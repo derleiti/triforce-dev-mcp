@@ -6,6 +6,32 @@
 # ENVIRONMENT FILES - KRITISCH! Niemals committen!
 # ============================================================================
 
+
+# local junk
+*.bak
+*.BAD.*
+*.BAK.*
+*.broken.*
+*~
+*.swp
+*.swo
+#*#
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.patch-bak/
+.repair-backup/
+
+# local env / build / runtime
+.venv/
+.env
+config/triforce.env
+data/
+docker/repository/repo/
+client-deploy/*.deb
+
+# huge logs / dumps
+all-debug-messeges-*.sh
 .patch-bak/
 .repair-backup/
 *.BAD.*
