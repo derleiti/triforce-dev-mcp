@@ -1,4 +1,4 @@
-llama-index>=0.12
+llama-index>=0.14.23
 chromadb>=0.5
 sentence-transformers>=5.7.0
 beautifulsoup4>=4.15.0
