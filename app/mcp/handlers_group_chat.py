@@ -200,6 +200,57 @@ async def handle_group_chat_message(params: Dict[str, Any]) -> Dict[str, Any]:
     return group_chat.post_message(session_id, sender, content, msg_type, params.get("metadata"))
 
 
+async def handle_group_chat_enqueue(params: Dict[str, Any], request=None) -> Dict[str, Any]:
+    """Queue an external user message for an existing MCP web-agent session.
+
+    This does not invoke Gemini or another model. It is intended as the trusted
+    reverse handoff primitive for local bridges such as Telegram/Desktop.
+    """
+    from app.services.group_chat import MessageType, group_chat
+    from app.utils.mcp_security import is_internal_full_request
+
+    if request is not None and not is_internal_full_request(request):
+        return {
+            "ok": False,
+            "error": "group_chat_enqueue is restricted to trusted internal callers",
+            "code": "INTERNAL_ONLY",
+        }
+
+    session_id = str(params.get("session_id", "")).strip()
+    target = str(params.get("target", "")).strip()
+    content = str(params.get("content", "")).strip()
+    source = str(params.get("source", "external-bridge")).strip() or "external-bridge"
+    metadata = params.get("metadata") if isinstance(params.get("metadata"), dict) else {}
+
+    if not session_id or not target or not content:
+        return {"ok": False, "error": "session_id, target, and content are required"}
+
+    session = group_chat.get_session(session_id)
+    if not session:
+        return {"ok": False, "error": f"Session {session_id} not found"}
+    if target not in session.participants:
+        return {"ok": False, "error": f"Target {target} is not a participant of {session_id}"}
+
+    msg = session.add_message(
+        sender=source,
+        msg_type=MessageType.QUESTION,
+        content=content,
+        metadata=metadata,
+        addressed_to=target,
+    )
+    session.pending_responses.add(target)
+    group_chat._save_session(session)
+    logger.info("Group Chat %s: queued external message %s -> %s", session_id, source, target)
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "message_id": msg.id,
+        "target": target,
+        "pending_responses": list(session.pending_responses),
+    }
+
+
 async def handle_group_chat_read(params: Dict[str, Any]) -> Dict[str, Any]:
     from app.services.group_chat import group_chat
     session_id = params.get("session_id", "")
@@ -267,6 +318,7 @@ async def handle_group_chat_assign(params: Dict[str, Any], request=None) -> Dict
 GROUP_CHAT_HANDLERS = {
     "group_chat_create": handle_group_chat_create,
     "group_chat_ask": handle_group_chat_ask,
+    "group_chat_enqueue": handle_group_chat_enqueue,
     "group_chat_message": handle_group_chat_message,
     "group_chat_read": handle_group_chat_read,
     "group_chat_status": handle_group_chat_status,

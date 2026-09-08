@@ -1193,7 +1193,6 @@ V5_ALIASES: Dict[str, str] = {
     "memory_index_stats": "memory_search",
     "memory_recall": "memory_search",
     "memory_update": "memory_store",
-    "memory_history": "memory_search",
     # code variants
     "codebase_file": "code_read",
     "codebase.file": "code_read",
@@ -1333,6 +1332,25 @@ def get_tool_count() -> int:
 # FLARUM — Community Forum Tools
 # =============================================================================
 V5_TOOLS += [
+    {
+        "name": "telegram_mcp_agent",
+        "description": "Internal Telegram identity-aware AI agent. Runs Nemotron or another configured model with a fixed TriForce MCP capability profile.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["message", "telegram_user_id"],
+            "properties": {
+                "message": {"type": "string", "description": "Telegram user message"},
+                "model": {"type": "string", "description": "Model ID"},
+                "profile": {"type": "string", "enum": ["owner", "group"]},
+                "telegram_user_id": {"type": "string"},
+                "telegram_username": {"type": "string"},
+                "display_name": {"type": "string"},
+                "chat_id": {"type": "string"},
+                "chat_title": {"type": "string"}
+            }
+        },
+        "x_inventory": "agent",
+    },
     {
         "name": "flarum_refresh",
         "description": "Prüft Flarum Forum-Verbindung und gibt Status zurück. Nützlich als Verbindungstest.",
@@ -1513,6 +1531,18 @@ V5_TOOLS += [
             "session_id": {"type": "string", "description": "Group Chat Session ID"},
             "question": {"type": "string", "description": "Optional: Zusätzliche Frage"},
         }},
+    },
+    {
+        "name": "group_chat_enqueue",
+        "description": "Queue a trusted external user message for a specific participant in an existing group chat session. Internal callers only.",
+        "inputSchema": {"type": "object", "required": ["session_id", "target", "content"], "properties": {
+            "session_id": {"type": "string"},
+            "target": {"type": "string"},
+            "content": {"type": "string"},
+            "source": {"type": "string"},
+            "metadata": {"type": "object"},
+        }},
+        "x_inventory": "group_chat",
     },
     {
         "name": "group_chat_message",

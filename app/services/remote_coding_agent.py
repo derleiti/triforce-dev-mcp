@@ -120,7 +120,21 @@ async def _call_client_tool(
         raise PermissionError(f"remote coding preview blocks tool: {name}")
     if name not in set(connection.supported_tools or []):
         raise LookupError(f"AICoder node does not advertise tool: {name}")
-    result = await connection.send_tool_call(name, arguments, timeout=timeout)
+    recalled = {}
+    if name in {'client_file_read', 'client_file_edit'}:
+        from .memory_runtime import remote_recall
+        recalled = await remote_recall(connection, 'file_opened',
+            run_id=str(arguments.get('_run_id', '')), file=str(arguments.get('path', '')),
+            task=str(arguments.get('_task', '')), model=str(arguments.get('_model', '')))
+    try:
+        result = await connection.send_tool_call(name, arguments, timeout=timeout)
+    except Exception as exc:
+        from .memory_runtime import remote_recall, remote_record
+        await remote_recall(connection, 'tool_failed', run_id=str(arguments.get('_run_id', '')),
+                            tool=name, error_type=type(exc).__name__, error=str(exc))
+        await remote_record(connection, 'tool_failed', run_id=str(arguments.get('_run_id', '')),
+                            tool=name, error_type=type(exc).__name__, error=str(exc), verification_state='failed')
+        raise
     if not isinstance(result, dict):
         return "REMOTE TOOL ERROR: invalid MCP result (expected an object)"
     blocks = result.get("content")
@@ -131,10 +145,17 @@ async def _call_client_tool(
     ] if isinstance(blocks, list) else []
     if result.get("isError") or "error" in result:
         detail = "\n".join(texts) or str(result.get("error") or "remote tool failed without details")
-        return "REMOTE TOOL ERROR: " + detail
+        from .memory_runtime import remote_recall, remote_record
+        recalled = await remote_recall(connection, 'tool_failed',
+            run_id=str(arguments.get('_run_id', '')), tool=name, error=detail)
+        await remote_record(connection, 'tool_failed', run_id=str(arguments.get('_run_id', '')),
+                            tool=name, error=detail, verification_state='failed')
+        suffix = '\n' + recalled['context'] if recalled.get('context') else ''
+        return "REMOTE TOOL ERROR: " + detail + suffix
     if not texts:
         return "REMOTE TOOL ERROR: invalid MCP result (missing text content)"
-    return "\n".join(texts)
+    suffix = "\n" + recalled["context"] if recalled.get("context") else ""
+    return "\n".join(texts) + suffix
 
 
 def _build_remote_tools(connection: ClientConnection) -> List[Callable[..., Awaitable[str]]]:
@@ -423,6 +444,11 @@ async def run_remote_coding_agent(
         raise RuntimeError("A remote coding run is already running on this node")
     connection.remote_coding_run_id = selected_run_id
     try:
+        from .memory_runtime import remote_recall
+        recalled = await remote_recall(connection, 'run_resumed' if run_id else 'task_started',
+                                       run_id=selected_run_id, task=task, model=selected_model)
+        if recalled.get('context'):
+            system = system + '\n\n' + recalled['context']
         worker_result = await _run_antigravity_worker(
             connection,
             task=task,
@@ -432,6 +458,9 @@ async def run_remote_coding_agent(
         )
     finally:
         connection.remote_coding_run_id = None
+    from .memory_runtime import remote_record
+    await remote_record(connection, 'run_completed', run_id=selected_run_id, task=task, model=selected_model,
+                        findings=str(worker_result.get("response") or "")[:4000], verification_state='completed')
     node = _node_view(client_id, connection)
     return {
         "status": "completed",

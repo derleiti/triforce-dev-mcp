@@ -9,7 +9,7 @@ source "$(dirname "$0")/triforce-env.sh"
 # npm auto-update (24h Cooldown, non-blocking)
 _auto_update_npm "@openai/codex"
 
-DEFAULT_MODEL="${CODEX_MODEL:-gpt-5.4}"
+DEFAULT_MODEL="${CODEX_MODEL:-gpt-5.6-terra}"
 
 # MCP one-shot calls must use Codex' explicit non-interactive exec mode.
 if [[ "${1:-}" == "--triforce-headless" ]]; then

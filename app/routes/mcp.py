@@ -49,6 +49,7 @@ from ..mcp.agent_instructions import build_mcp_instructions
 from ..mcp.adaptive_code import ADAPTIVE_CODE_TOOLS, ADAPTIVE_CODE_HANDLERS
 from ..mcp.adaptive_code_v4 import ADAPTIVE_CODE_V4_TOOLS, ADAPTIVE_CODE_V4_HANDLERS
 from ..mcp.handlers_group_chat import GROUP_CHAT_HANDLERS
+from ..mcp.handlers_telegram_agent import TELEGRAM_AGENT_HANDLERS
 from ..mcp.handlers_swarm import SWARM_HANDLERS
 from ..services.n8n_mcp import N8N_TOOLS, N8N_HANDLERS
 from ..mcp.flarum_tools import FLARUM_TOOL_HANDLERS
@@ -2465,6 +2466,7 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     tool_map.update(TASK_SPAWNER_HANDLERS)
     tool_map.update(N8N_HANDLERS)
     tool_map.update(GROUP_CHAT_HANDLERS)
+    tool_map.update(TELEGRAM_AGENT_HANDLERS)
     tool_map.update(SWARM_HANDLERS)
     tool_map.update(MCP_HANDLERS)
 
@@ -3753,9 +3755,12 @@ MCP_HANDLERS.update(ADAPTIVE_CODE_V4_HANDLERS)
 MCP_HANDLERS.update(LLM_COMPAT_HANDLERS)
 MCP_HANDLERS.update(HOTRELOAD_HANDLERS)
 MCP_HANDLERS.update(MEMORY_INDEX_HANDLERS)
+from ..mcp.handlers_memory_history import HISTORY_HANDLERS
+MCP_HANDLERS.update(HISTORY_HANDLERS)
 MCP_HANDLERS |= FLARUM_TOOL_HANDLERS
 MCP_HANDLERS.update(N8N_HANDLERS)
 MCP_HANDLERS.update(GROUP_CHAT_HANDLERS)
+MCP_HANDLERS.update(TELEGRAM_AGENT_HANDLERS)
 MCP_HANDLERS.update(SWARM_HANDLERS)
 
 # Register all handlers with the tool_registry_v3

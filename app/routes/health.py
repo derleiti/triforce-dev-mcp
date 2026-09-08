@@ -41,7 +41,9 @@ async def health_check():
     # Here you could add checks for database connection, external services, etc.
     # For now, a simple success response is sufficient.
     logger.info("Health probe received")
-    return JSONResponse(content=HEALTH_RESPONSE, status_code=status.HTTP_200_OK)
+    from ..services.memory_trigger import get_memory_engine
+    episodic = await get_memory_engine().health()
+    return JSONResponse(content={**HEALTH_RESPONSE, "episodic_memory": episodic}, status_code=status.HTTP_200_OK)
 
 
 @router.get(

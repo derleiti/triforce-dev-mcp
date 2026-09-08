@@ -30,6 +30,22 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
+    # Episodic history is optional and separate from curated TriForce memory.
+    episodic_memory_enabled: bool = Field(False, validation_alias="TRIFORCE_EPISODIC_MEMORY_ENABLED")
+    episodic_memory_provider: str = Field("claude-mem", validation_alias="TRIFORCE_EPISODIC_MEMORY_PROVIDER")
+    episodic_memory_data_dir: Optional[str] = Field(None, validation_alias="TRIFORCE_EPISODIC_MEMORY_DATA_DIR")
+    memory_auto_recall: bool = Field(True, validation_alias="TRIFORCE_MEMORY_AUTO_RECALL")
+    memory_max_results: int = Field(4, ge=1, le=5, validation_alias="TRIFORCE_MEMORY_MAX_RESULTS")
+    memory_token_budget: int = Field(1200, ge=128, le=8192, validation_alias="TRIFORCE_MEMORY_TOKEN_BUDGET")
+    memory_timeout: float = Field(0.8, gt=0, le=5, validation_alias="TRIFORCE_MEMORY_TIMEOUT")
+    memory_trigger_file: bool = Field(True, validation_alias="TRIFORCE_MEMORY_TRIGGER_FILE")
+    memory_trigger_failure: bool = Field(True, validation_alias="TRIFORCE_MEMORY_TRIGGER_FAILURE")
+    memory_trigger_retry: bool = Field(True, validation_alias="TRIFORCE_MEMORY_TRIGGER_RETRY")
+    memory_record_enabled: bool = Field(False, validation_alias="TRIFORCE_MEMORY_RECORD_ENABLED")
+    memory_promotion_enabled: bool = Field(False, validation_alias="TRIFORCE_MEMORY_PROMOTION_ENABLED")
+    memory_project_id: Optional[str] = Field(None, validation_alias="TRIFORCE_MEMORY_PROJECT_ID")
+    memory_stale_days: int = Field(90, ge=1, validation_alias="TRIFORCE_MEMORY_STALE_DAYS")
+
     # --- Core timeouts ---
     request_timeout: float = Field(default=30.0, validation_alias="REQUEST_TIMEOUT")
     ollama_timeout_ms: int = Field(default=120000, validation_alias="OLLAMA_TIMEOUT_MS")

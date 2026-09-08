@@ -35,6 +35,11 @@ PROVIDERS = {
         "env_key": "CEREBRAS_API_KEY",
         "models": ["llama-3.3-70b"],
     },
+    "nvidia": {
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "env_key": "NVIDIA_API_KEY",
+        "models": ["nvidia/nemotron-3-ultra-550b-a55b"],
+    },
 }
 
 # Default tools
@@ -101,6 +106,19 @@ def _build_tool_schemas(tool_names: List[str]) -> List[Dict]:
 def _get_all_handlers() -> Dict:
     """Build combined handler map from all MCP modules."""
     handlers = {}
+    # Prefer current multi-root code handlers over legacy codebase aliases.
+    # The dev-path resolver still enforces approved workspace roots and blocks
+    # sensitive components such as .ssh, .env, .git, secrets and credentials.
+    try:
+        from app.mcp.adaptive_code import handle_code_scout
+        from app.services.mcp_service import handle_codebase_file, handle_codebase_search
+        handlers.update({
+            "code_tree": handle_code_scout,
+            "code_read": handle_codebase_file,
+            "code_search": handle_codebase_search,
+        })
+    except Exception as exc:
+        logger.warning("Could not register multi-root code handlers: %s", exc)
     try:
         from app.mcp.structured_admin import STRUCTURED_ADMIN_HANDLERS
         handlers.update(STRUCTURED_ADMIN_HANDLERS)
@@ -237,6 +255,43 @@ async def _call_ollama_local(
         }
 
 
+async def run_text_model(
+    model: str,
+    task: str,
+    system_prompt: Optional[str] = None,
+    timeout: int = 90,
+) -> Dict[str, Any]:
+    """Run one text-only model call without tool calling."""
+    provider, model_name, base_url, api_key = _parse_model(model)
+    if not provider:
+        return {"status": "error", "model": model, "response": f"Invalid model: {model}"}
+
+    messages: List[Dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": task})
+
+    try:
+        if base_url is None:
+            result = await _call_ollama_local(model_name, messages, None, timeout)
+        else:
+            if not api_key:
+                return {"status": "error", "model": model, "response": f"No API key for {provider}"}
+            result = await _call_provider(base_url, api_key, model_name, messages, None, timeout)
+    except Exception as e:
+        return {"status": "error", "model": model, "response": str(e)[:300]}
+
+    choices = result.get("choices", []) if isinstance(result, dict) else []
+    if not choices:
+        return {"status": "error", "model": model, "response": "No choices in response"}
+    msg = choices[0].get("message", {})
+    return {
+        "status": "completed",
+        "model": model,
+        "response": str(msg.get("content") or "").strip(),
+    }
+
+
 async def run_api_agent(
     model: str,
     task: str,
@@ -307,11 +362,27 @@ async def run_api_agent(
             final_response = content
             break
 
-        # Append assistant message with tool calls
+        # Append assistant message with tool calls. Ollama expects
+        # function.arguments as an object, while OpenAI-compatible providers
+        # use a JSON string. Normalize only for the Ollama conversation state.
         assistant_msg = {"role": "assistant"}
         if content:
             assistant_msg["content"] = content
-        assistant_msg["tool_calls"] = tool_calls
+        if is_ollama:
+            ollama_tool_calls = []
+            for tc in tool_calls:
+                fn = dict(tc.get("function", {}))
+                raw_args = fn.get("arguments", {})
+                if isinstance(raw_args, str):
+                    try:
+                        raw_args = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        raw_args = {}
+                fn["arguments"] = raw_args
+                ollama_tool_calls.append({"type": "function", "function": fn})
+            assistant_msg["tool_calls"] = ollama_tool_calls
+        else:
+            assistant_msg["tool_calls"] = tool_calls
         messages.append(assistant_msg)
 
         # Execute each tool call
@@ -332,7 +403,28 @@ async def run_api_agent(
             else:
                 logger.info(f"API-Agent tool: {fn_name}({json.dumps(fn_args, ensure_ascii=False)[:80]})")
                 tools_called.append(fn_name)
-                tool_result = await _execute_tool(fn_name, fn_args)
+                tool_elapsed = time.time() - start
+                tool_remaining = timeout - tool_elapsed
+                if tool_remaining <= 0:
+                    return {
+                        "status": "timeout",
+                        "model": model,
+                        "response": final_response or "Timeout",
+                        "turns": turn,
+                        "tools_called": tools_called,
+                        "elapsed_ms": int(tool_elapsed * 1000),
+                    }
+                tool_timeout = min(45.0, tool_remaining)
+                try:
+                    tool_result = await asyncio.wait_for(
+                        _execute_tool(fn_name, fn_args),
+                        timeout=tool_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("API-Agent tool timeout: %s after %.1fs", fn_name, tool_timeout)
+                    tool_result = json.dumps({
+                        "error": f"Tool '{fn_name}' timed out after {int(tool_timeout)}s"
+                    })
 
             messages.append({
                 "role": "tool",

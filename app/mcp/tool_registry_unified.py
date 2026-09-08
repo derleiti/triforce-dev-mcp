@@ -213,6 +213,8 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     raw_tools: List[Dict[str, Any]] = []
     # v4 schemas removed — v5 is canonical source (2026-03-16)
     raw_tools.extend(v5_get_all_tools())
+    from .handlers_memory_history import HISTORY_TOOLS
+    raw_tools.extend(HISTORY_TOOLS)
 
     # 2026-04-27: include STRUCTURED_ADMIN_TOOLS (log_viewer, service_status,
     # mcp_telemetry, binary_exec, custom_exec, safe_probe, file_ops, ...).
