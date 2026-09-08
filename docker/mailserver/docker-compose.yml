@@ -1,7 +1,7 @@
 # Docker Mailserver - Korrektes Mount ohne Symlink
 services:
   mailserver:
-    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    image: ghcr.io/docker-mailserver/docker-mailserver:16.0.0
     container_name: mailserver
     hostname: mail
     domainname: ailinux.me

@@ -15,7 +15,6 @@ import httpx
 import os
 import logging
 import time
-import jwt
 from datetime import datetime
 
 from ..services.user_tiers import (
@@ -35,46 +34,27 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # JWT Config - Import from auth module to share secret
-from .client_auth import JWT_SECRET, JWT_ALGORITHM
+from .client_auth import decode_authorization_header
 
 
 
 
 def extract_user_and_tier_from_token(authorization: str = None) -> tuple:
-    """
-    Extrahiert User-ID (Email) UND Tier aus JWT Token.
-    
-    Returns: (email, tier) oder (None, None)
-    Tier wird direkt aus Token genommen - kein DB-Lookup nötig.
+    """Return (user, tier) for a verified bearer token.
+
+    Missing auth is still allowed for guest endpoints. Once an Authorization
+    header is supplied, however, it must be valid; malformed/expired bearer
+    tokens must never silently downgrade to an anonymous guest session.
     """
     if not authorization:
         return None, None
-    
-    try:
-        token = authorization.replace("Bearer ", "").strip()
-        if not token:
-            return None, None
-        
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        
-        email = payload.get("email") or payload.get("sub")
-        tier = payload.get("role") or payload.get("tier")
-        
-        if email:
-            logger.debug(f"Token valid: email={email}, tier={tier}")
-            return email, tier
-        
-        return None, tier
-        
-    except jwt.ExpiredSignatureError:
-        logger.warning("JWT Token expired")
-        return None, None
-    except jwt.InvalidTokenError as e:
-        logger.warning(f"Invalid JWT Token: {e}")
-        return None, None
-    except Exception as e:
-        logger.error(f"Token extraction error: {e}")
-        return None, None
+
+    payload = decode_authorization_header(authorization)
+    email = payload.get("email") or payload.get("sub")
+    tier = payload.get("tier") or payload.get("role")
+    if email:
+        logger.debug("Token valid: email=%s, tier=%s", email, tier)
+    return email, tier
 
 
 def get_user_and_tier_from_headers(
@@ -255,9 +235,9 @@ REGISTERED_FREE_PROVIDER_KEYS = {
 }
 
 def is_guest_free_model(model: str) -> bool:
-    """Guest policy: verified Ollama plus configured Mistral and verified NVIDIA chat models."""
+    """Guest policy: curated Ollama plus configured Mistral/NVIDIA chat models."""
     if model.startswith("ollama/"):
-        return True
+        return model in FREE_MODELS_OLLAMA
     provider = model.split("/", 1)[0]
     env_name = GUEST_FREE_PROVIDER_KEYS.get(provider)
     if not env_name or not os.getenv(env_name):
@@ -277,9 +257,9 @@ def guest_free_model_ids(models) -> List[str]:
 
 
 def is_registered_free_model(model: str) -> bool:
-    """Free-account policy: Ollama plus configured free-quota providers."""
+    """Free-account policy: curated Ollama plus configured free-quota providers."""
     if model.startswith("ollama/"):
-        return True
+        return model in FREE_MODELS_OLLAMA
     if model == OPENROUTER_FREE_ROUTER:
         return bool(os.getenv("OPENROUTER_API_KEY"))
     if model.startswith("openrouter/") and model.endswith(":free"):
@@ -514,15 +494,45 @@ async def call_ollama(
                 )
 
             result = response.json()
+            message = result.get("message") or {}
+            content = message.get("content") or ""
+            tool_calls = message.get("tool_calls") or []
+            done_reason = result.get("done_reason")
+
+            # Reasoning models can consume a tiny num_predict budget entirely in
+            # hidden/thinking tokens and return HTTP 200 with no assistant text.
+            # Never expose that as a successful empty answer: the caller must be
+            # able to classify it as truncation and retry with a larger budget.
+            if not content and not tool_calls:
+                if done_reason == "length":
+                    raise HTTPException(
+                        502,
+                        detail={
+                            "error": "ollama_response_truncated",
+                            "message": "Ollama exhausted max_tokens before producing an answer",
+                            "model": model_name,
+                            "finish_reason": "length",
+                        },
+                    )
+                raise HTTPException(
+                    502,
+                    detail={
+                        "error": "empty_ollama_response",
+                        "message": "Ollama returned no assistant content or tool calls",
+                        "model": model_name,
+                        "finish_reason": done_reason,
+                    },
+                )
 
             # Ollama Response in OpenAI-Format konvertieren
             return {
                 "choices": [{
                     "message": {
                         "role": "assistant",
-                        "content": result.get("message", {}).get("content", ""),
-                        "tool_calls": result.get("message", {}).get("tool_calls", []),
-                    }
+                        "content": content,
+                        "tool_calls": tool_calls,
+                    },
+                    "finish_reason": done_reason or "stop",
                 }],
                 "usage": {
                     "total_tokens": result.get("eval_count", 0) + result.get("prompt_eval_count", 0)

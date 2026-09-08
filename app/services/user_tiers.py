@@ -35,31 +35,39 @@ class TierConfig:
     daily_token_limit: int = 0  # 0 = unlimited
     ollama_unlimited: bool = False  # Ollama immer ohne Limit
 
-# Free catalog for authenticated users. Every cloud entry below completed a
-# live one-token chat probe on 2026-07-14; retired/subscription-only tags stay hidden.
+# Free Ollama Cloud catalog for authenticated users. Refreshed 2026-08-28
+# against Ollama's official cloud-model search and model pages. Keep this list
+# explicit so retired tags disappear from the public API instead of remaining
+# accidentally routable forever.
 OLLAMA_MODELS = [
-    "ollama/llama3.2:latest",
-    "ollama/devstral-2:123b-cloud",
-    "ollama/devstral-small-2:24b-cloud",
-    "ollama/gemma4:31b-cloud",
+    "ollama/glm-5.3-flash:cloud",
+    "ollama/kimi-k3:cloud",
+    "ollama/glm-5.2:cloud",
+    "ollama/kimi-k2.7-code:cloud",
+    "ollama/nemotron-3-ultra:cloud",
+    "ollama/minimax-m3:cloud",
+    "ollama/deepseek-v4-flash:cloud",
+    "ollama/deepseek-v4-flash:0731-cloud",
+    "ollama/deepseek-v4-pro:cloud",
+    "ollama/deepseek-v4-pro:0813-cloud",
+    "ollama/glm-5.1:cloud",
+    "ollama/kimi-k2.6:cloud",
+    "ollama/minimax-m2.7:cloud",
     "ollama/gemma4:cloud",
-    "ollama/glm-4.7:cloud",
+    "ollama/gemma4:31b-cloud",
+    "ollama/nemotron-3-super:cloud",
+    "ollama/qwen3.5:cloud",
+    "ollama/qwen3.5:397b-cloud",
+    "ollama/nemotron-3-nano:30b-cloud",
+    "ollama/mistral-large-3:675b-cloud",
     "ollama/gpt-oss:120b-cloud",
     "ollama/gpt-oss:20b-cloud",
-    "ollama/minimax-m2.1:cloud",
-    "ollama/minimax-m2.5:cloud",
-    "ollama/minimax-m3:cloud",
-    "ollama/ministral-3:14b-cloud",
-    "ollama/ministral-3:3b-cloud",
-    "ollama/ministral-3:8b-cloud",
-    "ollama/nemotron-3-nano:30b-cloud",
-    "ollama/nemotron-3-super:cloud",
-    "ollama/qwen3-coder:480b-cloud",
-    "ollama/qwen3-coder-next:cloud",
 ]
 
-# Lokales Fallback-Modell (läuft direkt auf Server, kein Cloud-Proxy)
-LOCAL_FALLBACK_MODEL = "ollama/llama3.2:latest"
+# Compatibility name used throughout the client API. The server currently has
+# no local generation model installed, so point the default/fallback route at a
+# current low-friction Ollama Cloud model instead of the removed llama3.2 tag.
+LOCAL_FALLBACK_MODEL = "ollama/gemma4:cloud"
 
 # Aliases für Kompatibilität
 FREE_MODELS_OLLAMA = OLLAMA_MODELS
