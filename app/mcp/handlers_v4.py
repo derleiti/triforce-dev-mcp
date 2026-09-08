@@ -75,6 +75,7 @@ class HandlerRegistry:
         
         self._register_core_handlers()
         self._register_search_handlers()
+        self._register_browser_handlers()
         self._register_memory_handlers()
         self._register_agent_handlers()
         self._register_code_handlers()
@@ -347,17 +348,27 @@ class HandlerRegistry:
         except ImportError as e:
             logger.warning(f"Search handlers import failed: {e}")
     
-    def _register_memory_handlers(self):
-        """Memory: memory_store, memory_search, memory_clear"""
+    def _register_browser_handlers(self):
+        """Browser: register the real Playwright/browser handlers exposed in the tool catalog."""
         try:
-            # Memory functions not yet implemented - create stubs
+            from app.mcp.handlers_browser import BROWSER_HANDLERS
+            self.register_many(BROWSER_HANDLERS)
+        except Exception as exc:
+            logger.warning("Browser handlers unavailable: %s", exc)
+
+    def _register_memory_handlers(self):
+        """Memory: route implemented store/search handlers; keep clear fail-closed."""
+        try:
+            from app.services.mcp_service import (
+                handle_tristar_memory_search,
+                handle_tristar_memory_store,
+            )
+
             async def handle_memory_store(params):
-                logger.warning("memory_store not yet implemented")
-                return {"status": "not_implemented", "message": "Memory store function pending"}
+                return await handle_tristar_memory_store(params)
 
             async def handle_memory_search(params):
-                logger.warning("memory_search not yet implemented")
-                return {"status": "not_implemented", "message": "Memory search function pending"}
+                return await handle_tristar_memory_search(params)
 
             async def handle_memory_clear(params):
                 logger.warning("memory_clear not yet implemented")

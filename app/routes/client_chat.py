@@ -139,6 +139,8 @@ class ChatResponse(BaseModel):
     latency_ms: Optional[int] = None
     fallback_used: Optional[bool] = False  # True wenn lokales Fallback-Modell verwendet wurde
     tool_transport: str = "none"  # none | native | text_fallback
+    finish_reason: Optional[str] = None
+    provider_diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelsResponse(BaseModel):
@@ -651,6 +653,19 @@ async def call_registered_model(
 
     content = result.get("content", "")
     tool_calls = result.get("tool_calls") or []
+    provider_diagnostics = result.get("provider_diagnostics") if isinstance(result.get("provider_diagnostics"), dict) else {}
+    if not str(content or "").strip() and not tool_calls:
+        detail = {
+            "error": "empty_provider_response",
+            "provider": str(model_info.provider),
+            "requested_model": model,
+            "model_used": result.get("model_used") or model,
+            "retryable": True,
+            "retry_after": 2,
+            "provider_diagnostics": provider_diagnostics,
+        }
+        logger.warning("Provider returned empty assistant response: %s", detail)
+        raise HTTPException(status_code=502, detail=detail)
     prompt_tokens = sum(len(str(item.get("content", "")).split()) for item in messages)
     completion_tokens = len(content.split())
     return {
@@ -658,12 +673,24 @@ async def call_registered_model(
             "role": "assistant",
             "content": content,
             "tool_calls": tool_calls,
-        }}],
+        }, "finish_reason": provider_diagnostics.get("finish_reason")}],
         "usage": {"total_tokens": result.get("usage_total") or prompt_tokens + completion_tokens},
         "model_used": result.get("model_used") or model,
         "is_fallback": False,
         "tool_transport": result.get("tool_transport", "native" if tools else "none"),
+        "provider_diagnostics": provider_diagnostics,
     }
+
+
+def _default_provider_retry_after(status: int) -> int | None:
+    """Fallback retry hint used only when the provider supplied none."""
+    if int(status) == 429:
+        return 30
+    if int(status) in {408, 500, 502, 503, 504}:
+        return 5
+    if int(status) == 524:
+        return 15
+    return None
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -735,12 +762,20 @@ async def client_chat(
                         "chat_keepalive_http_error model=%s status=%s keepalives=%d elapsed=%.1fs",
                         requested_model, exc.status_code, keepalive_count, time.monotonic() - started,
                     )
+                    detail_retry_after = (
+                        exc.detail.get("retry_after")
+                        if isinstance(exc.detail, dict) else None
+                    )
                     payload = {
                         "error": {
                             "status": int(exc.status_code),
                             "detail": exc.detail,
                             "retryable": int(exc.status_code) in {408, 429, 500, 502, 503, 504, 524},
-                            "retry_after": 120 if int(exc.status_code) in {429, 502, 503, 504, 524} else None,
+                            "retry_after": (
+                                int(detail_retry_after)
+                                if isinstance(detail_retry_after, (int, float)) and detail_retry_after > 0
+                                else _default_provider_retry_after(int(exc.status_code))
+                            ),
                         }
                     }
                     yield json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -925,7 +960,9 @@ async def client_chat(
         tokens_unlimited=is_unlimited,
         latency_ms=latency,
         fallback_used=fallback_used,
-        tool_transport=result.get("tool_transport", "native" if request.tools else "none")
+        tool_transport=result.get("tool_transport", "native" if request.tools else "none"),
+        finish_reason=((result.get("choices") or [{}])[0].get("finish_reason") if isinstance((result.get("choices") or [{}])[0], dict) else None),
+        provider_diagnostics=(result.get("provider_diagnostics") if isinstance(result.get("provider_diagnostics"), dict) else {}),
     )
 
 

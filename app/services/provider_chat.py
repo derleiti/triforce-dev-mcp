@@ -201,6 +201,34 @@ def _detail(provider: str, response: httpx.Response) -> str:
         return f"{provider} API {response.status_code}: {response.text[:500]}"
 
 
+def _retry_after_for_provider_error(status: int, raw_error: Any = None) -> int | None:
+    """Return a conservative retry hint for provider failures without HTTP Retry-After.
+
+    Embedded OpenRouter errors arrive inside HTTP 200 responses, so there is no
+    transport-level Retry-After header to honor. Prefer an explicit provider hint
+    when present; otherwise use short overload backoff and a longer rate-limit
+    backoff. Unlimited retry is owned by AICoder, not by a single long sleep.
+    """
+    candidates: list[Any] = []
+    if isinstance(raw_error, dict):
+        candidates.append(raw_error.get("retry_after"))
+        metadata = raw_error.get("metadata")
+        if isinstance(metadata, dict):
+            candidates.extend((metadata.get("retry_after"), metadata.get("retry_after_seconds")))
+    for value in candidates:
+        try:
+            parsed = int(float(value))
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return min(300, parsed)
+    if status == 429:
+        return 30
+    if status in {408, 409, 425, 500, 502, 503, 504}:
+        return 5
+    return None
+
+
 async def _post(
     provider: str,
     url: str,
@@ -228,6 +256,36 @@ async def _post(
         if response.status_code >= 400:
             raise HTTPException(response.status_code, _detail(provider, response))
         data = response.json()
+        if isinstance(data, dict) and data.get("error"):
+            # OpenRouter and some OpenAI-compatible gateways can return HTTP 200
+            # while embedding the actual provider failure in an `error` object.
+            # Treat that as a real provider error here instead of allowing the
+            # normalizer to turn it into a misleading empty assistant response.
+            raw_error = data.get("error")
+            if isinstance(raw_error, dict):
+                embedded_code = raw_error.get("code")
+                status = embedded_code if isinstance(embedded_code, int) and 400 <= embedded_code <= 599 else 502
+                detail = {
+                    "error": "provider_embedded_error",
+                    "provider": provider,
+                    "provider_code": embedded_code,
+                    "provider_message": str(raw_error.get("message") or raw_error.get("type") or "provider returned an embedded error")[:2000],
+                    "provider_metadata": raw_error.get("metadata") if isinstance(raw_error.get("metadata"), dict) else {},
+                    "retryable": status in {408, 409, 425, 429, 500, 502, 503, 504},
+                    "retry_after": _retry_after_for_provider_error(status, raw_error),
+                }
+            else:
+                status = 502
+                detail = {
+                    "error": "provider_embedded_error",
+                    "provider": provider,
+                    "provider_code": None,
+                    "provider_message": str(raw_error)[:2000],
+                    "provider_metadata": {},
+                    "retryable": True,
+                    "retry_after": _retry_after_for_provider_error(status, raw_error),
+                }
+            raise HTTPException(status_code=status, detail=detail)
         if isinstance(data, dict):
             data["_ailinux_tool_transport"] = (
                 "text_fallback" if tools_dropped else "native" if tools_requested else "none"
@@ -243,19 +301,32 @@ def _tool_transport(data: dict[str, Any], tools_requested: bool) -> str:
 
 
 def _standard(data: dict[str, Any], model: str) -> dict[str, Any]:
-    message = ((data.get("choices") or [{}])[0].get("message") or {})
+    choice = ((data.get("choices") or [{}])[0] or {})
+    message = (choice.get("message") or {}) if isinstance(choice, dict) else {}
     content = message.get("content") or ""
     if isinstance(content, list):
         content = "".join(
             str(p.get("text") or "") for p in content
             if isinstance(p, dict) and p.get("type") in ("text", "output_text")
         )
+    reasoning = message.get("reasoning_content", message.get("reasoning", "")) if isinstance(message, dict) else ""
     return {
         "content": str(content),
         "tool_calls": message.get("tool_calls") or [],
         "usage_total": _usage(data),
         "model_used": data.get("model") or model,
         "tool_transport": _tool_transport(data, bool(data.get("_ailinux_tool_transport") != "none")),
+        "provider_diagnostics": {
+            "finish_reason": choice.get("finish_reason") if isinstance(choice, dict) else None,
+            "native_finish_reason": choice.get("native_finish_reason") if isinstance(choice, dict) else None,
+            "reasoning_chars": len(str(reasoning or "")),
+            "content_chars": len(str(content or "")),
+            "tool_call_count": len(message.get("tool_calls") or []) if isinstance(message, dict) else 0,
+            "usage": data.get("usage") if isinstance(data.get("usage"), dict) else {},
+            "response_keys": sorted(str(k) for k in data.keys())[:64],
+            "choice_keys": sorted(str(k) for k in choice.keys())[:32] if isinstance(choice, dict) else [],
+            "message_keys": sorted(str(k) for k in message.keys())[:32] if isinstance(message, dict) else [],
+        },
     }
 
 
