@@ -21,11 +21,11 @@
 │                          (FastAPI + Uvicorn)                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
 │  │    Auth     │  │   Router    │  │    MCP      │  │  Federation │    │
-│  │  (JWT/RBAC) │  │ (Provider)  │  │  (134 Tools)│  │   (Mesh)    │    │
+│  │  (JWT/RBAC) │  │ (Provider)  │  │ (39 Core)   │  │   (Mesh)    │    │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│  │   Memory    │  │   Logging   │  │   Metrics   │  │   Agents    │    │
-│  │   (Prisma)  │  │   (JSON)    │  │ (Prometheus)│  │  (CLI LLM)  │    │
+│  │Memory Fabric│  │   Logging   │  │   Metrics   │  │   Agents    │    │
+│  │Curated+Epis.│  │   (JSON)    │  │ (Prometheus)│  │  (CLI LLM)  │    │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
@@ -116,18 +116,32 @@ response = await handler.chat(model_name, messages)
 
 ### 4. MCP (Model Context Protocol)
 
-**134 Tools** in Kategorien:
+**39 Core-Tools** im Default-Profil und **79 kanonische Tools** mit `inventory=all`, darunter:
 
 - Search & Web (3)
 - Code & Development (6)
-- Memory & Knowledge (3)
+- Memory & Knowledge (4): `memory_store`, `memory_search`, `memory_clear`, `memory_history`
 - AI & Chat (3)
 - System & Admin (5)
 - Mesh & Federation (5)
 - Ollama (5)
 - Weitere (104)
 
-### 5. Federation Mesh
+### 5. Native Agent Memory
+
+TriForce besitzt eine native Memory-Abstraktion mit zwei persistenten Ebenen plus Runtime-State:
+
+1. **Curated TriForce Memory** für bestätigte Facts, Entscheidungen, Codewissen, Summaries und TODOs.
+2. **Episodic Memory** für frühere Agenten-Runs, Fehler, Lösungsversuche, Datei-Kontext und Handoffs.
+3. **Runtime State** für den momentanen Workflow.
+
+Die episodische Ebene läuft über `MemoryTriggerEngine` → `EpisodicMemoryProvider` → `ClaudeMemAdapter`. Aktuell ist Claude-Mem 13.24.1 der Provider. Recall ist modellneutral: auch Codex, Gemini, Nemotron, Qwen, Mistral oder lokale Modelle können denselben historischen Kontext erhalten.
+
+Die Integration ist fail-open, budgetiert, projektgescoped, dedupliziert und redigiert typische Secrets. Promotion in kuratiertes Memory ist separat, standardmäßig deaktiviert und nur für `verified` Observations mit Evidence erlaubt.
+
+Siehe [episodic-memory.md](episodic-memory.md).
+
+### 6. Federation Mesh
 
 **Protokoll:**
 - Transport: WireGuard VPN (10.10.0.0/24)
@@ -169,6 +183,17 @@ response = await handler.chat(model_name, messages)
 5. Result → Client
 ```
 
+### Episodic Recall
+
+```text
+1. Agent/Runtime erzeugt Event
+2. MemoryTriggerEngine normalisiert und dedupliziert
+3. Provider sucht projektgescoped episodische Historie
+4. Relevanz/Staleness/Commit-Bezug werden bewertet
+5. Wenige Treffer werden innerhalb des Context-Budgets injiziert
+6. Bei Workerfehlern läuft TriForce ohne Recall weiter
+```
+
 ### Federation Task
 
 ```
@@ -203,7 +228,7 @@ response = await handler.chat(model_name, messages)
 ### Endpoints
 
 ```
-GET /health          # Basic Health
+GET /health          # Core + optional episodic_memory health
 GET /v1/mesh/resources  # Federation Status
 GET /v1/logs         # System Logs (Admin)
 ```

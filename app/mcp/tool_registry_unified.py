@@ -131,6 +131,65 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "swarm_consolidated": "swarm",
 }
 
+
+
+# Canonical advertised MCP surface. Legacy/duplicate handlers may remain callable
+# for compatibility, but are intentionally hidden from model discovery.
+CANONICAL_TOOL_NAMES = frozenset({
+    # Core operations
+    "shell", "status", "service_control", "container_control", "hot_reload",
+    "log_viewer", "mcp_analytics", "config", "config_set",
+    # Files/code
+    "file_ops", "code_search", "code_edit", "code_tree", "git",
+    # AI/agents
+    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast",
+    "agent_start", "agent_stop", "evolve", "nova_chat_agent",
+    # Search/browser
+    "search", "crawl", "browser_navigate", "browser_click", "browser_type",
+    "browser_screenshot", "browser_close",
+    # Ollama/model operations
+    "ollama_status", "ollama_pull", "ollama_delete",
+    # Mesh/remote
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task",
+    # Vault
+    "vault_status", "vault_keys", "vault_add",
+    # Memory
+    "memory_store", "memory_search", "memory_clear", "memory_history",
+    # Settings/debug
+    "prompts", "prompt_set", "debug",
+    # Mail
+    "mail_inbox", "mail_read", "mail_send", "mail_mark_seen",
+    # WordPress
+    "wp_list_posts", "wp_create_draft", "wp_update_post", "wp_delete_post",
+    "wp_create_page", "wp_multi_ai_post",
+    # Forum
+    "flarum_discussions", "flarum_discussion_get", "flarum_post_get",
+    "flarum_post_create", "flarum_post_edit", "flarum_discussion_create",
+    "flarum_tags", "flarum_users", "flarum_posts",
+    # Notifications
+    "notify_list", "notify_read", "notify_send", "notify_clear",
+    # Group chat
+    "group_chat_create", "group_chat_ask", "group_chat_message", "group_chat_read",
+    "group_chat_list", "group_chat_consolidate", "group_chat_assign",
+    # Integrations
+    "n8n_mcp_call",
+})
+
+# Small default surface for LLMs. Specialized capabilities stay available through
+# inventory-specific tools/list calls without flooding every model context.
+CORE_TOOL_NAMES = frozenset({
+    "shell", "status", "service_control", "container_control", "hot_reload",
+    "log_viewer", "mcp_analytics", "config", "config_set",
+    "file_ops", "code_search", "code_edit", "code_tree", "git",
+    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast",
+    "agent_start", "agent_stop", "search", "crawl", "ollama_status",
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task",
+    "memory_store", "memory_search", "memory_history", "prompts", "prompt_set",
+    "notify_list", "notify_send", "group_chat_create", "group_chat_ask",
+    "group_chat_read",
+})
+
+
 INVENTORY_SYNONYMS: Dict[str, str] = {
     "code": "filesystem",
     "files": "filesystem",
@@ -163,6 +222,9 @@ INVENTORY_SYNONYMS: Dict[str, str] = {
     "group_chat": "group_chat",
     "gc": "group_chat",
     "swarm": "swarm",
+    "browser": "browser",
+    "n8n": "integration",
+    "integration": "integration",
 }
 
 
@@ -201,6 +263,10 @@ def _inventory_for_tool(name: str) -> str:
         return "group_chat"
     if name.startswith(("swarm_",)):
         return "swarm"
+    if name.startswith(("browser_",)):
+        return "browser"
+    if name.startswith(("n8n_",)):
+        return "integration"
     return "misc"
 
 
@@ -242,6 +308,10 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
         seen.add(name)
         tools.append(cloned)
 
+    # Only advertise one canonical tool per capability. Compatibility handlers and
+    # aliases remain callable by name but do not consume LLM tool context.
+    tools = [tool for tool in tools if tool.get("name") in CANONICAL_TOOL_NAMES]
+
     for tool in tools:
         name = tool.get("name", "")
         tool.setdefault("x_inventory", _inventory_for_tool(name))
@@ -264,6 +334,16 @@ def filter_tools_by_inventory(tools: List[Dict[str, Any]], inventory: str) -> Li
     if not wanted or wanted in ("all", "*"):
         return tools
     return [tool for tool in tools if (tool.get("x_inventory") or _inventory_for_tool(tool.get("name", ""))) == wanted]
+
+
+def filter_tools_for_profile(tools: List[Dict[str, Any]], profile: str) -> List[Dict[str, Any]]:
+    """Return the small default core, canonical full surface, or one inventory."""
+    wanted = (profile or "core").strip().lower()
+    if wanted in {"core", "minimal", "default"}:
+        return [tool for tool in tools if tool.get("name") in CORE_TOOL_NAMES]
+    if wanted in {"all", "full", "*"}:
+        return tools
+    return filter_tools_by_inventory(tools, wanted)
 
 
 def decorate_tools(

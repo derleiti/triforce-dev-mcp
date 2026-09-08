@@ -14,6 +14,7 @@ import json
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
+from ..config import VERSION
 
 # Crawler imports are loaded lazily inside handlers to avoid heavy startup imports and optional dependencies (playwright).
 from ..services.wordpress import wordpress_service
@@ -225,7 +226,7 @@ async def public_mcp_metadata(request: Request) -> Dict[str, Any]:
     base = str(request.base_url).rstrip("/")
     return {
         "name": "ailinux-mcp-server",
-        "version": "2.80",
+        "version": VERSION,
         "transport": "streamable-http",
         "endpoint": f"{base}/v1/mcp",
         "authorization_server": f"{base}/v1/.well-known/oauth-authorization-server",
@@ -1558,7 +1559,7 @@ async def handle_initialize(params: Dict[str, Any], request: Optional[Request] =
         "protocolVersion": "2024-11-05",
         "serverInfo": {
             "name": "ailinux-mcp-server",
-            "version": "2.80",
+            "version": VERSION,
             "tristar": {
                 "enabled": True,
                 "total_models": stats.get("total_models", 0),
@@ -1579,12 +1580,12 @@ async def handle_initialize(params: Dict[str, Any], request: Optional[Request] =
 
 
 async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] = None) -> Dict[str, Any]:
-    """MCP tools/list - unified inventory (v4 + extras + V5).
-    
-    Wiederhergestellt nach dem Stash-Merge-Verlust vom 2026-04-20.
-    Vorher: nur 52 v4-Tools. Jetzt: ~142 (v4 + WP/Browser/Redis/Performance + V5).
+    """MCP tools/list with a minimal default and canonical inventory profiles.
+
+    Legacy handlers remain callable for compatibility, but duplicate/dead tools
+    are intentionally not advertised to models.
     """
-    inventory = str(params.get("inventory", "all"))
+    inventory = str(params.get("inventory", "core"))
     # Check if client wants legacy (v3) tools
     use_legacy = inventory in {"legacy", "v3"} or params.get("legacy", False) or params.get("v3", False)
     
@@ -1598,16 +1599,12 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
     
     # Primary: unified inventory (Pre-Killer style, full toolbox with handlers)
     try:
-        from ..mcp.tool_registry_unified import get_unified_tools
+        from ..mcp.tool_registry_unified import get_unified_tools, filter_tools_for_profile
         from ..mcp.handlers_wordpress import WORDPRESS_TOOL_SCHEMAS
         from ..mcp.handlers_browser import BROWSER_TOOL_SCHEMAS
-        from ..mcp.handlers_redis import REDIS_TOOL_SCHEMAS
-        from ..services.model_performance import PERFORMANCE_TOOL_SCHEMAS
         
         tools = get_unified_tools(
-            extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS +
-                         PERFORMANCE_TOOL_SCHEMAS + REDIS_TOOL_SCHEMAS +
-                         N8N_TOOLS)
+            extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS)
         )
         existing = {t.get("name") for t in tools}
         if "nova_chat_agent" not in existing:
@@ -1630,16 +1627,8 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
             })
             existing.add("nova_chat_agent")
         
-        # V5 extension tools (deduplicated)
-        try:
-            from ..mcp.tool_registry_v5 import V5_TOOLS
-            for tool in V5_TOOLS:
-                if tool.get("name") not in existing:
-                    tools.append(tool)
-                    existing.add(tool.get("name"))
-        except Exception as e:
-            logger.warning(f"V5_TOOLS load skipped: {e}")
-        
+        tools = filter_tools_for_profile(tools, inventory)
+
         for tool in tools:
             if isinstance(tool, dict) and "outputSchema" not in tool:
                 tool["outputSchema"] = {"type": "object", "additionalProperties": True}
@@ -1648,7 +1637,7 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
             tools,
             "unified",
             request,
-            note="v4 + WordPress/Browser/Redis/Performance + V5 (restored 2026-04-27)",
+            note=f"canonical MCP surface profile={inventory}",
         )
     except Exception as e:
         logger.warning(f"Unified tools failed, falling back to v4: {e}")
@@ -2733,7 +2722,7 @@ async def handle_codebase_structure(params: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "root": path,
         "structure": "\n".join(lines),
-        "backend_version": "2.80 (Optimized Tree)",
+        "backend_version": f"{VERSION} (Optimized Tree)",
     }
 
 
@@ -3877,7 +3866,7 @@ async def mcp_health_or_sse(request: Request):
             "protocolVersion": protocol_version,
             "serverInfo": {
                 "name": "ailinux-mcp-server",
-                "version": "2.80",
+                "version": VERSION,
                 "description": "AILinux TriForce MCP Server"
             },
             "capabilities": {
@@ -4082,7 +4071,7 @@ async def mcp_messages_handler(request: Request, session_id: Optional[str] = Non
                 "protocolVersion": params.get("protocolVersion", "2024-11-05"),
                 "serverInfo": {
                     "name": "ailinux-mcp-server",
-                    "version": "2.80"
+                    "version": VERSION
                 },
                 "capabilities": {
                     "tools": {"listChanged": True},
@@ -4241,7 +4230,7 @@ async def _process_mcp_request(
             "protocolVersion": params.get("protocolVersion", "2024-11-05"),
             "serverInfo": {
                 "name": "ailinux-mcp-server",
-                "version": "2.80"
+                "version": VERSION
             },
             "capabilities": {
                 "tools": {"listChanged": True},

@@ -14,7 +14,7 @@ TriForce ist eine verteilte Multi-LLM Plattform mit folgenden Hauptkomponenten:
                                     │
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                         TRIFORCE BACKEND v2.80                           │
+│                         TRIFORCE BACKEND v2.81                           │
 │                                                                          │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐        │
 │  │   Routes   │  │  Services  │  │    MCP     │  │   Agents   │        │
@@ -22,8 +22,8 @@ TriForce ist eine verteilte Multi-LLM Plattform mit folgenden Hauptkomponenten:
 │  └────────────┘  └────────────┘  └────────────┘  └────────────┘        │
 │                                                                          │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐        │
-│  │   Redis    │  │   Memory   │  │ Federation │  │  Mesh AI   │        │
-│  │  (Cache)   │  │  (Prisma)  │  │  (P2P)     │  │  (Coord)   │        │
+│  │   Redis    │  │Memory Fabric│ │ Federation │  │  Mesh AI   │        │
+│  │  (Cache)   │  │Curated+Epis.│ │  (P2P)     │  │  (Coord)   │        │
 │  └────────────┘  └────────────┘  └────────────┘  └────────────┘        │
 └──────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -71,16 +71,50 @@ TriForce ist eine verteilte Multi-LLM Plattform mit folgenden Hauptkomponenten:
 
 ### 3. MCP System
 
-134 Tools in Kategorien:
-- Core (15): Basis-Funktionen
-- Code (12): File-Operations
-- Memory (8): Wissen speichern
-- Mesh (10): Federation
-- Ollama (6): Lokale Modelle
-- Agents (8): Multi-Agent
-- Admin (12): System
+Der Unified Registry exponiert standardmäßig **39 Core-Tools**; `inventory=all` liefert **79 kanonische Tools**. Legacy-Aliase und doppelte Fähigkeiten bleiben nur als Kompatibilitätsschicht und werden Modellen nicht advertised. Spezialisierte Inventories wie Memory, Filesystem, Browser, Forum oder WordPress können gezielt angefordert werden.
 
-### 4. Federation Mesh
+Discovery und Dispatch besitzen jeweils genau **eine kanonische Implementierung** in `app/routes/mcp.py` zusammen mit `app/mcp/tool_registry_unified.py`. Historische Python-Einstiege in `app/services/mcp_service.py` delegieren nur noch auf diese Implementierung und führen keine eigene Tool-Liste bzw. keinen eigenen Dispatcher mehr.
+
+Die Memory-Oberfläche besteht aktuell aus:
+
+- `memory_store` — kuratiertes Wissen speichern
+- `memory_search` — kuratiertes Wissen suchen
+- `memory_clear` — kuratiertes Memory verwalten
+- `memory_history` — episodische Historie suchen, Timeline/Details abrufen und verifizierte Observations kontrolliert promoten
+
+`memory_history` ist für authentifizierte interne Operatoren gedacht; episodische Treffer gelten als untrusted historical context.
+
+### 4. Native Agent Memory Fabric
+
+TriForce trennt drei Zuständigkeiten strikt:
+
+```text
+Runtime Events
+    │
+    ▼
+MemoryTriggerEngine
+    │
+    ▼
+EpisodicMemoryProvider ──► ClaudeMemAdapter ──► local Claude-Mem worker / SQLite
+    │                                              │
+    └──────── bounded, redacted recall ◄───────────┘
+                       │
+                       ▼
+                   Agent Context
+                       │ verified + evidence + explicit promotion
+                       ▼
+               TriForce Curated Memory
+```
+
+- **Runtime State** beantwortet: Was passiert gerade?
+- **Episodic Memory** beantwortet: Was ist früher passiert/versucht worden?
+- **Curated Memory** beantwortet: Was wissen wir verifiziert und dauerhaft?
+
+Der Provider ist optional und fail-open. Worker-Ausfall, Timeout oder malformed responses dürfen keinen normalen TriForce-Workflow stoppen. Auto-Recall verwendet Result-Limits, Kontextbudget, Deduplication, Secret-Redaction und einen Circuit Breaker. Historische Erinnerungen können stale oder falsch sein; aktueller Code, Tests und Runtime-Evidence haben Vorrang.
+
+Die aktuelle Implementierung bindet Claude-Mem **13.24.1** über einen TriForce-eigenen Adapter an. Dadurch ist episodisches Memory modellneutral und nicht auf Claude beschränkt.
+
+### 5. Federation Mesh
 
 3 Nodes über WireGuard VPN:
 - Master (Hetzner): Koordination
@@ -113,6 +147,18 @@ TriForce ist eine verteilte Multi-LLM Plattform mit folgenden Hauptkomponenten:
 5. Client ← Response
 ```
 
+### Episodic Memory Recall
+
+```text
+1. Runtime Event → MemoryTriggerEngine
+2. Scope/Trigger/Dedup prüfen
+3. ClaudeMemAdapter → lokale Worker-Suche
+4. Projekt-/Relevanz-/Stale-Filter
+5. Result- und Context-Budget anwenden
+6. Historischen Kontext als untrusted markieren
+7. Agent arbeitet weiter; bei Memory-Fehlern fail-open ohne Recall
+```
+
 ### Federation Request
 
 ```
@@ -141,9 +187,14 @@ triforce/
 │   ├── services/            # Business Logic
 │   │   ├── chat_router.py
 │   │   ├── mesh_coordinator.py
+│   │   ├── episodic_memory.py      # Provider boundary / Claude-Mem adapter
+│   │   ├── memory_trigger.py       # Central recall/record/promotion policy
+│   │   ├── memory_runtime.py       # Runtime event translation
 │   │   └── ...
 │   ├── mcp/                 # MCP Tools
-│   │   └── tool_registry_v4.py
+│   │   ├── tool_registry_v5.py
+│   │   ├── tool_registry_unified.py
+│   │   └── handlers_memory_history.py
 │   └── utils/
 ├── config/
 │   ├── triforce.env         # Environment
@@ -164,7 +215,8 @@ triforce/
 |------------|-------------|
 | Backend | Python 3.12, FastAPI, Uvicorn |
 | Cache | Redis |
-| Memory | Prisma + SQLite |
+| Curated Memory | TriForce/TriStar persistent memory |
+| Episodic Memory | TriForce Provider API + local Claude-Mem worker (SQLite) |
 | Proxy | Apache 2.4 |
 | VPN | WireGuard |
 | Container | Docker (optional) |
@@ -217,7 +269,7 @@ triforce/
 
 | Endpoint | Funktion |
 |----------|----------|
-| `/health` | System-Status |
+| `/health` | System-Status inklusive optionalem `episodic_memory` Health-State |
 | `/v1/mesh/resources` | Federation-Status |
 | `/v1/mesh/status` | Mesh-Koordinator |
 
@@ -239,3 +291,4 @@ logs?category=api|llm|mcp|error|agent
 - [API Reference](api/REST.md)
 - [MCP Tools](api/MCP.md)
 - [Federation](architecture/FEDERATION.md)
+- [Episodic Agent Memory](architecture/episodic-memory.md)

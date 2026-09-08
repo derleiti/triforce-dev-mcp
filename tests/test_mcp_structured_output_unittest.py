@@ -83,7 +83,8 @@ class TestMcpStructuredOutput(unittest.TestCase):
     def test_advertised_output_schemas_are_objects(self):
         response = asyncio.run(handle_tools_list({}))
 
-        self.assertGreater(response["count"], 100)
+        self.assertGreater(response["count"], 20)
+        self.assertLessEqual(response["count"], 50)
         self.assertTrue(
             all(tool.get("outputSchema", {}).get("type") == "object" for tool in response["tools"])
         )

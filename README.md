@@ -4,16 +4,15 @@
 <!-- AILINUX_STATUS_START -->
 ## Current production snapshot
 
-- Production branch: `nova-nextlevel-20260603`.
-- Current production HEAD: `0a5738a6` (`fix: remove merge artifacts and restore runtime dependencies`).
+- Production branch: `master`.
+- Episodic-memory integration baseline: `65eec52f` (`Integrate episodic memory and harden agent bridges`).
 - API base URL: `https://api.ailinux.me`.
-- Health check: `GET /health` returns `{"ok": true, "status": "ok"}` when healthy.
+- Health check: `GET /health` reports core service health plus the optional `episodic_memory` provider state.
 - Systemd service: `triforce.service`, working directory `/home/zombie/triforce`, Uvicorn on port `9000`.
 - Default chat model: `ollama/gemma4:12b`; local Ollama tag is `gemma4:12b`.
 - OpenClaw gateway: `ws://127.0.0.1:18789`.
 - Runtime hygiene: logs, local env files, runtime spools, Docker/n8n volumes, virtualenvs, backup files, and build outputs stay out of Git.
 - Git safety: use explicit pathspecs; avoid broad cleanup commands in production checkouts.
-- Auto-update note: if service logs say branch `master` while the checkout is `nova-nextlevel-20260603`, align the updater before relying on unattended updates.
 <!-- AILINUX_STATUS_END -->
 
 <div align="center">
@@ -22,11 +21,11 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Nodes](https://img.shields.io/badge/federation-3%20nodes-orange)
 ![Models](https://img.shields.io/badge/models-925%2B-purple)
-![MCP Tools](https://img.shields.io/badge/MCP%20tools-145-red)
+![MCP Tools](https://img.shields.io/badge/MCP%20core-39-red)
 
 **Multi-LLM Orchestration Platform with Federation Support**
 
-[Installation](#installation) • [Hub Sync](#server-hub-sync) • [CLI Agents](#cli-agents) • [MCP Tools](#mcp-tools) • [API](#api-usage)
+[Installation](#installation) • [Hub Sync](#server-hub-sync) • [CLI Agents](#cli-agents) • [Agent Memory](#native-agent-memory) • [MCP Tools](#mcp-tools) • [API](#api-usage)
 
 </div>
 
@@ -34,16 +33,17 @@
 
 ## 🚀 Overview
 
-TriForce is a decentralized AI platform that unifies **925+ LLM models** from **9 providers** into a single API. It features a federated mesh network, local Ollama integration, **145 MCP tools**, and **4 autonomous CLI agents**.
+TriForce is a decentralized AI platform that unifies **925+ LLM models** from **9 providers** into a single API. It features a federated mesh network, local Ollama integration, **39 default / 79 full canonical MCP tools**, and **4 autonomous CLI agents**.
 
 ### Key Features
 
 - **Multi-Provider**: Gemini, Anthropic, Groq, Cerebras, Mistral, OpenRouter, GitHub, Cloudflare, Ollama
 - **Federation**: Distributed compute across multiple nodes (64 cores, 156GB RAM)
-- **MCP Tools**: 145 integrated tools for code, search, memory, files
+- **MCP Tools**: 39-tool minimal default surface; 79 canonical tools in the full inventory, with legacy duplicates hidden from model discovery
 - **CLI Agents**: 4 autonomous AI agents (Claude, Codex, Gemini, OpenCode)
 - **Auto-Sync**: Automatic hub synchronization via update.ailinux.me (hourly)
 - **Local Models**: Ollama integration for private inference
+- **Native Agent Memory**: TriForce Memory Fabric combines curated knowledge with persistent episodic history through a provider abstraction
 - **OpenAI Compatible**: Drop-in replacement for OpenAI API
 
 ### Federation Status
@@ -170,16 +170,53 @@ curl -X POST https://api.ailinux.me/v1/agents/cli/claude-mcp/stop
 
 ---
 
+## 🧠 Native Agent Memory
+
+TriForce now has a **native memory fabric** with three deliberately separated layers:
+
+| Layer | Purpose | Authority |
+|-------|---------|-----------|
+| **Runtime State** | What is happening right now in the active task/run | Current runtime only |
+| **Episodic Memory** | What agents previously tried, changed, discovered or failed on | Historical context; never treated as truth by itself |
+| **Curated TriForce Memory** | Verified facts, decisions, code knowledge, summaries and TODOs | Durable project knowledge |
+
+The episodic layer is integrated through `EpisodicMemoryProvider` and currently uses a pinned **Claude-Mem 13.24.1** local worker. Claude-Mem is an implementation detail of the episodic provider, not the identity of TriForce memory. The same recalled history can therefore be supplied to Codex, Gemini, Nemotron, Qwen, Mistral, local models and future TriForce agents.
+
+Automatic recall is centralized in `MemoryTriggerEngine` and can react to task start/resume, first file access, failures, retries, handoffs, merge/commit review points and run completion. File/failure recall is deduplicated, bounded by result/context limits, redacts common secrets and fails open if the worker is unavailable.
+
+Promotion from episodic history into curated TriForce memory is **never automatic**. It is disabled by default and requires an observation marked `verified` plus explicit verification evidence. Current code, tests and runtime evidence always outrank historical memory.
+
+Core configuration:
+
+```bash
+TRIFORCE_EPISODIC_MEMORY_ENABLED=false
+TRIFORCE_EPISODIC_MEMORY_PROVIDER=claude-mem
+TRIFORCE_EPISODIC_MEMORY_DATA_DIR=/path/to/claude-mem-data
+TRIFORCE_MEMORY_AUTO_RECALL=true
+TRIFORCE_MEMORY_MAX_RESULTS=4
+TRIFORCE_MEMORY_TOKEN_BUDGET=1200
+TRIFORCE_MEMORY_TIMEOUT=0.8
+TRIFORCE_MEMORY_RECORD_ENABLED=false
+TRIFORCE_MEMORY_PROMOTION_ENABLED=false
+TRIFORCE_MEMORY_PROJECT_ID=triforce
+```
+
+The worker port is discovered from Claude-Mem `settings.json`; TriForce does not guess or hardcode it. The integration was verified end-to-end against Claude-Mem 13.24.1 with worker health, manual store and subsequent search using isolated synthetic data.
+
+Detailed design, privacy model, triggers and troubleshooting: [`docs/architecture/episodic-memory.md`](docs/architecture/episodic-memory.md).
+
+---
+
 ## 🔧 MCP Tools
 
-145 integrated tools. Selected categories (excerpt, not the full inventory):
+The default MCP discovery surface is **39 core tools**. `inventory=all` exposes **79 canonical tools**; specialized inventories expose only the requested capability group. Selected categories:
 
 | Category | Tools | Examples |
 |----------|-------|----------|
 | Chat | 3 | chat, models, specialist |
 | Code | 6 | code_read, code_edit, code_search, code_patch |
 | System | 9 | shell, status, health, logs, restart |
-| Memory | 4 | memory_store, memory_search, memory_clear |
+| Memory | 4 | memory_store, memory_search, memory_clear, memory_history |
 | Web | 3 | search, crawl, web_fetch |
 | Agents | 8 | agents, agent_call, agent_start, agent_stop |
 | Ollama | 6 | ollama_run, ollama_list, ollama_pull |
@@ -240,8 +277,8 @@ triforce/
 ├── app/                    # FastAPI Backend
 │   ├── main.py            # Application entry
 │   ├── routes/            # API endpoints
-│   ├── services/          # Business logic
-│   ├── mcp/               # MCP handlers & registry
+│   ├── services/          # Business logic (incl. episodic memory runtime/trigger/provider)
+│   ├── mcp/               # MCP handlers & registry (incl. memory_history)
 │   └── utils/             # Utilities & logging
 ├── config/                 # Configuration files
 ├── scripts/               # Management scripts
@@ -249,7 +286,7 @@ triforce/
 │   ├── create-release.sh  # Release builder
 │   └── start-triforce.sh  # Service starter
 ├── bin/                   # Agent wrappers
-├── docs/                  # Documentation
+├── docs/                  # Documentation, including architecture/episodic-memory.md
 └── docker/                # Docker configs
 ```
 

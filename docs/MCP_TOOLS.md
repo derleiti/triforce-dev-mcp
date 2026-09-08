@@ -1,11 +1,14 @@
 # MCP Tools Reference
 
-**Last Updated:** 2026-01-02  
-**Total Tools:** 134+
+**Last Updated:** 2026-09-09
+**Default MCP surface:** 39 core tools
+**Full canonical surface:** 79 tools
 
 ## Overview
 
-TriForce exposes 134+ MCP tools via the `/v1/mcp` endpoint. Tools are organized into categories.
+TriForce now exposes a **minimal 39-tool default surface** through `/v1/mcp`. Clients can request `inventory=all` for the **79-tool canonical surface** or a specialized inventory such as `memory`, `filesystem`, `group_chat`, `forum`, `wordpress`, `browser` or `integration`. Legacy aliases and duplicate handlers may remain callable for compatibility, but they are intentionally hidden from normal model discovery.
+
+`app/routes/mcp.py` is the single canonical MCP discovery and tool-call dispatcher. Compatibility functions in `app/services/mcp_service.py` delegate to it; they do not maintain a second registry.
 
 ## Authentication
 
@@ -70,7 +73,24 @@ curl -X POST "https://api.ailinux.me/v1/mcp" \
 |------|-------------|
 | `memory_store` | Store information |
 | `memory_search` | Search memory |
-| `memory_clear` | Clear memory |
+| `memory_clear` | Clear/manage curated memory |
+| `memory_history` | Scoped episodic history: compact search/recent, timeline/get, and controlled promotion of verified observations |
+
+#### Memory model
+
+`memory_store` / `memory_search` operate on **curated TriForce memory**. `memory_history` operates on the separate **episodic history provider**. Episodic results are historical observations, not trusted instructions or current facts. Current code, tests and runtime evidence take precedence.
+
+`memory_history` is restricted to authenticated internal operator credentials and a configured `TRIFORCE_MEMORY_PROJECT_ID`. Promotion is additionally disabled unless `TRIFORCE_MEMORY_PROMOTION_ENABLED=true`, and the source observation must be `verified` with verification evidence.
+
+Available `memory_history` actions:
+
+| Action | Purpose |
+|--------|---------|
+| `search` | Compact, budgeted episodic recall for a query |
+| `recent` | Recent scoped history |
+| `timeline` | Context around one selected observation |
+| `get` | Retrieve selected observation IDs |
+| `promote` | Explicitly promote verified evidence into curated TriForce memory |
 
 ### Code Tools
 
@@ -210,6 +230,26 @@ curl -X POST "https://api.ailinux.me/v1/mcp" \
     "id": "4"
   }'
 ```
+
+
+### Search Episodic Agent History
+
+```bash
+curl -X POST "https://api.ailinux.me/v1/mcp" \
+  -H "Authorization: Basic <credentials>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "memory_history",
+      "arguments": {"action": "search", "query": "parser timeout retry"}
+    },
+    "id": "memory-1"
+  }'
+```
+
+Start with compact search and fetch timeline/full observations only for selected IDs. This progressive-disclosure pattern prevents historical sessions from flooding the model context.
 
 ## Error Handling
 

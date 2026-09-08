@@ -1,5 +1,5 @@
 """
-MCP (Model Context Protocol) Module for AILinux Backend v2.80
+MCP (Model Context Protocol) Module for AILinux Backend
 
 This module provides:
 - API documentation for Claude Code integration
@@ -31,7 +31,7 @@ from .translation import APIToMCPTranslator, MCPToAPITranslator
 from .specialists import ModelSpecialist, SpecialistRouter
 from .context import ContextManager, ConversationContext
 
-__version__ = "2.80"
+from app.config import VERSION as __version__
 
 __all__ = [
     # Version

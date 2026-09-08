@@ -4,9 +4,8 @@ import base64
 import json
 import logging
 import re
-import os
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 from pathlib import Path
 
@@ -16,15 +15,6 @@ from .wordpress import wordpress_service
 from . import chat as chat_service
 from .model_registry import registry
 from ..utils.throttle import request_slot
-from .ollama_mcp import OLLAMA_TOOLS, OLLAMA_HANDLERS
-from .tristar_mcp import TRISTAR_TOOLS, TRISTAR_HANDLERS
-from .gemini_access import GEMINI_ACCESS_TOOLS, GEMINI_ACCESS_HANDLERS
-from .command_queue import QUEUE_TOOLS, QUEUE_HANDLERS
-from ..routes.mesh import MESH_TOOLS, MESH_HANDLERS
-from .mcp_filter import MESH_FILTER_TOOLS, MESH_FILTER_HANDLERS
-from .init_service import INIT_TOOLS, INIT_HANDLERS, init_service, loadbalancer, mcp_brain
-from .gemini_model_init import MODEL_INIT_TOOLS, MODEL_INIT_HANDLERS, gemini_model_init
-from .agent_bootstrap import BOOTSTRAP_TOOLS, BOOTSTRAP_HANDLERS, bootstrap_service, chat_processor, shortcode_filter
 from ..routes.admin_crawler import (
     CrawlerConfigUpdate,
     CrawlerConfigUpdateResponse,
@@ -33,22 +23,15 @@ from ..routes.admin_crawler import (
     get_crawler_config,
     update_crawler_config,
 )
-from ..mcp.api_docs import get_api_docs, get_endpoint_for_task, API_DOCUMENTATION
+from ..mcp.api_docs import get_api_docs, get_endpoint_for_task
 from ..mcp.translation import BidirectionalTranslator, APIToMCPTranslator, MCPToAPITranslator
-from ..mcp.specialists import specialist_router, SpecialistCapability, SPECIALISTS
+from ..mcp.specialists import specialist_router, SPECIALISTS
 from ..mcp.context import context_manager, prompt_library, workflow_manager
-from ..mcp.adaptive_code import ADAPTIVE_CODE_TOOLS, ADAPTIVE_CODE_HANDLERS
-from ..mcp.adaptive_code_v4 import ADAPTIVE_CODE_V4_TOOLS, ADAPTIVE_CODE_V4_HANDLERS
 from .compatibility_layer import compatibility_layer
 from .system_control import system_control
 from .mcp_debugger import mcp_debugger
-from .huggingface_inference import HF_INFERENCE_TOOLS, HF_HANDLERS
 from .remote_task import remote_task_service, TaskType, TaskStatus
 # === NEW CLIENT-SERVER ARCHITECTURE TOOLS ===
-from .api_vault import VAULT_TOOLS, VAULT_HANDLERS, api_vault
-from .chat_router import CHAT_ROUTER_TOOLS, CHAT_ROUTER_HANDLERS
-from .task_spawner import TASK_SPAWNER_TOOLS, TASK_SPAWNER_HANDLERS
-from .txt2img_mcp import TXT2IMG_TOOLS, TXT2IMG_HANDLERS
 from .nova_chat_agent import nova_chat_agent_service as account_specialists
 
 # Constants
@@ -1606,506 +1589,29 @@ async def handle_resources_read_mcp(params: Dict[str, Any]) -> Dict[str, Any]:
     raise ValueError(f"Resource not found: {uri}")
 
 async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
-    """MCP initialize method - returns server info and capabilities."""
-    from .tristar.model_init import model_init_service
-
-    # Get TriStar model count
-    stats = await model_init_service.get_stats()
-
-    return {
-        "protocolVersion": "2024-11-05",
-        "serverInfo": {
-            "name": "ailinux-mcp-server",
-            "version": "2.80",
-            "tristar": {
-                "enabled": True,
-                "total_models": stats.get("total_models", 0),
-                "initialized_models": stats.get("initialized", 0),
-            },
-        },
-        "capabilities": {
-            "tools": {
-                "tristar": True,
-                "memory": True,
-                "mesh": True,
-            },
-            "prompts": {},
-            "resources": {},
-        },
-    }
+    """Compatibility entry point; canonical MCP initialize lives in routes.mcp."""
+    from ..routes.mcp import handle_initialize as canonical_initialize
+    return await canonical_initialize(params)
 
 async def handle_tools_list(params: Dict[str, Any]) -> Dict[str, Any]:
-    """MCP tools/list method - returns available tools including Ollama, TriStar, Gemini, and Queue tools."""
-    # Base tools
-    tools = [
-        {
-            "name": "chat",
-            "description": "Send a message to an AI model. Supports Ollama, Gemini, Mistral, Anthropic Claude, and GPT-OSS.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string", "description": "The message to send to the AI model"},
-                    "model": {"type": "string", "description": "Model ID (e.g., 'anthropic/claude-sonnet-4', 'gemini/gemini-2.0-flash')"},
-                    "system_prompt": {"type": "string", "description": "Optional system prompt"},
-                    "temperature": {"type": "number", "description": "Sampling temperature (0.0-2.0)"},
-                },
-                "required": ["message"],
-            },
-        },
-        {
-            "name": "list_models",
-            "description": "List all available AI models with their capabilities",
-            "inputSchema": {"type": "object", "properties": {}},
-        },
-        {
-            "name": "ask_specialist",
-            "description": "Route a task to the best specialist model",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "task": {"type": "string", "description": "Task description for routing"},
-                    "message": {"type": "string", "description": "The actual message/prompt"},
-                    "preferred_speed": {"type": "string", "enum": ["fast", "medium", "slow"]},
-                },
-                "required": ["task", "message"],
-            },
-        },
-        {
-            "name": "crawl_url",
-            "description": "Crawl a website and extract content",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "URL to crawl"},
-                    "keywords": {"type": "array", "items": {"type": "string"}, "description": "Keywords for filtering"},
-                    "max_pages": {"type": "integer", "description": "Maximum pages to crawl"},
-                },
-                "required": ["url"],
-            },
-        },
-        {
-            "name": "web_search",
-            "description": "Search the web for information using AI-powered search",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                },
-                "required": ["query"],
-            },
-        },
-        # TriStar Tools
-        {
-            "name": "tristar.models",
-            "description": "Get all registered TriStar LLM models with their roles and capabilities",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "role": {"type": "string", "enum": ["admin", "lead", "worker", "reviewer"], "description": "Filter by role"},
-                    "capability": {"type": "string", "description": "Filter by capability (code, math, reasoning, etc.)"},
-                    "provider": {"type": "string", "description": "Filter by provider (ollama, gemini, anthropic, mistral)"},
-                },
-            },
-        },
-        {
-            "name": "tristar.init",
-            "description": "Initialize (impfen) a model with system prompt and configuration",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "model_id": {"type": "string", "description": "Model ID to initialize"},
-                },
-                "required": ["model_id"],
-            },
-        },
-        {
-            "name": "tristar.memory.store",
-            "description": "Store a memory entry in TriStar shared memory",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "content": {"type": "string", "description": "Memory content to store"},
-                    "memory_type": {"type": "string", "enum": ["fact", "decision", "code", "summary", "context", "todo"], "description": "Type of memory"},
-                    "llm_id": {"type": "string", "description": "ID of the LLM storing the memory"},
-                    "initial_confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "Initial confidence score"},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization"},
-                },
-                "required": ["content"],
-            },
-        },
-        {
-            "name": "tristar.memory.search",
-            "description": "Search TriStar shared memory",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "min_confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "Minimum confidence score"},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Filter by tags"},
-                    "memory_type": {"type": "string", "description": "Filter by memory type"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum results"},
-                },
-            },
-        },
-        # Codebase Access Tools
-        {
-            "name": "codebase.structure",
-            "description": "Get the backend codebase directory structure (app/, routes/, services/, etc.)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative path to scan (default: 'app')"},
-                    "include_files": {"type": "boolean", "description": "Include files in output (default: true)"},
-                    "max_depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum directory depth (default: 4)"},
-                },
-            },
-        },
-        {
-            "name": "codebase.file",
-            "description": "Read a specific file from the backend codebase",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative file path (e.g., 'app/routes/mcp.py')"},
-                },
-                "required": ["path"],
-            },
-        },
-        {
-            "name": "codebase.search",
-            "description": "Search for patterns/text in the codebase",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search pattern (regex supported)"},
-                    "path": {"type": "string", "description": "Relative path to search in (default: 'app')"},
-                    "file_pattern": {"type": "string", "description": "File glob pattern (default: '*.py')"},
-                    "max_results": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum results (default: 50)"},
-                    "context_lines": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Context lines around match (default: 2)"},
-                },
-                "required": ["query"],
-            },
-        },
-        {
-            "name": "codebase.routes",
-            "description": "Get all API routes with their HTTP methods, paths, and handlers",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-        {
-            "name": "codebase.services",
-            "description": "Get all service modules with their classes and functions",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-        {
-            "name": "codebase.edit",
-            "description": "Edit a file in the backend codebase. Creates automatic backup. Validates Python syntax for .py files.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative file path (e.g., 'app/routes/mcp.py')"},
-                    "mode": {
-                        "type": "string",
-                        "enum": ["replace", "insert", "append", "delete_lines"],
-                        "description": "Edit mode: replace (old_text→new_text), insert (at line), append (to end), delete_lines (line range)"
-                    },
-                    "old_text": {"type": "string", "description": "Text to find and replace (for mode=replace)"},
-                    "new_text": {"type": "string", "description": "New text to insert (for replace/insert/append)"},
-                    "line_number": {"type": "integer", "description": "Line number for insert mode"},
-                    "start_line": {"type": "integer", "description": "Start line for delete_lines mode"},
-                    "end_line": {"type": "integer", "description": "End line for delete_lines mode"},
-                    "create_backup": {"type": "boolean", "default": True, "description": "Create .bak backup file"},
-                    "dry_run": {"type": "boolean", "default": False, "description": "Preview changes without writing"},
-                },
-                "required": ["path", "mode"],
-            },
-        },
-        {
-            "name": "codebase.create",
-            "description": "Create a new file in the backend codebase. Will not overwrite existing files.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative file path for new file"},
-                    "content": {"type": "string", "description": "File content"},
-                    "template": {
-                        "type": "string",
-                        "enum": ["empty", "python_module", "fastapi_route", "service_class"],
-                        "description": "Use a template instead of content"
-                    },
-                },
-                "required": ["path"],
-            },
-        },
-        {
-            "name": "codebase.backup",
-            "description": "Create or restore backups of codebase files",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative file path"},
-                    "action": {
-                        "type": "string",
-                        "enum": ["create", "restore", "list", "diff"],
-                        "description": "Backup action"
-                    },
-                },
-                "required": ["path", "action"],
-            },
-        },
-        # CLI Agent Tools - Subprocess Management for Claude, Codex, Gemini
-        {
-            "name": "cli-agents.list",
-            "description": "List all CLI agents (Claude, Codex, Gemini subprocesses) with their status",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-        {
-            "name": "cli-agents.get",
-            "description": "Get details for a specific CLI agent including output buffer",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "Agent ID (e.g., 'claude-mcp', 'codex-mcp', 'gemini-mcp')"},
-                },
-                "required": ["agent_id"],
-            },
-        },
-        {
-            "name": "cli-agents.start",
-            "description": "Start a CLI agent subprocess (fetches system prompt from TriForce)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "Agent ID to start"},
-                },
-                "required": ["agent_id"],
-            },
-        },
-        {
-            "name": "cli-agents.stop",
-            "description": "Stop a CLI agent subprocess",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "Agent ID to stop"},
-                    "force": {"type": "boolean", "description": "Force kill (default: false)"},
-                },
-                "required": ["agent_id"],
-            },
-        },
-        {
-            "name": "cli-agents.restart",
-            "description": "Restart a CLI agent (stop + start)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "Agent ID to restart"},
-                },
-                "required": ["agent_id"],
-            },
-        },
-        {
-            "name": "cli-agents.call",
-            "description": "Send a message to a CLI agent",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "Agent ID to call"},
-                    "message": {"type": "string", "description": "Message to send"},
-                    "timeout": {"type": "integer", "minimum": 10, "maximum": 600, "description": "Timeout in seconds (default: 120)"},
-                },
-                "required": ["agent_id", "message"],
-            },
-        },
-        {
-            "name": "cli-agents.broadcast",
-            "description": "Broadcast a message to multiple or all CLI agents",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string", "description": "Message to broadcast"},
-                    "agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Specific agent IDs (omit for all)"},
-                },
-                "required": ["message"],
-            },
-        },
-        {
-            "name": "cli-agents.output",
-            "description": "Get output buffer for a CLI agent",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "Agent ID"},
-                    "lines": {"type": "integer", "minimum": 1, "maximum": 500, "description": "Number of lines (default: 50)"},
-                },
-                "required": ["agent_id"],
-            },
-        },
-        {
-            "name": "cli-agents.stats",
-            "description": "Get statistics for CLI agents (count by status and type)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-    ]
+    """Compatibility entry point for the canonical MCP discovery surface.
 
-    # Add Ollama, TriStar, Gemini Access, and Queue tools dynamically
-    tools.extend(OLLAMA_TOOLS)
-    tools.extend(TRISTAR_TOOLS)
-    tools.extend(GEMINI_ACCESS_TOOLS)
-    tools.extend(QUEUE_TOOLS)
-    tools.extend(MESH_TOOLS)
-    tools.extend(MESH_FILTER_TOOLS)
-    tools.extend(INIT_TOOLS)
-    tools.extend(MODEL_INIT_TOOLS)
-    tools.extend(BOOTSTRAP_TOOLS)
-    tools.extend(ADAPTIVE_CODE_TOOLS)
-    tools.extend(ADAPTIVE_CODE_V4_TOOLS)  # Enhanced: LRU Cache, Async I/O, Delta Sync, Agent-Aware
-    tools.extend(HF_INFERENCE_TOOLS)
-    tools.extend(REMOTE_TASK_TOOLS)
-    
-    # === NEW CLIENT-SERVER ARCHITECTURE TOOLS ===
-    tools.extend(VAULT_TOOLS)
-    tools.extend(CHAT_ROUTER_TOOLS)
-    tools.extend(TASK_SPAWNER_TOOLS)
-    tools.extend(TXT2IMG_TOOLS)  # Stable Diffusion / Image Generation
-
-    # Add System & Compatibility Tools
-    tools.extend([
-        {
-            "name": "check_compatibility",
-            "description": "Checks compatibility of all MCP tools with OpenAI, Gemini and Anthropic",
-            "inputSchema": {"type": "object", "properties": {}}
-        },
-        {
-            "name": "debug_mcp_request",
-            "description": "Traces an MCP request without executing it",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "method": {"type": "string"},
-                    "params": {"type": "object"}
-                },
-                "required": ["method"]
-            }
-        },
-        {
-            "name": "restart_backend",
-            "description": "Restarts the entire backend service",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "delay": {"type": "integer", "default": 2}
-                }
-            }
-        },
-        {
-            "name": "restart_agent",
-            "description": "Restarts a specific CLI agent",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string"}
-                },
-                "required": ["agent_id"]
-            }
-        }
-    ])
-
-    # MCP tool names must match ^[a-zA-Z0-9_-]{1,64}$ for strict clients.
-    # Keep internal handler aliases intact, but export normalized names only.
-    for tool in tools:
-        tool["name"] = str(tool.get("name", "")).replace(".", "_").replace("-", "_")
-    return {"tools": tools}
+    Keep this symbol for older imports, but never maintain a second tool schema
+    inventory here. All discovery policy lives in app.routes.mcp and
+    app.mcp.tool_registry_unified.
+    """
+    from ..routes.mcp import handle_tools_list as canonical_tools_list
+    return await canonical_tools_list(params)
 
 async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
-    """MCP tools/call method - executes a tool."""
-    tool_name = params.get("name")
-    arguments = params.get("arguments", {})
+    """Compatibility entry point for the canonical MCP tool dispatcher.
 
-    if not tool_name:
-        raise ValueError("'name' parameter is required for tools/call")
-
-    # Map tool names to internal handlers
-    tool_map = {
-        "chat": handle_llm_invoke,
-        "list_models": handle_models_list,
-        "ask_specialist": handle_specialists_invoke,
-        "crawl_url": handle_crawl_url,
-        "web_search": lambda p: handle_llm_invoke({"model": "gemini/gemini-2.5-flash", "prompt": f"Web search: {p.get('query', '')}"}),
-        # TriStar Integration
-        "tristar.models": handle_tristar_models,
-        "tristar.init": handle_tristar_init,
-        "tristar.memory.store": handle_tristar_memory_store,
-        "tristar.memory.search": handle_tristar_memory_search,
-        # Codebase Access
-        "codebase.structure": handle_codebase_structure,
-        "codebase.file": handle_codebase_file,
-        "codebase.search": handle_codebase_search,
-        "codebase.routes": handle_codebase_routes,
-        "codebase.services": handle_codebase_services,
-        "codebase.edit": handle_codebase_edit,
-        "codebase.create": handle_codebase_create,
-        "codebase.backup": handle_codebase_backup,
-        # CLI Agents
-        "cli-agents.list": handle_cli_agents_list,
-        "cli-agents.get": handle_cli_agents_get,
-        "cli-agents.start": handle_cli_agents_start,
-        "cli-agents.stop": handle_cli_agents_stop,
-        "cli-agents.restart": handle_cli_agents_restart,
-        "cli-agents.call": handle_cli_agents_call,
-        "cli-agents.broadcast": handle_cli_agents_broadcast,
-        "cli-agents.output": handle_cli_agents_output,
-        "cli-agents.stats": handle_cli_agents_stats,
-        # System & Compatibility
-        "check_compatibility": handle_check_compatibility,
-        "debug_mcp_request": handle_debug_mcp_request,
-        "restart_backend": handle_restart_backend,
-        "restart_agent": handle_restart_agent,
-    }
-
-    # Merge with dynamic handlers from services
-    tool_map.update(OLLAMA_HANDLERS)
-    tool_map.update(TRISTAR_HANDLERS)
-    tool_map.update(GEMINI_ACCESS_HANDLERS)
-    tool_map.update(QUEUE_HANDLERS)
-    tool_map.update(MESH_HANDLERS)
-    tool_map.update(MESH_FILTER_HANDLERS)
-    tool_map.update(INIT_HANDLERS)
-    tool_map.update(MODEL_INIT_HANDLERS)
-    tool_map.update(BOOTSTRAP_HANDLERS)
-    tool_map.update(ADAPTIVE_CODE_HANDLERS)
-    tool_map.update(ADAPTIVE_CODE_V4_HANDLERS)  # Enhanced V4 handlers
-    tool_map.update(HF_HANDLERS)
-    tool_map.update(REMOTE_TASK_HANDLERS)  # Remote Task Execution via SSH
-    
-    # === NEW CLIENT-SERVER ARCHITECTURE HANDLERS ===
-    tool_map.update(VAULT_HANDLERS)
-    tool_map.update(CHAT_ROUTER_HANDLERS)
-    tool_map.update(TASK_SPAWNER_HANDLERS)
-    tool_map.update(TXT2IMG_HANDLERS)  # Stable Diffusion / Image Generation
-
-    handler = tool_map.get(tool_name)
-    if not handler:
-        raise ValueError(f"Unknown tool: {tool_name}")
-
-    result = await handler(arguments)
-    return {
-        "content": [
-            {"type": "text", "text": json.dumps(result, separators=(',', ':'))}
-        ],
-        "isError": False,
-    }
+    Legacy callers importing app.services.mcp_service continue to work, while
+    aliases, authorization-independent normalization and handler resolution are
+    defined exactly once in app.routes.mcp.handle_tools_call.
+    """
+    from ..routes.mcp import handle_tools_call as canonical_tools_call
+    return await canonical_tools_call(params)
 
 # ============================================================================
 # Remote Task Handlers - CLI Agents arbeiten auf Remote-Hosts

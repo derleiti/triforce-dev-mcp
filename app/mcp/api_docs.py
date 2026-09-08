@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 
+from app.config import VERSION
+
 
 class HTTPMethod(str, Enum):
     GET = "GET"
@@ -60,9 +62,9 @@ class Endpoint:
 API_DOCUMENTATION: Dict[str, Any] = {
     "info": {
         "title": "AILinux AI Backend API",
-        "version": "2.80",
-        "description": """
-AILinux AI Server Backend v2.80 - TriStar/TriForce Release
+        "version": VERSION,
+        "description": f"""
+AILinux AI Server Backend v{VERSION} - TriStar/TriForce Release
 
 CORE CAPABILITIES:
 - Multi-provider LLM chat (Ollama, Gemini, Mistral, Anthropic, GPT-OSS)
@@ -562,7 +564,7 @@ media.upload, llm.invoke, admin.crawler.control, admin.crawler.config.get/set
             description="Get full TriStar system status including chains, projects, agents, and models.",
             response_example={
                 "status": "online",
-                "version": "2.80",
+                "version": VERSION,
                 "chains": {"total": 5, "running": 1, "completed": 4},
                 "projects": {"total": 3},
                 "agents": {"total": 16, "enabled": 14},

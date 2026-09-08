@@ -79,6 +79,12 @@ See `docs/NOTIFICATION_SYSTEM.md` for full architecture.
 
 Default timeout: 30min (scheduler tasks), 5min (notifier tasks).
 
+## Persistent Agent Memory
+
+Agents can now receive persistent episodic context through the native TriForce Memory Fabric. `MemoryTriggerEngine` centralizes recall for task start/resume, file context, failures, retries and handoffs; the current provider is Claude-Mem 13.24.1 behind `EpisodicMemoryProvider`. Recall is model-neutral, bounded, redacted and fail-open. Curated TriForce memory remains a separate verified-knowledge layer, and promotion from episodic history is explicit and evidence-gated.
+
+See [`architecture/episodic-memory.md`](architecture/episodic-memory.md).
+
 ## MCP Tools
 
 ### Agent Management

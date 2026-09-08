@@ -12,8 +12,9 @@ Authoritative project documentation starts with:
 - `docs/MCP_NODE_OPENCLAW.md` for OpenClaw/MCP node operation.
 - `docs/API_DOCUMENTATION.md` and `docs/api/REST.md` for API details.
 - `docs/ARCHITECTURE.md` and `docs/architecture/OVERVIEW.md` for architecture notes.
+- `docs/architecture/episodic-memory.md` for the native persistent Agent Memory Fabric and Claude-Mem provider integration.
 
-Current baseline: branch `nova-nextlevel-20260603`, head `16f43b8a`, service `triforce.service`, API `https://api.ailinux.me`, default model `ollama/gemma4:12b`.
+Current baseline: production branch `master`; episodic-memory integration baseline `65eec52f`; service `triforce.service`; API `https://api.ailinux.me`; default chat model `ollama/gemma4:12b`.
 
 Generated, cache, backup, vendor, and runtime folders are not authoritative documentation sources.
 <!-- AILINUX_STATUS_END -->
@@ -48,6 +49,8 @@ Generated, cache, backup, vendor, and runtime folders are not authoritative docu
 |----------|--------------|
 | [architecture/FEDERATION.md](architecture/FEDERATION.md) | Federation Protocol |
 | [architecture/SECURITY.md](architecture/SECURITY.md) | Sicherheitskonzept |
+| [architecture/episodic-memory.md](architecture/episodic-memory.md) | Native Agent Memory Fabric, Claude-Mem Adapter, Trigger, Privacy und Failure-Verhalten |
+| [MCP_TOOL_AUDIT_2026-09-09.md](MCP_TOOL_AUDIT_2026-09-09.md) | MCP Code-Review: tote Tools, Duplikate, 39-Core/79-Full Konsolidierung |
 
 ---
 
