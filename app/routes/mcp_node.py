@@ -58,6 +58,8 @@ class ClientConnection:
         self.total_tool_calls: int = 0
         self.successful_tool_calls: int = 0
         self.failed_tool_calls: int = 0
+        self.closed = False
+        self.remote_coding_run_id: Optional[str] = None
 
     async def send_tool_call(self, tool: str, params: Dict[str, Any], timeout: float = 60.0) -> Dict[str, Any]:
         """
@@ -66,6 +68,8 @@ class ClientConnection:
         Returns:
             Tool-Ergebnis vom Client
         """
+        if self.closed or self.mode == "telemetry_only":
+            raise HTTPException(409, "Client is not available for remote execution")
         request_id = str(uuid.uuid4())
 
         # JSON-RPC Request
@@ -84,12 +88,9 @@ class ClientConnection:
         self.pending_requests[request_id] = future
 
         try:
-            # Request senden
-            await self.websocket.send_json(request)
-
-            # Auf Antwort warten (mit Timeout)
-            result = await asyncio.wait_for(future, timeout=timeout)
-            return result
+            async with asyncio.timeout(timeout):
+                await self.websocket.send_json(request)
+                return await future
 
         except asyncio.TimeoutError:
             logger.error(f"Tool call timeout: {tool} for {self.client_id}")
@@ -97,17 +98,34 @@ class ClientConnection:
 
         finally:
             self.pending_requests.pop(request_id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()  # Observe a disconnect racing with send failure.
+
+    def disconnect(self) -> None:
+        """Fail waiting callers immediately when this physical socket disappears."""
+        self.closed = True
+        for future in self.pending_requests.values():
+            if not future.done():
+                future.set_exception(ConnectionError("MCP client disconnected"))
 
     def handle_response(self, response: Dict[str, Any]):
         """Verarbeitet Response vom Client"""
+        if not isinstance(response, dict):
+            return
         request_id = response.get("id")
-        if request_id and request_id in self.pending_requests:
+        if isinstance(request_id, str) and request_id in self.pending_requests:
             future = self.pending_requests[request_id]
             if not future.done():
                 if "error" in response:
-                    future.set_exception(Exception(response["error"].get("message", "Unknown error")))
+                    error = response["error"]
+                    detail = error.get("message", "Unknown error") if isinstance(error, dict) else "Malformed client RPC error"
+                    future.set_exception(RuntimeError(str(detail)))
+                elif "result" in response:
+                    future.set_result(response["result"])
                 else:
-                    future.set_result(response.get("result", {}))
+                    future.set_exception(RuntimeError("Client RPC response has no result or error"))
 
 
 # Aktive Client-Verbindungen
@@ -126,31 +144,35 @@ async def _heartbeat_monitor():
         await asyncio.sleep(HEARTBEAT_CHECK_INTERVAL)
         
         now = datetime.now()
-        stale_clients = []
+        stale_clients = {}
         
         for client_id, conn in list(CONNECTED_CLIENTS.items()):
             # Zeit seit letztem Lebenszeichen
             inactive_seconds = (now - conn.last_seen).total_seconds()
             
             if inactive_seconds > HEARTBEAT_TIMEOUT_SECONDS:
-                stale_clients.append(client_id)
+                stale_clients[id(conn)] = conn
                 logger.warning(f"Client {client_id} inactive for {inactive_seconds:.0f}s, marking as stale")
         
         # Stale Clients entfernen
-        for client_id in stale_clients:
-            conn = CONNECTED_CLIENTS.pop(client_id, None)
-            if conn:
-                try:
-                    await conn.websocket.close(code=4002, reason="Heartbeat timeout")
-                except Exception:
-                    pass  # Verbindung ist wahrscheinlich schon tot
-                logger.info(f"Removed stale client: {client_id}")
+        for conn in stale_clients.values():
+            # A close yields control: later entries may have reconnected since
+            # the snapshot. Remove aliases only if they still name this socket.
+            for alias, current in list(CONNECTED_CLIENTS.items()):
+                if current is conn:
+                    CONNECTED_CLIENTS.pop(alias, None)
+            conn.disconnect()
+            try:
+                await conn.websocket.close(code=4002, reason="Heartbeat timeout")
+            except Exception:
+                logger.debug("Stale client socket was already closed: %s", conn.client_id)
+            logger.info("Removed stale client: %s", conn.client_id)
 
 
 def start_heartbeat_monitor():
     """Startet den Heartbeat-Monitor (einmal beim App-Start aufrufen)"""
     global _heartbeat_task
-    if _heartbeat_task is None:
+    if _heartbeat_task is None or _heartbeat_task.done():
         _heartbeat_task = asyncio.create_task(_heartbeat_monitor())
         logger.info("Heartbeat monitor started")
 
@@ -325,14 +347,18 @@ async def websocket_connect(
 
     # Token validieren (bei telemetry_only: toleranter)
     payload = {}
+    authenticated = False
     if token:
         try:
             payload = decode_jwt_token(token)
+            authenticated = bool(payload.get("sub") or payload.get("client_id"))
+            if not authenticated:
+                raise ValueError("Token has no client identity")
         except Exception as e:
             if is_telemetry_only:
                 # Telemetrie-Only: Token-Fehler nur loggen, nicht abbrechen
                 logger.warning(f"Telemetry connection with invalid/expired token: {e}")
-                payload = {"client_id": session_id}
+                payload = {}
             else:
                 # Full-Mode: Token muss gültig sein
                 logger.error(f"WebSocket rejected: Invalid token - {e}")
@@ -347,24 +373,23 @@ async def websocket_connect(
         return
 
     # Client-ID aus Token, Session oder generieren
-    client_id = payload.get("client_id") or session_id or str(uuid.uuid4())[:16]
+    if not authenticated:
+        # Anonymous telemetry must never reserve a user-controlled alias or owner.
+        session_id = None
+    client_id = payload.get("client_id") or session_id or str(uuid.uuid4())
     
-    # User-ID: aus Token, Query-Param oder Client-ID
-    resolved_user_id = payload.get("sub") or user_id or client_id
-    
-    # Tier: aus Query-Param oder Service abfragen
-    # Map client tier names to UserTier enum
-    tier_mapping = {
-        "free": UserTier.GUEST,
-        "guest": UserTier.GUEST,
-        "registered": UserTier.REGISTERED,
-        "pro": UserTier.PRO,
-        "enterprise": UserTier.ENTERPRISE
-    }
-    if tier and tier.lower() in tier_mapping:
-        resolved_tier = tier_mapping[tier.lower()]
-    else:
-        resolved_tier = tier_service.get_user_tier(resolved_user_id)
+    # Ownership and tier come from authenticated server state, never query claims.
+    resolved_user_id = payload.get("sub") or client_id
+    resolved_tier = tier_service.get_user_tier(resolved_user_id) if authenticated else UserTier.GUEST
+
+    aliases = {client_id}
+    if session_id:
+        aliases.add(session_id)
+    for alias in aliases:
+        existing = CONNECTED_CLIENTS.get(alias)
+        if existing is not None and existing.user_id != resolved_user_id:
+            await websocket.close(code=4003, reason="Client identifier belongs to another account")
+            return
     
     logger.info(f"MCP Node connecting: session={session_id}, machine={machine_id}, user={resolved_user_id}, tier={resolved_tier.value}, version={client_version}")
 
@@ -379,30 +404,32 @@ async def websocket_connect(
 
     logger.info(f"Client connected: {client_id} ({resolved_tier.value})")
 
-    # Willkommensnachricht mit verfügbaren Tools
-    await websocket.send_json({
-        "jsonrpc": "2.0",
-        "method": "connected",
-        "params": {
-            "client_id": client_id,
-            "session_id": session_id,
-            "user_id": resolved_user_id,
-            "tier": resolved_tier.value,
-            "available_tools": list(CLIENT_SIDE_TOOLS.keys()),
-            "server_version": "2.80.0"
-        }
-    })
-
     try:
+        # Include the initial send in cleanup coverage.
+        await websocket.send_json({
+            "jsonrpc": "2.0",
+            "method": "connected",
+            "params": {
+                "client_id": client_id,
+                "session_id": session_id,
+                "user_id": resolved_user_id,
+                "tier": resolved_tier.value,
+                "available_tools": list(CLIENT_SIDE_TOOLS.keys()),
+                "server_version": "2.80.0"
+            }
+        })
         while True:
             # Nachrichten vom Client empfangen
             data = await websocket.receive_json()
+            if not isinstance(data, dict):
+                logger.warning("Ignoring non-object MCP message from %s", client_id)
+                continue
 
             # Response auf Tool-Call?
-            if "result" in data or "error" in data:
+            if "result" in data or "error" in data or ("id" in data and "method" not in data):
                 connection.handle_response(data)
 
-    # Client-Info empfangen
+            # Client-Info empfangen
             elif data.get("method") == "client/info":
                 info_params = data.get("params", {})
                 logger.info(f"Client info received: platform={info_params.get('platform')}, hostname={info_params.get('hostname')}, version={info_params.get('server_version')}, mode={info_params.get('mode')}")
@@ -455,9 +482,10 @@ async def websocket_connect(
         logger.error(f"WebSocket error for {client_id}: {e}")
     finally:
         # Alle Referenzen entfernen
-        CONNECTED_CLIENTS.pop(client_id, None)
-        if session_id and session_id != client_id:
-            CONNECTED_CLIENTS.pop(session_id, None)
+        connection.disconnect()
+        for alias in aliases:
+            if CONNECTED_CLIENTS.get(alias) is connection:
+                CONNECTED_CLIENTS.pop(alias, None)
         logger.info(f"Client cleanup completed: {client_id}")
 
 
@@ -465,16 +493,44 @@ async def websocket_connect(
 # HTTP Endpoints für Tool-Calls via Proxy
 # =============================================================================
 
+def _require_node_user(authorization: Optional[str]) -> str:
+    if not authorization:
+        raise HTTPException(401, "Authorization required")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(401, "Bearer token required")
+    try:
+        payload = decode_jwt_token(token.strip())
+        user_id = payload.get("sub") or payload.get("client_id")
+        if not isinstance(user_id, str) or not user_id:
+            raise ValueError("Token has no client identity")
+        return user_id
+    except Exception as exc:
+        raise HTTPException(401, "Invalid token") from exc
+
+
+def _owned_connection(client_id: str, user_id: str) -> ClientConnection:
+    connection = CONNECTED_CLIENTS.get(client_id)
+    if connection is None or connection.user_id != user_id:
+        raise HTTPException(404, "Client not connected for this account")
+    if connection.mode == "telemetry_only":
+        raise HTTPException(403, "Client is telemetry-only")
+    return connection
+
+
 @router.get("/clients")
 async def list_connected_clients(authorization: str = Header(None)):
     """Liste aller verbundenen Clients"""
-    if not authorization:
-        raise HTTPException(401, "Authorization required")
+    user_id = _require_node_user(authorization)
 
     clients = []
+    seen = set()
     for client_id, conn in CONNECTED_CLIENTS.items():
+        if conn.user_id != user_id or id(conn) in seen:
+            continue
+        seen.add(id(conn))
         clients.append({
-            "client_id": client_id,
+            "client_id": conn.client_id,
             "user_id": conn.user_id,
             "tier": conn.tier.value,
             "connected_at": conn.connected_at.isoformat(),
@@ -497,22 +553,11 @@ async def call_client_tool(
     Der Server sendet den Tool-Call an den verbundenen Client,
     der Client führt das Tool lokal aus und sendet das Ergebnis zurück.
     """
-    if not authorization:
-        raise HTTPException(401, "Authorization required")
-
-    # Validiere Caller
-    try:
-        token = authorization.replace("Bearer ", "")
-        payload = decode_jwt_token(token)
-    except Exception:
-        raise HTTPException(401, "Invalid token")
+    user_id = _require_node_user(authorization)
 
     # Client finden
     client_id = request.client_id
-    connection = CONNECTED_CLIENTS.get(client_id)
-
-    if not connection:
-        raise HTTPException(404, f"Client nicht verbunden: {client_id}")
+    connection = _owned_connection(client_id, user_id)
 
     # Tool-Berechtigung prüfen
     if request.tool not in CLIENT_SIDE_TOOLS:
@@ -528,6 +573,11 @@ async def call_client_tool(
         result = await connection.send_tool_call(request.tool, request.tool_args())
         latency = int((datetime.now() - start_time).total_seconds() * 1000)
 
+        if not isinstance(result, dict) or result.get("isError") or "error" in result:
+            return ProxyToolResponse(
+                success=False, tool=request.tool, client_id=client_id,
+                result=result, error="Client tool returned an error or invalid result", latency_ms=latency,
+            )
         logger.info(f"Proxy call success: {request.tool} on {client_id} ({latency}ms)")
 
         return ProxyToolResponse(
@@ -578,74 +628,14 @@ async def chat_with_client_files(
     model: Optional[str] = None,
     authorization: str = Header(None)
 ):
-    """
-    Chat mit KI, die auf Client-Dateisystem zugreifen kann
-
-    Die KI kann während des Chats:
-    - Dateien vom Client lesen
-    - Codebase durchsuchen
-    - Shell-Befehle ausführen (Enterprise)
-
-    Dies ermöglicht "Claude Code"-ähnliche Funktionalität,
-    wobei der Client die Dateien bereitstellt.
-    """
-    if not authorization:
-        raise HTTPException(401, "Authorization required")
-
-    # Client prüfen
-    connection = CONNECTED_CLIENTS.get(client_id)
-    if not connection:
-        raise HTTPException(404, f"Client nicht verbunden: {client_id}")
-
-    # Tier und Model bestimmen
-    tier = connection.tier
-    if not model:
-        from .client_chat import get_default_model
-        model = get_default_model(tier)
-
-    # System-Prompt mit Client-Tools
-    system_prompt = f"""Du bist ein KI-Assistent mit Zugriff auf das Dateisystem des Benutzers.
-
-Verfügbare Tools:
-- client_file_read: Datei lesen
-- client_file_list: Verzeichnis auflisten
-- client_codebase_search: Code durchsuchen
-{"- client_file_write: Datei schreiben (Enterprise)" if tier == UserTier.ENTERPRISE else ""}
-{"- client_shell_exec: Shell-Befehl ausführen (Enterprise)" if tier == UserTier.ENTERPRISE else ""}
-
-Wenn der Benutzer nach Dateien fragt oder Code-Hilfe benötigt,
-nutze die Tools um die relevanten Dateien zu lesen.
-
-Benutzer-Tier: {tier.value}
-"""
-
-    # Chat ausführen (mit Tool-Calling Loop)
-    from .client_chat import call_ollama, call_openrouter, normalize_ollama_model
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": message}
-    ]
-
-    # Erste Antwort
-    if tier == UserTier.FREE:
-        result = await call_ollama(model, messages)
-    else:
-        result = await call_openrouter(model, messages)
-
-    response = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-    # TODO: Implementiere Tool-Calling Loop
-    # Wenn die KI ein Tool aufrufen möchte, sende es an den Client
-    # und füge das Ergebnis zur Konversation hinzu
-
-    return {
-        "response": response,
-        "model": model,
-        "tier": tier.value,
-        "client_id": client_id,
-        "tools_available": list(CLIENT_SIDE_TOOLS.keys())
-    }
+    """Reserved file-chat endpoint; the legacy route has no tool execution loop."""
+    user_id = _require_node_user(authorization)
+    _owned_connection(client_id, user_id)
+    raise HTTPException(
+        501,
+        "Client file chat tool execution is not implemented; "
+        "use /v1/remote-coding/run for compatible AICoder nodes",
+    )
 
 
 # =============================================================================

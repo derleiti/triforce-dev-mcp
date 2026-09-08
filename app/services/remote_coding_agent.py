@@ -92,7 +92,7 @@ def list_remote_coding_nodes() -> List[RemoteCodingNode]:
         if connection.mode == "telemetry_only":
             continue
         node = _node_view(registry_id, connection)
-        if node.supported_tools:
+        if set(node.supported_tools) & REMOTE_MODEL_TOOLS:
             rows.append(node)
     return rows
 
@@ -121,20 +121,20 @@ async def _call_client_tool(
     if name not in set(connection.supported_tools or []):
         raise LookupError(f"AICoder node does not advertise tool: {name}")
     result = await connection.send_tool_call(name, arguments, timeout=timeout)
-    if isinstance(result, dict):
-        blocks = result.get("content")
-        if isinstance(blocks, list):
-            texts = [
-                str(block.get("text"))
-                for block in blocks
-                if isinstance(block, dict) and block.get("type") == "text"
-            ]
-            if texts:
-                if result.get("isError"):
-                    return "REMOTE TOOL ERROR: " + "\n".join(texts)
-                return "\n".join(texts)
-        return str(result)
-    return str(result)
+    if not isinstance(result, dict):
+        return "REMOTE TOOL ERROR: invalid MCP result (expected an object)"
+    blocks = result.get("content")
+    texts = [
+        block["text"] for block in blocks
+        if isinstance(block, dict) and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    ] if isinstance(blocks, list) else []
+    if result.get("isError") or "error" in result:
+        detail = "\n".join(texts) or str(result.get("error") or "remote tool failed without details")
+        return "REMOTE TOOL ERROR: " + detail
+    if not texts:
+        return "REMOTE TOOL ERROR: invalid MCP result (missing text content)"
+    return "\n".join(texts)
 
 
 def _build_remote_tools(connection: ClientConnection) -> List[Callable[..., Awaitable[str]]]:
@@ -203,10 +203,11 @@ async def _read_worker_stderr(stream, sink: list[str]) -> None:
     if stream is None:
         return
     while True:
-        line = await stream.readline()
-        if not line:
+        chunk = await stream.read(4096)
+        if not chunk:
             return
-        sink.append(line.decode("utf-8", errors="replace").rstrip())
+        # Bound memory and drain even diagnostics without newlines.
+        sink.append(chunk.decode("utf-8", errors="replace"))
         del sink[:-40]
 
 
@@ -274,14 +275,14 @@ async def _run_antigravity_worker(
     model_base_url = normalize_antigravity_model_base_url(
         os.getenv("TRIFORCE_ANTIGRAVITY_MODEL_BASE_URL", "http://127.0.0.1:9000")
     )
-    await send({
+    start_message = {
         "type": "start",
         "task": task,
         "model": model,
         "base_url": model_base_url,
         "system": system,
         "tools": sorted(set(connection.supported_tools or []) & REMOTE_MODEL_TOOLS),
-    })
+    }
 
     async def exchange() -> Dict[str, Any]:
         while True:
@@ -294,14 +295,20 @@ async def _run_antigravity_worker(
                 continue
             try:
                 message = json.loads(raw[len(prefix):])
-            except json.JSONDecodeError:
-                continue
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise RuntimeError("Invalid Antigravity RPC JSON") from exc
+            if not isinstance(message, dict):
+                raise RuntimeError("Invalid Antigravity RPC message: expected an object")
             kind = message.get("type")
             if kind == "tool_call":
                 call_id = str(message.get("id") or "")
                 name = str(message.get("name") or "")
-                args = message.get("arguments") if isinstance(message.get("arguments"), dict) else {}
+                args = message.get("arguments")
+                if not call_id or not isinstance(args, dict):
+                    raise RuntimeError("Invalid Antigravity RPC tool call")
                 try:
+                    if name not in REMOTE_MODEL_TOOLS:
+                        raise PermissionError(f"worker cannot invoke tool: {name}")
                     remote_args = dict(args)
                     remote_args["_run_id"] = run_id
                     remote_args["_task"] = task
@@ -311,50 +318,74 @@ async def _run_antigravity_worker(
                 except Exception as exc:
                     await send({"type": "tool_result", "id": call_id, "error": str(exc)})
             elif kind == "final":
+                if not isinstance(message.get("response"), str) or not message["response"].strip():
+                    raise RuntimeError("Invalid Antigravity final response")
                 return message
             elif kind == "error":
                 raise RuntimeError(str(message.get("message") or "Antigravity worker failed"))
+            else:
+                raise RuntimeError(f"Invalid Antigravity RPC message type: {kind}")
 
     try:
-        result = await asyncio.wait_for(exchange(), timeout=max(10.0, min(300.0, timeout)))
-        if "client_run_state" in set(connection.supported_tools or []):
-            await _call_client_tool(connection, "client_run_state", {
-                "_run_id": run_id,
-                "_task": task,
-                "_model": model,
-                "status": "completed",
-                "response": str(result.get("response") or ""),
-            })
-    except Exception as exc:
+        async with asyncio.timeout(max(0.01, min(300.0, timeout))):
+            await send(start_message)
+            result = await exchange()
+            proc.stdin.close()
+            code = await asyncio.wait_for(proc.wait(), timeout=3)
+            if code != 0:
+                raise RuntimeError(f"Antigravity worker exited {code}")
+            if "client_run_state" in set(connection.supported_tools or []):
+                acknowledgement = await _call_client_tool(connection, "client_run_state", {
+                    "_run_id": run_id,
+                    "_task": task,
+                    "_model": model,
+                    "status": "completed",
+                    "response": result["response"],
+                })
+                if acknowledgement.startswith("REMOTE TOOL ERROR:"):
+                    raise RuntimeError(f"Remote run state was not persisted: {acknowledgement}")
+    except (Exception, asyncio.CancelledError) as exc:
         if "client_run_state" in set(connection.supported_tools or []):
             try:
-                await _call_client_tool(connection, "client_run_state", {
+                acknowledgement = await _call_client_tool(connection, "client_run_state", {
                     "_run_id": run_id,
                     "_task": task,
                     "_model": model,
                     "status": "paused",
-                    "reason": str(exc),
-                })
+                    "reason": str(exc) or type(exc).__name__,
+                }, timeout=3.0)
+                if acknowledgement.startswith("REMOTE TOOL ERROR:"):
+                    logger.error("failed to persist remote coding pause state for %s: %s", run_id, acknowledgement)
             except Exception:
                 logger.exception("failed to persist remote coding pause state for %s", run_id)
-        if proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=3)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
         raise
     finally:
         if proc.stdin and not proc.stdin.is_closing():
             proc.stdin.close()
         if proc.returncode is None:
             try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass  # The child exited between the returncode check and signal.
+            try:
                 await asyncio.wait_for(proc.wait(), timeout=3)
             except asyncio.TimeoutError:
-                proc.kill()
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
                 await proc.wait()
-        await stderr_task
+        # A descendant may still hold stderr open after the worker exits.
+        try:
+            await asyncio.wait_for(stderr_task, timeout=3)
+        except asyncio.CancelledError:
+            stderr_task.cancel()
+            await asyncio.gather(stderr_task, return_exceptions=True)
+            raise
+        except Exception:
+            stderr_task.cancel()
+            await asyncio.gather(stderr_task, return_exceptions=True)
+            logger.warning("Antigravity stderr reader did not finish cleanly for %s", run_id)
     return result
 
 
@@ -374,7 +405,7 @@ async def run_remote_coding_agent(
     if not task.strip():
         raise ValueError("task is required")
     connection = resolve_remote_coding_node(client_id)
-    advertised = set(connection.supported_tools or []) & REMOTE_TOOLS
+    advertised = set(connection.supported_tools or []) & REMOTE_MODEL_TOOLS
     if not advertised:
         raise RuntimeError("AICoder node exposes no compatible remote coding tools")
 
@@ -384,15 +415,23 @@ async def run_remote_coding_agent(
 
     selected_model = model or os.getenv(
         "TRIFORCE_ANTIGRAVITY_MODEL",
-        "mistral/mistral-code-latest",
+        "ollama/gemma4:12b",
     )
-    worker_result = await _run_antigravity_worker(
-        connection,
-        task=task,
-        model=selected_model,
-        system=system,
-        run_id=selected_run_id,
-    )
+    # Registry aliases share this physical connection and its execution guard.
+    # Claim before the first await; release on failure and cancellation as well.
+    if connection.remote_coding_run_id is not None:
+        raise RuntimeError("A remote coding run is already running on this node")
+    connection.remote_coding_run_id = selected_run_id
+    try:
+        worker_result = await _run_antigravity_worker(
+            connection,
+            task=task,
+            model=selected_model,
+            system=system,
+            run_id=selected_run_id,
+        )
+    finally:
+        connection.remote_coding_run_id = None
     node = _node_view(client_id, connection)
     return {
         "status": "completed",

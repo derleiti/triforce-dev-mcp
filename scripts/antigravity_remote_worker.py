@@ -10,11 +10,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import posixpath
 import sys
 import uuid
 from typing import Any
 
 PREFIX = "TRIFORCE_ANTIGRAVITY_RPC "
+# The wire protocol has one stdin reader. Parallel SDK tool calls must not
+# consume and discard another call's response.
+_rpc_lock = asyncio.Lock()
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -36,15 +40,17 @@ async def read_message() -> dict[str, Any]:
 
 
 async def remote_tool(name: str, arguments: dict[str, Any]) -> str:
-    call_id = uuid.uuid4().hex
-    emit({"type": "tool_call", "id": call_id, "name": name, "arguments": arguments})
-    while True:
+    async with _rpc_lock:
+        call_id = uuid.uuid4().hex
+        emit({"type": "tool_call", "id": call_id, "name": name, "arguments": arguments})
         message = await read_message()
         if message.get("type") != "tool_result" or message.get("id") != call_id:
-            continue
+            raise RuntimeError("Unexpected parent RPC response")
         if message.get("error"):
             return f"REMOTE TOOL ERROR: {message.get('error')}"
-        return str(message.get("result") or "")
+        if not isinstance(message.get("result"), str):
+            return "REMOTE TOOL ERROR: invalid parent RPC result"
+        return message["result"]
 
 
 async def main() -> int:
@@ -60,7 +66,7 @@ async def main() -> int:
     advertised = {
         str(name) for name in start.get("tools", []) if isinstance(name, str)
     }
-    progress = {"mutation_seen": False, "verified_after_mutation": False}
+    unverified_paths: set[str] = set()
     if not task or not model or not base_url:
         emit({"type": "error", "message": "task, model and base_url are required"})
         return 2
@@ -74,8 +80,8 @@ async def main() -> int:
     async def client_file_read(path: str, start_line: int = 1, end_line: int = 400) -> str:
         """Read a UTF-8 text file from the connected AICoder workspace."""
         result = await remote_tool("client_file_read", {"path": path, "start_line": start_line, "end_line": end_line})
-        if progress["mutation_seen"] and not result.startswith("REMOTE TOOL ERROR:"):
-            progress["verified_after_mutation"] = True
+        if not result.startswith("REMOTE TOOL ERROR:"):
+            unverified_paths.discard(posixpath.normpath(path))
         return result
 
     async def client_file_list(path: str = ".", recursive: bool = False) -> str:
@@ -91,10 +97,7 @@ async def main() -> int:
 
     async def client_git_status(path: str = ".") -> str:
         """Read git status from the connected AICoder workspace."""
-        result = await remote_tool("client_git_status", {"path": path})
-        if progress["mutation_seen"] and not result.startswith("REMOTE TOOL ERROR:"):
-            progress["verified_after_mutation"] = True
-        return result
+        return await remote_tool("client_git_status", {"path": path})
 
     async def client_file_edit(
         path: str,
@@ -111,9 +114,9 @@ async def main() -> int:
             arguments["old_text"] = old_text
             arguments["new_text"] = new_text
         result = await remote_tool("client_file_edit", arguments)
-        if not result.startswith("REMOTE TOOL ERROR:"):
-            progress["mutation_seen"] = True
-            progress["verified_after_mutation"] = False
+        # Even an error may follow a partial write. Require evidence of the
+        # affected file, not an unrelated read or a repository status listing.
+        unverified_paths.add(posixpath.normpath(path))
         return result
 
     candidates = {
@@ -136,7 +139,8 @@ async def main() -> int:
             "limited to client_file_edit operation=create or exact operation=replace; the local "
             "AICoder creates rollback backups. Never request shell, delete, append, blind overwrite, "
             "git mutation, or writes outside the workspace. After every successful edit, verify the "
-            "result with client_file_read and/or client_git_status before claiming completion."
+            "contents of each edited path with client_file_read before claiming completion. "
+            "client_git_status alone does not verify file contents."
         )
     else:
         instructions = (
@@ -164,16 +168,16 @@ async def main() -> int:
             response = await agent.chat(task)
             text = await response.text()
             usage = response.usage_metadata
-            if progress["mutation_seen"] and not progress["verified_after_mutation"]:
+            if unverified_paths:
                 response = await agent.chat(
-                    "A remote file mutation succeeded but has not been verified yet. "
-                    "Use client_file_read and/or client_git_status now to verify the actual "
-                    "post-change state. Do not make another edit unless verification reveals "
+                    "Remote file edits have not been verified yet. Use client_file_read "
+                    f"to inspect each of these paths: {sorted(unverified_paths)}. "
+                    "Do not make another edit unless verification reveals "
                     "a concrete defect."
                 )
                 text = await response.text()
                 usage = response.usage_metadata
-            if progress["mutation_seen"] and not progress["verified_after_mutation"]:
+            if unverified_paths:
                 emit({
                     "type": "error",
                     "message": "Antigravity remote write was not verified after mutation",

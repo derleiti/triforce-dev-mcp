@@ -198,6 +198,7 @@ class TestMcpStructuredOutput(unittest.TestCase):
         self.assertNotIn("FEDERATION_PSK loaded:", source)
         self.assertNotIn("secret[:", source)
 
+    @patch.dict("os.environ", {"FEDERATION_SECRET": "offline-test-only-federation-secret"})
     def test_federation_signature_mismatch_does_not_log_auth_material(self):
         from app.services.server_federation import (
             create_signed_request,
@@ -217,6 +218,7 @@ class TestMcpStructuredOutput(unittest.TestCase):
         self.assertNotIn("release-test-payload", output)
         self.assertNotIn(request["signature"], output)
 
+    @patch.dict("os.environ", {"FEDERATION_SECRET": "offline-test-only-federation-secret"})
     def test_bootstrap_log_describes_on_demand_readiness(self):
         from app import main
         from app.services.agent_bootstrap import bootstrap_service
