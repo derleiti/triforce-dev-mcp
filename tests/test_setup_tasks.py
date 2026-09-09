@@ -9,7 +9,7 @@ def test_mutating_tasks_are_narrow_admin_helper_actions():
     for task in TASKS.values():
         if task.mutating:
             assert task.requires_admin
-            assert task.helper_action in {"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node"}
+            assert task.helper_action in {"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node", "legacy-import"}
 
 
 def test_no_task_exposes_arbitrary_script_or_shell_parameter():
@@ -64,3 +64,12 @@ def test_profiles_have_distinct_docker_policy():
     assert any("Docker-Installation unverändert" in change for change in node.changes)
     assert any("triforce.service aktivieren und starten" in change for change in server.changes)
     assert any("triforce.service aktivieren und starten" in change for change in node.changes)
+
+
+def test_legacy_import_task_is_fixed_and_safe():
+    task = TASKS["legacy-import"]
+    assert task.helper_action == "legacy-import"
+    assert task.requires_admin and task.mutating
+    assert "runtime-init" in task.dependencies and "config-init" in task.dependencies
+    assert any("9000" in change for change in task.changes)
+    assert any("INSTALL_DIR" in change for change in task.changes)

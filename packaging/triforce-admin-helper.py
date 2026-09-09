@@ -27,7 +27,7 @@ UNIT_SOURCE = INSTALL_ROOT / "packaging/systemd/triforce.service"
 UNIT_DEST = Path("/usr/lib/systemd/system/triforce.service")
 SERVICE = "triforce.service"
 SETUP_RUNNER = Path("/usr/lib/triforce/triforce-setup-runner")
-SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node"})
+SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node", "legacy-import"})
 
 
 def require_root() -> None:
@@ -167,6 +167,15 @@ def service_action(action: str) -> None:
 
 
 
+
+def legacy_import() -> None:
+    config_init()
+    sys.path.insert(0, str(INSTALL_ROOT))
+    from app.legacy_settings import apply_import
+    apply_import(CONFIG)
+    os.chmod(CONFIG, 0o640)
+    shutil.chown(CONFIG, user="root", group="triforce")
+
 def _set_deployment_mode(mode: str) -> None:
     if mode not in {"server", "node"}:
         raise SystemExit("invalid deployment mode")
@@ -273,7 +282,7 @@ def main() -> int:
     require_root()
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=[
-        "runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node",
+        "runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node", "legacy-import",
         "service-start", "service-stop", "service-restart",
         "service-enable", "service-disable", "config-read", "config-update", "config-raw-update", "config-restore",
         "setup-start", "setup-cancel",
@@ -289,6 +298,7 @@ def main() -> int:
     elif action == "config-init": config_init()
     elif action == "service-install": service_install()
     elif action == "docker-install": docker_install()
+    elif action == "legacy-import": legacy_import()
     elif action == "profile-server": deployment_profile("server")
     elif action == "profile-node": deployment_profile("node")
     elif action in {"service-start", "service-stop", "service-restart", "service-enable", "service-disable"}: service_action(action)

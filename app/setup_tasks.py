@@ -134,6 +134,17 @@ def check_docker() -> TaskResult:
         {"binary": docker, "docker_version": docker_version, "compose_version": compose_version, "service": service_state},
     )
 
+
+def check_legacy_import() -> TaskResult:
+    from .legacy_settings import build_plan
+    plan = build_plan()
+    found = plan.source is not None
+    return TaskResult(
+        "legacy-import", found, "ready" if found else "missing",
+        "Legacy-Konfiguration gefunden und kann sicher übernommen werden" if found else "Keine bekannte Legacy-Konfiguration gefunden",
+        plan.to_dict(),
+    )
+
 def check_redis() -> TaskResult:
     try:
         with socket.create_connection(("127.0.0.1", 6379), timeout=0.5):
@@ -214,6 +225,7 @@ TASKS: dict[str, SetupTask] = {
     "config-init": SetupTask("config-init", "Konfiguration initialisieren", "Erstellt /etc/triforce/triforce.env nur wenn sie fehlt.", True, True, ("runtime-init",), ("/etc/triforce/triforce.env"), "Vorhandene Konfiguration und Secrets werden nicht überschrieben.", check_config, "config-init"),
     "service-install": SetupTask("service-install", "TriForce-Dienst installieren/reparieren", "Installiert ausschließlich die paketierte triforce.service-Unit; startet oder aktiviert sie nicht automatisch.", True, True, ("runtime-init", "config-init"), ("/usr/lib/systemd/system/triforce.service", "systemctl daemon-reload"), "Unit kann sicher erneut installiert werden; Enable/Start bleiben separat.", check_service, "service-install"),
     "docker-install": SetupTask("docker-install", "Docker installieren", "Installiert Docker Engine und Docker Compose v2 aus den freigegebenen Debian/Ubuntu-Paketen und startet Docker.", True, True, ("system-check",), ("Paketquellen aktualisieren", "docker.io installieren, falls Docker fehlt", "docker-compose-v2 installieren, falls Compose v2 fehlt", "docker.service aktivieren und starten"), "Idempotent: eine bereits funktionierende Docker-/Compose-Installation wird nicht ersetzt; TriForce wird nicht zur docker-Gruppe hinzugefügt und Container werden nicht automatisch gestartet.", check_docker, "docker-install"),
+    "legacy-import": SetupTask("legacy-import", "Alte TriForce-Settings übernehmen", "Übernimmt kompatible Backend-Einstellungen aus einer bekannten alten triforce.env/.env in die paketierte /etc/triforce/triforce.env. Legacy-Docker-/Website-Pfade bleiben unangetastet.", True, True, ("runtime-init", "config-init"), ("Legacy-Konfiguration nur als dotenv-Daten lesen", "kompatible Backend- und Runtime-Keys atomar übernehmen", "bestehende neue Paket-Secrets erhalten, wenn kein Legacy-Wert existiert", "TRIFORCE_BIND_HOST=0.0.0.0 für den bestehenden Docker-Reverse-Proxy setzen", "TRIFORCE_API_PORT=9000 für api.ailinux.me beibehalten", "keine alten INSTALL_DIR/DATA_DIR/WordPress-/Repo-Pfade übernehmen"), "Idempotent: erneuter Import aktualisiert nur die erlaubten Legacy-Keys; neue Paket-spezifische Werte bleiben erhalten.", check_legacy_import, "legacy-import"),
     "redis-check": SetupTask("redis-check", "Redis prüfen", "Prüft lokalen Redis ohne ihn automatisch zu installieren.", False, False, (), (), "Nur lesend.", check_redis),
     "memory-worker": SetupTask("memory-worker", "Memory-Worker prüfen", "Prüft optionalen Claude-Mem Worker; keine automatische Aktivierung von Recall/Recording/Promotion.", False, False, (), (), "Nur lesend; Memory-Flags bleiben unverändert.", check_memory_worker),
     "agents-check": SetupTask("agents-check", "CLI-Agenten prüfen", "Prüft Claude, Codex, Gemini und OpenCode ohne Installationen zu verändern.", False, False, (), (), "Nur lesend; keine Deinstallation oder globale Bereinigung.", check_agents),

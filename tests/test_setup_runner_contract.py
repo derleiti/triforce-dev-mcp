@@ -12,6 +12,7 @@ def test_runner_has_fixed_tasks_and_no_shell_execution():
     assert '"docker-install": "docker-install"' in text
     assert '"profile-server": "profile-server"' in text
     assert '"profile-node": "profile-node"' in text
+    assert '"legacy-import": "legacy-import"' in text
     assert "shell=True" not in text
     assert "subprocess.run([str(HELPER), TASK_ACTIONS[task]]" in text
 

@@ -73,3 +73,9 @@ def test_services_page_exposes_install_start_stop_restart_and_autostart():
     assert '("Stopp", "service-stop")' in text
     assert '("Neustart", "service-restart")' in text
     assert 'service-enable" if checked else "service-disable' in text
+
+
+def test_setup_page_has_legacy_import_button():
+    text = GUI.read_text()
+    assert 'task.task_id == "legacy-import"' in text
+    assert 'QPushButton("Alte TriForce-Settings übernehmen")' in text

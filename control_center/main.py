@@ -470,6 +470,8 @@ class SetupPage(QWidget):
                 button = QPushButton("Server einrichten")
             elif task.task_id == "profile-node":
                 button = QPushButton("Node einrichten")
+            elif task.task_id == "legacy-import":
+                button = QPushButton("Alte TriForce-Settings übernehmen")
             elif task.task_id == "docker-install":
                 button = QPushButton("Docker installieren")
             elif task.task_id == "service-install":

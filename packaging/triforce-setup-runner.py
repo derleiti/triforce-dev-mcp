@@ -30,6 +30,7 @@ TASK_ACTIONS = {
     "docker-install": "docker-install",
     "profile-server": "profile-server",
     "profile-node": "profile-node",
+    "legacy-import": "legacy-import",
 }
 
 

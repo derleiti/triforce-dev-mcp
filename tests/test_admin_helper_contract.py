@@ -56,7 +56,7 @@ def test_fresh_config_sanitizes_template_secrets_and_generates_local_auth():
 
 def test_setup_start_is_fixed_systemd_job_not_arbitrary_command():
     text = HELPER.read_text()
-    assert 'SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node"})' in text
+    assert 'SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node", "legacy-import"})' in text
     assert '"/usr/bin/systemd-run", "--unit=triforce-setup-job"' in text
     assert 'str(SETUP_RUNNER), task' in text
     assert 'parser.add_argument("task", nargs="?", choices=sorted(SETUP_TASKS))' in text
@@ -106,3 +106,11 @@ def test_deployment_profiles_are_fixed_and_keep_docker_node_optional():
     assert 'if mode == "server":\n        docker_install()' in text
     assert 'elif action == "profile-node": deployment_profile("node")' in text
     assert 'elif action == "profile-server": deployment_profile("server")' in text
+
+
+def test_legacy_import_uses_fixed_migrator():
+    text = HELPER.read_text()
+    assert 'def legacy_import()' in text
+    assert 'from app.legacy_settings import apply_import' in text
+    assert 'apply_import(CONFIG)' in text
+    assert 'elif action == "legacy-import": legacy_import()' in text
