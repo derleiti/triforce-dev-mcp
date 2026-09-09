@@ -292,19 +292,48 @@ class TriStarMCPService:
         return {"error": f"Setting '{key}' not found"}
 
     async def set_setting(self, key: str, value: Any, section: str = "config") -> Dict[str, Any]:
-        """Set a configuration value."""
-        config_file = TRISTAR_BASE / "config.json"
+        """Persist one supported backend setting in the canonical dotenv store.
 
+        Source and Debian runtimes select their own config file through
+        ``TRIFORCE_CONFIG_FILE``.  Do not revive the historical
+        ``/var/tristar/config.json`` side store: it caused settings written via
+        MCP to diverge from the values consumed by the server and is read-only
+        in the hardened package service.
+        """
         try:
-            if config_file.exists():
-                config = json.loads(config_file.read_text())
-            else:
-                config = {}
+            from app.settings_store import (
+                SECRET_ENV_KEYS,
+                load_snapshot,
+                save_updates,
+                settings_inventory,
+            )
 
-            config[key] = value
-            config_file.write_text(json.dumps(config, indent=2))
+            aliases = {
+                alias
+                for setting in settings_inventory()
+                for alias in setting.env_names
+            }
+            if key not in aliases:
+                return {
+                    "error": f"Unsupported canonical setting '{key}'",
+                    "status": "rejected",
+                }
 
-            return {"key": key, "value": value, "status": "saved"}
+            snapshot = load_snapshot()
+            save_updates(
+                {key: value},
+                path=snapshot.path,
+                expected_digest=snapshot.digest,
+                environ={},
+            )
+            rendered = "********" if key in SECRET_ENV_KEYS and value not in (None, "") else value
+            return {
+                "key": key,
+                "value": rendered,
+                "status": "saved",
+                "storage": "canonical-env",
+                "path": str(snapshot.path),
+            }
         except Exception as e:
             return {"error": str(e), "status": "failed"}
 

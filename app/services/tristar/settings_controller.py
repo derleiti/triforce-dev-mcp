@@ -132,7 +132,7 @@ class APIKeyConfig:
     # OpenRouter (300+ models, one API key, $5 free + free models)
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_default_model: str = "meta-llama/llama-3.3-70b-instruct:free"
+    openrouter_default_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     openrouter_timeout_ms: int = 120000
 
     # Together AI ($25 free credits, 3 months unlimited FLUX.1)

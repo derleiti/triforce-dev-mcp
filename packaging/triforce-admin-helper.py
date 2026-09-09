@@ -39,6 +39,47 @@ def run_fixed(*args: str) -> None:
     subprocess.run(list(args), check=True, timeout=60)
 
 
+def migrate_legacy_tristar(legacy: Path, target: Path) -> None:
+    """Move legacy TriStar state behind the package-owned writable state path.
+
+    The package keeps compatibility with older code that still references
+    ``/var/tristar`` by replacing that path with a symlink to
+    ``/var/lib/triforce/tristar``. Existing data is never overwritten: a
+    conflicting destination entry aborts the migration for operator review.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+
+    if legacy.is_symlink():
+        try:
+            if legacy.resolve(strict=False) == target.resolve(strict=False):
+                return
+        except OSError:
+            pass
+        raise SystemExit(f"refusing unexpected TriStar symlink: {legacy}")
+
+    if legacy.exists():
+        if not legacy.is_dir():
+            raise SystemExit(f"refusing non-directory legacy TriStar path: {legacy}")
+        for entry in list(legacy.iterdir()):
+            destination = target / entry.name
+            if destination.exists() or destination.is_symlink():
+                raise SystemExit(f"TriStar migration conflict: {destination}")
+            shutil.move(str(entry), str(destination))
+        legacy.rmdir()
+
+    if not legacy.exists() and not legacy.is_symlink():
+        legacy.symlink_to(target, target_is_directory=True)
+
+
+def _chown_tree(path: Path, user: str, group: str) -> None:
+    shutil.chown(path, user=user, group=group)
+    for root, dirs, files in os.walk(path):
+        for name in dirs:
+            shutil.chown(Path(root) / name, user=user, group=group)
+        for name in files:
+            shutil.chown(Path(root) / name, user=user, group=group)
+
+
 def runtime_init() -> None:
     try:
         pwd.getpwnam("triforce")
@@ -52,8 +93,9 @@ def runtime_init() -> None:
     os.chmod(ETC_DIR, 0o750)
     shutil.chown(ETC_DIR, user="root", group="triforce")
     legacy_tristar = Path("/var/tristar")
-    if not legacy_tristar.exists() and not legacy_tristar.is_symlink():
-        legacy_tristar.symlink_to(STATE_DIR / "tristar", target_is_directory=True)
+    tristar_state = STATE_DIR / "tristar"
+    migrate_legacy_tristar(legacy_tristar, tristar_state)
+    _chown_tree(tristar_state, "triforce", "triforce")
 
 
 def config_init() -> None:

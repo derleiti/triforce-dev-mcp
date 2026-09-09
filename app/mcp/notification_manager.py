@@ -623,7 +623,7 @@ async def _cloud_mail_fallback(event: Dict) -> bool:
         _CF_PROVIDERS = [
             ("https://api.groq.com/openai/v1/chat/completions", _os_cf.environ.get("GROQ_API_KEY", ""), "llama-3.3-70b-versatile"),
             ("https://api.cerebras.ai/v1/chat/completions", _os_cf.environ.get("CEREBRAS_API_KEY", ""), "llama-3.3-70b"),
-            ("https://openrouter.ai/api/v1/chat/completions", _os_cf.environ.get("OPENROUTER_API_KEY", ""), "meta-llama/llama-3.3-70b-instruct:free"),
+            ("https://openrouter.ai/api/v1/chat/completions", _os_cf.environ.get("OPENROUTER_API_KEY", ""), "nvidia/nemotron-3-ultra-550b-a55b:free"),
         ]
         _cf_messages = [
             {"role": "system", "content": (
@@ -715,7 +715,7 @@ async def _direct_mail_reply(event: Dict) -> bool:
         _PROVIDERS = [
             ("https://api.groq.com/openai/v1/chat/completions", _os_dm.environ.get("GROQ_API_KEY", ""), "llama-3.3-70b-versatile"),
             ("https://api.cerebras.ai/v1/chat/completions", _os_dm.environ.get("CEREBRAS_API_KEY", ""), "llama-3.3-70b"),
-            ("https://openrouter.ai/api/v1/chat/completions", _os_dm.environ.get("OPENROUTER_API_KEY", ""), "meta-llama/llama-3.3-70b-instruct:free"),
+            ("https://openrouter.ai/api/v1/chat/completions", _os_dm.environ.get("OPENROUTER_API_KEY", ""), "nvidia/nemotron-3-ultra-550b-a55b:free"),
         ]
         messages = [
             {"role": "system", "content": (

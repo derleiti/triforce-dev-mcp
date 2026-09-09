@@ -251,7 +251,7 @@ class Settings(BaseSettings):
     # OpenRouter (300+ models, one API key)
     openrouter_api_key: str | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", validation_alias="OPENROUTER_BASE_URL")
-    openrouter_default_model: str = Field(default="meta-llama/llama-3.3-70b-instruct:free", validation_alias="OPENROUTER_DEFAULT_MODEL")
+    openrouter_default_model: str = Field(default="nvidia/nemotron-3-ultra-550b-a55b:free", validation_alias="OPENROUTER_DEFAULT_MODEL")
     openrouter_timeout_ms: int = Field(default=120000, validation_alias="OPENROUTER_TIMEOUT_MS")
 
     # Together AI ($25 free credits)

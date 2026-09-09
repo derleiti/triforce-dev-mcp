@@ -36,11 +36,12 @@ def test_packaged_writable_crawler_paths_live_under_var_lib():
     assert "CRAWLER_SPOOL_DIR=/var/lib/triforce/crawler_spool" in text
     assert "CRAWLER_TRAIN_DIR=/var/lib/triforce/crawler_spool/train" in text
 
-def test_new_install_maps_legacy_tristar_into_var_lib_without_overwrite():
+def test_package_migrates_legacy_tristar_into_var_lib_without_overwrite():
     text = HELPER.read_text()
+    assert 'def migrate_legacy_tristar(' in text
     assert 'legacy_tristar = Path("/var/tristar")' in text
-    assert 'legacy_tristar.exists()' in text
-    assert 'legacy_tristar.symlink_to(STATE_DIR / "tristar"' in text
+    assert 'migrate_legacy_tristar(legacy_tristar, tristar_state)' in text
+    assert 'TriStar migration conflict' in text
 
 def test_fresh_config_sanitizes_template_secrets_and_generates_local_auth():
     text = HELPER.read_text()

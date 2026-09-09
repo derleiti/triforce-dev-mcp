@@ -78,7 +78,7 @@ KNOWN_WORKING = {
 # OpenRouter FREE Modelle (kostenlos, ohne Credits nutzbar)
 OPENROUTER_FREE_MODELS = [
     "meta-llama/llama-3.1-405b-instruct:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
     "meta-llama/llama-3.2-3b-instruct:free",
     "deepseek/deepseek-r1-0528:free",
     "google/gemini-2.0-flash-exp:free",
@@ -98,7 +98,7 @@ OPENROUTER_FREE_MODELS = [
 ]
 
 # Default Free-Modell für Fallback
-DEFAULT_FREE_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+DEFAULT_FREE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 
 class ModelAvailabilityService:

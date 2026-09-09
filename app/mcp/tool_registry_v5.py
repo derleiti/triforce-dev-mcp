@@ -146,7 +146,7 @@ V5_TOOLS: List[Dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "key": {"type": "string", "description": "Setting key (e.g. 'ollama.timeout')"},
+                "key": {"type": "string", "description": "Canonical environment key (e.g. 'OLLAMA_TIMEOUT_MS')"},
                 "value": {"type": "string", "description": "Setting value (serialized as string)"},
             },
             "required": ["key", "value"],

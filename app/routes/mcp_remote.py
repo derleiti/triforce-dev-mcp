@@ -75,6 +75,8 @@ router = APIRouter(tags=["MCP Remote Server"])
 
 # NOTE: OAuth metadata endpoints are now in oauth_service.py
 
+from app.config import VERSION
+
 
 # ============================================================================
 # MCP Server Info
@@ -82,8 +84,8 @@ router = APIRouter(tags=["MCP Remote Server"])
 
 MCP_SERVER_INFO = {
     "name": "AILinux API",
-    "version": "2.80",
-    "description": "AILinux AI Backend v2.80 - TriStar/TriForce Multi-LLM Orchestration with CLI Agents, Codebase Access, and Self-Development capabilities",
+    "version": VERSION,
+    "description": f"AILinux AI Backend {VERSION} - TriStar/TriForce Multi-LLM Orchestration with CLI Agents, Codebase Access, and Self-Development capabilities",
     "vendor": "AILinux",
 }
 
@@ -1720,7 +1722,7 @@ async def mcp_discovery(request: Request):
     mcp_url = f"{base_url}/v1/mcp"
 
     return {
-        "mcp_version": "2024-11-05",
+        "mcp_version": "2025-11-25",
         "server": MCP_SERVER_INFO,
         "capabilities": MCP_CAPABILITIES,
         "endpoints": {

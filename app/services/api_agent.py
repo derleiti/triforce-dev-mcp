@@ -28,7 +28,7 @@ PROVIDERS = {
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "env_key": "OPENROUTER_API_KEY",
-        "models": ["meta-llama/llama-3.3-70b-instruct:free", "nvidia/nemotron-3-super-120b-a12b:free", "qwen/qwen3-coder:free"],
+        "models": ["nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free", "qwen/qwen3-coder:free"],
     },
     "cerebras": {
         "base_url": "https://api.cerebras.ai/v1",
@@ -56,7 +56,7 @@ DEFAULT_AGENT_TOOLS = [
 MODEL_PRIORITY = [
     "groq/llama-3.3-70b-versatile",
     "cerebras/llama-3.3-70b",
-    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
 ]
 
