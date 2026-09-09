@@ -163,7 +163,7 @@ EOF
 
 BACKEND_DEB="$(make_backend)"
 CONTROL_DEB="$(make_control)"
-sha256sum "$BACKEND_DEB" "$CONTROL_DEB" > "$OUT/SHA256SUMS"
+(cd "$OUT" && sha256sum "$(basename "$BACKEND_DEB")" "$(basename "$CONTROL_DEB")" > SHA256SUMS)
 cat > "$OUT/BUILD-MANIFEST.txt" <<EOF
 TriForce product: 2.85 Beta 1
 Debian version: $VERSION

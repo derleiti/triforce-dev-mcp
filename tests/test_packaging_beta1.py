@@ -101,6 +101,12 @@ def test_release_prunes_non_ascii_runtime_aliases():
     assert r'*[!\ -~]*' in text
 
 
+def test_release_checksums_use_portable_relative_filenames():
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    assert '(cd "$OUT" && sha256sum "$(basename "$BACKEND_DEB")" "$(basename "$CONTROL_DEB")" > SHA256SUMS)' in text
+    assert 'sha256sum "$BACKEND_DEB" "$CONTROL_DEB" > "$OUT/SHA256SUMS"' not in text
+
+
 def test_arch_preserves_prebuilt_wheels_without_debug_split():
     text = (ROOT / "packaging/arch/PKGBUILD.in").read_text()
     assert "options=('!strip' '!debug')" in text
