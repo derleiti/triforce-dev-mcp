@@ -28,7 +28,7 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH="$ROOT" "$GUI_VENV/bin/python" "$ROOT/contr
 "$GUI_VENV/bin/python" -m nuitka \
   --mode=standalone \
   --enable-plugin=pyqt6 \
-  --include-qt-plugins=platforms,imageformats,iconengines,wayland \
+  --include-qt-plugins=platforms,imageformats,iconengines,wayland-decoration-client,wayland-graphics-integration-client,wayland-shell-integration \
   --include-package=control_center \
   --output-dir="$GUI_OUT" \
   --output-filename=triforce-control-center \

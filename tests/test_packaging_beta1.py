@@ -63,6 +63,8 @@ def test_ci_prepare_script_builds_runtime_and_gui():
     assert 'pydantic-settings==2.15.0' in text
     assert '--smoke-test' in text
     assert '--mode=standalone' in text
+    assert 'wayland-shell-integration' in text
+    assert ',wayland ' not in text
 
 
 def test_arch_pkgbuild_contract():
