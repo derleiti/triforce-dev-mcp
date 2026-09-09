@@ -45,6 +45,28 @@ def test_roundtrip_preserves_comments_unknowns_and_quotes(tmp_path: Path):
     assert after.values["UNKNOWN_FUTURE"] == "a value"
 
 
+def test_save_updates_collapses_duplicate_active_keys(tmp_path: Path):
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text(
+        "# legacy duplicate must not win\n"
+        "TRIFORCE_API_PORT=9100\n"
+        "UNKNOWN_FUTURE=keep\n"
+        "TRIFORCE_API_PORT=19121\n"
+    )
+    snap = load_snapshot(cfg)
+    after = save_updates(
+        {"TRIFORCE_API_PORT": 9000},
+        path=cfg,
+        expected_digest=snap.digest,
+        environ=clean_env(),
+    )
+    text = cfg.read_text()
+    assert text.count("TRIFORCE_API_PORT=") == 1
+    assert "TRIFORCE_API_PORT=9000" in text
+    assert "UNKNOWN_FUTURE=keep" in text
+    assert after.values["TRIFORCE_API_PORT"] == "9000"
+
+
 def test_save_detects_parallel_change(tmp_path: Path):
     cfg = tmp_path / "triforce.env"
     cfg.write_text("REQUEST_TIMEOUT=30\n")

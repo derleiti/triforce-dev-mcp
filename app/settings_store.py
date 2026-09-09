@@ -295,14 +295,22 @@ def _format_value(value: Any) -> str:
 
 def _replace_lines(original: str, updates: Mapping[str, Any]) -> str:
     pending = dict(updates)
+    update_keys = set(pending)
+    written: set[str] = set()
     out: list[str] = []
     for line in original.splitlines(keepends=True):
         stripped = line.lstrip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.split("=", 1)[0].strip()
-            if key in pending:
+            if key in update_keys:
+                # Canonical dotenv files must not retain duplicate active keys.
+                # python-dotenv uses the last value, so leaving a later legacy
+                # duplicate behind can silently undo a successful settings update.
+                if key in written:
+                    continue
                 newline = "\n" if line.endswith("\n") else ""
                 out.append(f"{key}={_format_value(pending.pop(key))}{newline}")
+                written.add(key)
                 continue
         out.append(line)
     if pending:
