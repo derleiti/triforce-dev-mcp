@@ -50,3 +50,9 @@ def test_setup_page_has_explicit_docker_install_button():
     assert 'task.task_id == "docker-install"' in text
     assert 'QPushButton("Docker installieren")' in text
     assert '"setup-start", task_id' in text
+
+
+def test_setup_page_has_explicit_triforce_service_install_button():
+    text = GUI.read_text()
+    assert 'task.task_id == "service-install"' in text
+    assert 'QPushButton("TriForce-Dienst installieren")' in text

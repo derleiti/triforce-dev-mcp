@@ -46,3 +46,10 @@ def test_docker_install_task_is_fixed_and_does_not_grant_socket_privileges():
     assert "docker.io" in text
     assert "docker-compose-v2" in text
     assert "docker-gruppe" in text
+
+
+def test_service_install_task_repairs_package_managed_unit():
+    task = TASKS["service-install"]
+    assert task.title == "TriForce-Dienst installieren/reparieren"
+    assert "/usr/lib/systemd/system/triforce.service" in task.changes
+    assert not any("/etc/systemd/system/triforce.service" == change for change in task.changes)

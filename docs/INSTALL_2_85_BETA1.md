@@ -76,3 +76,8 @@ Betreiber freigegeben werden.
 Auf der Setup-Seite des Control Centers steht der Button **Docker installieren** zur Verfuegung. Nach PolicyKit-Autorisierung startet ein ueberwachter Setup-Job. Wenn Docker Engine und Compose v2 bereits funktionieren, wird die vorhandene Installation beibehalten. Andernfalls installiert TriForce ausschliesslich `docker.io` und `docker-compose-v2` aus den konfigurierten Debian/Ubuntu-Paketquellen und aktiviert `docker.service`.
 
 Der Installer fuegt den Benutzer `triforce` absichtlich **nicht** zur Gruppe `docker` hinzu und startet keine Docker-Stacks. Docker-Socket-Rechte und das Starten einzelner Profiles bleiben eine separate Betreiberentscheidung.
+
+
+### TriForce-systemd-Dienst
+
+Der Backend-Paketinhalt liefert `triforce.service` unter `/usr/lib/systemd/system/triforce.service`. Auf der Setup-Seite kann die Unit mit **TriForce-Dienst installieren** explizit installiert bzw. repariert werden. Die Reparatur schreibt bewusst in den paketverwalteten `/usr/lib/systemd/system`-Pfad und legt keine Schattenkopie unter `/etc/systemd/system` an. Start/Stopp und Aktivierung beim Systemstart bleiben danach getrennte Bedienaktionen.

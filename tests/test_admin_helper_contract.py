@@ -89,3 +89,9 @@ def test_docker_install_uses_only_fixed_distro_packages_and_no_group_mutation():
     assert 'gpasswd' not in text
     assert 'groupadd' not in text
     assert 'docker compose up' not in text
+
+
+def test_service_repair_targets_package_managed_unit_path():
+    text = HELPER.read_text()
+    assert 'UNIT_DEST = Path("/usr/lib/systemd/system/triforce.service")' in text
+    assert 'UNIT_DEST = Path("/etc/systemd/system/triforce.service")' not in text

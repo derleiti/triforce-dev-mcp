@@ -466,6 +466,8 @@ class SetupPage(QWidget):
             self.tasks.setItem(row, 2, QTableWidgetItem("nicht geprüft"))
             if task.task_id == "docker-install":
                 button = QPushButton("Docker installieren")
+            elif task.task_id == "service-install":
+                button = QPushButton("TriForce-Dienst installieren")
             else:
                 button = QPushButton("Prüfen" if not task.mutating else "Plan / Ausführen")
             button.clicked.connect(lambda _=False, tid=task.task_id, r=row: self.task_action(tid, r))
