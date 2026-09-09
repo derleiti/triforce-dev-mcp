@@ -450,7 +450,7 @@ async def _gemini(
     settings = get_settings()
     # Production historically used GOOGLE_AI_STUDIO_KEY while Settings only
     # exposed GEMINI_API_KEY. Resolve both without moving or logging the secret.
-    from .google_genai import resolve_api_key
+    from .google_genai import resolve_ai_studio_key, resolve_api_key
     api_key = resolve_api_key()
     if not api_key:
         raise HTTPException(503, "Gemini support is not configured")
@@ -482,16 +482,24 @@ async def _gemini(
             fallback.pop("toolConfig", None)
             tool_transport = "text_fallback"
             response = await client.post(url, headers=headers, json=fallback)
+        if response.status_code in (401, 403):
+            # Keep Gemini direct: if the canonical credential is stale, retry once
+            # with the separately configured AI Studio credential. Never route an
+            # authentication failure through OpenRouter.
+            alternate_key = resolve_ai_studio_key()
+            if alternate_key and alternate_key != api_key:
+                headers = {
+                    "x-goog-api-key": alternate_key,
+                    "Content-Type": "application/json",
+                }
+                response = await client.post(url, headers=headers, json=payload)
+                if response.status_code in (400, 404, 422) and payload.get("tools"):
+                    fallback = dict(payload)
+                    fallback.pop("tools", None)
+                    fallback.pop("toolConfig", None)
+                    tool_transport = "text_fallback"
+                    response = await client.post(url, headers=headers, json=fallback)
         if response.status_code >= 400:
-            # Keep Gemini models usable while a direct AI Studio credential is
-            # disabled by routing the same documented model through OpenRouter.
-            if response.status_code in (401, 403) and _key(
-                settings, "openrouter_api_key", "OPENROUTER_API_KEY"
-            ):
-                return await _compatible(
-                    "openrouter", f"google/{model}", messages, tools,
-                    tool_choice, temperature, max_tokens,
-                )
             raise HTTPException(response.status_code, _detail("gemini", response))
         data = response.json()
     parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
