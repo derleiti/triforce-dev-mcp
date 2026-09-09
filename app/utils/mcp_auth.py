@@ -27,6 +27,8 @@ import hashlib
 import base64
 import json
 from pathlib import Path
+
+from app.paths import LOG_DIR
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional, Set, Tuple
 
@@ -39,7 +41,7 @@ from ..config import get_settings
 logger = logging.getLogger("ailinux.auth")
 
 # Log directory
-_LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+_LOG_DIR = LOG_DIR
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # File handler for auth log
@@ -81,6 +83,7 @@ _settings = get_settings()
 # OAuth credentials from .env
 MCP_AUTH_USER = _settings.mcp_oauth_user or os.getenv("MCP_OAUTH_USER", "")
 MCP_AUTH_PASS = _settings.mcp_oauth_pass or os.getenv("MCP_OAUTH_PASS", "")
+MCP_ALLOW_UNAUTHENTICATED_LOCAL = _settings.mcp_allow_unauthenticated_local
 
 # Token Storage (file-based for multi-worker support)
 _AUTH_DIR = Path("/var/tristar/auth")
@@ -431,10 +434,11 @@ def _jwt_has_full_mcp_access(payload: Dict[str, Any]) -> bool:
 
 async def require_mcp_auth(request: Request) -> str:
     """
-    Unified MCP authentication - Port-based.
-    
-    X-Forwarded-Port: 9100 → Auth required (external)
-    No X-Forwarded-Port → Bypass (internal/public)
+    Unified MCP authentication.
+
+    Authentication is required by default for every MCP request. A local-only
+    bypass exists solely as an explicit compatibility switch and only applies
+    to loopback clients without forwarding headers.
     """
     client_ip = request.client.host if request.client else "unknown"
     auth_header = request.headers.get("Authorization", "")
@@ -447,19 +451,25 @@ async def require_mcp_auth(request: Request) -> str:
             or ""
         ).strip()
     
-    # Port/header-based auth decision
     forwarded_port = request.headers.get("X-Forwarded-Port", "")
     forwarded_for = request.headers.get("X-Forwarded-For", "")
-    
-    # No forwarding headers = trusted internal call → bypass
-    # Forwarded internal requests must still authenticate because they originated externally.
-    if forwarded_port != "9100" and not forwarded_for:
+
+    if (
+        MCP_ALLOW_UNAUTHENTICATED_LOCAL
+        and client_ip in {"127.0.0.1", "::1"}
+        and not forwarded_for
+        and not forwarded_port
+    ):
         request.state.mcp_auth_user = "internal"
-        logger.debug(f"AUTH_OK | IP: {client_ip} | X-Fwd-Port: {forwarded_port or 'none'} | Method: port_bypass")
+        request.state.mcp_auth_method = "explicit-local-bypass"
+        request.state.mcp_auth_full_access = True
+        logger.warning("AUTH_LOCAL_BYPASS | IP: %s | explicitly enabled", client_ip)
         return "internal"
-    
-    # External/forwarded request → requires auth
-    logger.debug(f"AUTH_CHECK | IP: {client_ip} | X-Fwd-Port: {forwarded_port or 'none'} | X-Fwd-For: {forwarded_for or 'none'}")
+
+    logger.debug(
+        "AUTH_CHECK | IP: %s | X-Fwd-Port: %s | X-Fwd-For: %s",
+        client_ip, forwarded_port or "none", forwarded_for or "none",
+    )
     
     if not MCP_AUTH_USER or not MCP_AUTH_PASS:
         logger.error("AUTH_ERROR | MCP_OAUTH_USER/PASS not configured")

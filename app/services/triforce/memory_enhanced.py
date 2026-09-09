@@ -18,6 +18,8 @@ import logging
 import json
 from pathlib import Path
 
+from app.paths import STATE_DIR
+
 logger = logging.getLogger("ailinux.triforce.memory")
 
 
@@ -131,10 +133,10 @@ class EnhancedMemoryService:
 
     def __init__(
         self,
-        storage_dir: str = "/home/zombie/triforce/triforce/memory",
+        storage_dir: str | None = None,
         max_entries: int = 10000
     ):
-        self.storage_dir = Path(storage_dir)
+        self.storage_dir = Path(storage_dir) if storage_dir is not None else (STATE_DIR / "memory")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.max_entries = max_entries
 

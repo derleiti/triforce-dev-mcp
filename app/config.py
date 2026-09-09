@@ -88,12 +88,14 @@ class Settings(BaseSettings):
     # MCP Authentication (User/Password only - no API keys)
     mcp_oauth_user: Optional[str] = Field(default=None, validation_alias="MCP_OAUTH_USER")
     mcp_oauth_pass: Optional[str] = Field(default=None, validation_alias="MCP_OAUTH_PASS")
+    mcp_allow_unauthenticated_local: bool = Field(default=False, validation_alias="MCP_ALLOW_UNAUTHENTICATED_LOCAL")
     mcp_dev_allowed_roots: Optional[str] = Field(
         default=None,
         validation_alias="MCP_DEV_ALLOWED_ROOTS",
     )
 
     # MCP Mesh WebSocket
+    mcp_ws_enabled: bool = Field(default=True, validation_alias="MCP_WS_ENABLED")
     mcp_ws_host: str = Field(default="0.0.0.0", validation_alias="MCP_WS_HOST")
     mcp_ws_port: int = Field(default=44433, validation_alias="MCP_WS_PORT")
     mcp_ws_enable_ipv6: bool = Field(default=False, validation_alias="MCP_WS_ENABLE_IPV6")
@@ -224,7 +226,7 @@ class Settings(BaseSettings):
     nova_claude_user: Optional[str] = Field(default=None, validation_alias=AliasChoices("NOVA_CLAUDE_USER", "CLAUDE_USER"))
     nova_claude_pass: Optional[str] = Field(default=None, validation_alias=AliasChoices("NOVA_CLAUDE_PASS", "CLAUDE_PASS"))
     nova_claude_agent_id: Optional[str] = Field(default=None, validation_alias=AliasChoices("NOVA_CLAUDE_AGENT_ID", "CLAUDE_AGENT_ID"))
-    claude_agent_id: Optional[str] = Field(default=None, validation_alias=AliasChoices("CLAUDE_AGENT_ID", "NOVA_CLAUDE_AGENT_ID"))
+    claude_agent_id: Optional[str] = Field(default=None, validation_alias="CLAUDE_AGENT_ID")
     nova_mistral_url: Optional[str] = Field(default=None, validation_alias="NOVA_MISTRAL_URL")
     nova_mistral_user: Optional[str] = Field(default=None, validation_alias="NOVA_MISTRAL_USER")
     nova_mistral_pass: Optional[str] = Field(default=None, validation_alias="NOVA_MISTRAL_PASS")

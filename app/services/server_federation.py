@@ -321,17 +321,13 @@ import hashlib
 import base64
 
 FEDERATION_PSK = os.getenv("FEDERATION_SECRET", "")
-if not FEDERATION_PSK:
-    # 2026-08-16: Vorher stand hier ein hartkodierter Default, der im
-    # oeffentlichen Repo einsehbar ist. Ohne gesetztes Secret lief die
-    # Federation dann mit einem allgemein bekannten Schluessel weiter und
-    # loggte trotzdem "PSK configured". Jetzt fail-closed.
-    raise RuntimeError(
-        "FEDERATION_SECRET ist nicht gesetzt. Federation-Nachrichten koennen "
-        "nicht signiert werden. Setze FEDERATION_SECRET in config/triforce.env "
-        "(auf allen Nodes derselbe Wert)."
-    )
-logger.info(f"Federation PSK configured (len={len(FEDERATION_PSK)})")
+if FEDERATION_PSK:
+    logger.info("Federation PSK configured (len=%d)", len(FEDERATION_PSK))
+else:
+    # Federation is optional on fresh/local installations. Keep it fail-closed
+    # at the signing boundary instead of preventing the entire backend from
+    # importing when no federation secret was intentionally configured.
+    logger.info("Federation disabled: FEDERATION_SECRET is not configured")
 
 # Federation Node Configuration
 # vpn_ip: WireGuard VPN address for direct communication
@@ -361,6 +357,8 @@ FEDERATION_NODES = {
 def create_signed_request(data: dict, secret: str = None) -> dict:
     """Signiere Request mit PSK"""
     secret = secret or FEDERATION_PSK
+    if not secret:
+        raise RuntimeError("Federation signing is disabled: FEDERATION_SECRET is not configured")
     timestamp = str(int(time.time()))
     
     # Create signature
@@ -384,7 +382,10 @@ def verify_signed_request(request: dict, secret: str = None, max_age: int = 300)
     Returns: Das 'data' dict wenn Signatur gültig, sonst None.
     """
     secret = secret or FEDERATION_PSK
-    
+    if not secret:
+        logger.warning("Signed federation request rejected: federation is disabled")
+        return None
+
     try:
         data = request.get("data", {})
         timestamp = request.get("timestamp", "0")

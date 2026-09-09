@@ -17,11 +17,13 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.paths import DATA_DIR, PROJECT_ROOT
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 
-DEFAULT_ROOT = Path(os.getenv("AILINUX_RAG_ROOT", "/home/zombie/triforce")).expanduser().resolve()
-DEFAULT_STORE = Path(os.getenv("AILINUX_RAG_STORE", str(DEFAULT_ROOT / "data" / "rag"))).expanduser().resolve()
+DEFAULT_ROOT = Path(os.getenv("AILINUX_RAG_ROOT", str(PROJECT_ROOT))).expanduser().resolve()
+DEFAULT_STORE = Path(os.getenv("AILINUX_RAG_STORE", str(DATA_DIR / "rag"))).expanduser().resolve()
 
 
 def _configured_allowed_roots() -> List[Path]:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from ..utils.rate_limit_compat import RateLimiter
 
-from ..config import get_settings
+from ..config import Settings, get_settings
+from ..routes.client_auth import require_admin
+from ..settings_store import ConfigConflict, ConfigError, load_snapshot, save_updates
 from ..schemas.settings import SettingsResponse, SettingsUpdate
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -53,82 +55,62 @@ async def get_settings_endpoint():
     )
 
 
-@router.put("", response_model=SettingsResponse, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
-async def update_settings_endpoint(updates: SettingsUpdate):
-    """
-    Update system settings (runtime configuration).
-    Note: These changes are not persisted to .env file and will be lost on restart.
-    """
-    import os
-    import json
+def _update_to_env(updates: SettingsUpdate) -> dict[str, object]:
+    """Translate the public update schema to canonical environment aliases."""
+    values = updates.model_dump(exclude_none=True, exclude={"expected_digest"})
+    result: dict[str, object] = {}
+    for field_name, value in values.items():
+        field = Settings.model_fields[field_name]
+        alias = field.validation_alias
+        choices = getattr(alias, "choices", None)
+        if choices:
+            env_name = next((str(choice) for choice in choices if isinstance(choice, str)), field_name)
+        elif alias is not None:
+            env_name = str(alias)
+        else:
+            env_name = field_name
+        result[env_name] = value
+    return result
 
-    # Clear the settings cache to force reload
+
+@router.put(
+    "",
+    response_model=SettingsResponse,
+    dependencies=[Depends(RateLimiter(times=10, seconds=60))],
+)
+async def update_settings_endpoint(
+    updates: SettingsUpdate,
+    _admin: dict = Depends(require_admin),
+):
+    """Persist supported settings through the canonical configuration store.
+
+    The backend never escalates privileges. On packaged installations
+    ``/etc/triforce/triforce.env`` is root-owned, so remote API writes are
+    rejected with HTTP 403 and must be performed through the local Control
+    Center/PolicyKit helper. Successful writes are intentionally not injected
+    into ``os.environ``; server settings become active after a controlled
+    restart.
+    """
+    env_updates = _update_to_env(updates)
+    if not env_updates:
+        return await get_settings_endpoint()
+
+    try:
+        snapshot = load_snapshot()
+        expected = updates.expected_digest or snapshot.digest
+        save_updates(env_updates, expected_digest=expected, environ={})
+    except ConfigConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Systemkonfiguration ist geschützt. Verwende das lokale "
+                "TriForce Control Center mit administrativer Autorisierung."
+            ),
+        ) from exc
+    except (ConfigError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     get_settings.cache_clear()
-
-    # Update environment variables for runtime changes
-    # Core Settings
-    if updates.request_timeout is not None:
-        os.environ["REQUEST_TIMEOUT"] = str(updates.request_timeout)
-    if updates.ollama_timeout_ms is not None:
-        os.environ["OLLAMA_TIMEOUT_MS"] = str(updates.ollama_timeout_ms)
-    if updates.max_concurrent_requests is not None:
-        os.environ["MAX_CONCURRENT_REQUESTS"] = str(updates.max_concurrent_requests)
-    if updates.request_queue_timeout is not None:
-        os.environ["REQUEST_QUEUE_TIMEOUT"] = str(updates.request_queue_timeout)
-
-    # Backend URLs
-    if updates.ollama_base is not None:
-        os.environ["OLLAMA_BASE"] = str(updates.ollama_base)
-    if updates.stable_diffusion_url is not None:
-        os.environ["STABLE_DIFFUSION_URL"] = str(updates.stable_diffusion_url)
-    if updates.comfyui_url is not None:
-        os.environ["COMFYUI_URL"] = str(updates.comfyui_url)
-    if updates.wordpress_url is not None:
-        os.environ["WORDPRESS_URL"] = str(updates.wordpress_url)
-
-    # Backend Settings
-    if updates.ollama_bearer_auth_enabled is not None:
-        os.environ["OLLAMA_BEARER_AUTH_ENABLED"] = str(updates.ollama_bearer_auth_enabled).lower()
-    if updates.stable_diffusion_backend is not None:
-        os.environ["STABLE_DIFFUSION_BACKEND"] = updates.stable_diffusion_backend
-    if updates.stable_diffusion_default_models is not None:
-        os.environ["STABLE_DIFFUSION_DEFAULT_MODELS"] = updates.stable_diffusion_default_models
-
-    # Crawler Configuration
-    if updates.crawler_enabled is not None:
-        os.environ["CRAWLER_ENABLED"] = str(updates.crawler_enabled).lower()
-    if updates.crawler_max_memory_bytes is not None:
-        os.environ["CRAWLER_MAX_MEMORY_BYTES"] = str(updates.crawler_max_memory_bytes)
-    if updates.crawler_flush_interval is not None:
-        os.environ["CRAWLER_FLUSH_INTERVAL"] = str(updates.crawler_flush_interval)
-    if updates.crawler_retention_days is not None:
-        os.environ["CRAWLER_RETENTION_DAYS"] = str(updates.crawler_retention_days)
-    if updates.crawler_summary_model is not None:
-        os.environ["CRAWLER_SUMMARY_MODEL"] = updates.crawler_summary_model
-
-    # User Crawler Settings
-    if updates.user_crawler_workers is not None:
-        os.environ["USER_CRAWLER_WORKERS"] = str(updates.user_crawler_workers)
-    if updates.user_crawler_max_concurrent is not None:
-        os.environ["USER_CRAWLER_MAX_CONCURRENT"] = str(updates.user_crawler_max_concurrent)
-
-    # Auto Crawler Settings
-    if updates.auto_crawler_workers is not None:
-        os.environ["AUTO_CRAWLER_WORKERS"] = str(updates.auto_crawler_workers)
-    if updates.auto_crawler_enabled is not None:
-        os.environ["AUTO_CRAWLER_ENABLED"] = str(updates.auto_crawler_enabled).lower()
-
-    # WordPress Settings
-    if updates.wordpress_category_id is not None:
-        os.environ["WORDPRESS_CATEGORY_ID"] = str(updates.wordpress_category_id)
-
-    # OpenAI Compatibility
-    if updates.openai_model_aliases is not None:
-        os.environ["OPENAI_MODEL_ALIASES"] = json.dumps(updates.openai_model_aliases)
-
-    # CORS
-    if updates.cors_allowed_origins is not None:
-        os.environ["CORS_ALLOWED_ORIGINS"] = updates.cors_allowed_origins
-
-    # Return updated settings
     return await get_settings_endpoint()

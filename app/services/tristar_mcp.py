@@ -34,6 +34,8 @@ import shlex
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.paths import LOG_DIR
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ailinux.tristar_mcp")
@@ -83,7 +85,7 @@ class TriStarMCPService:
             log_files = list(TRISTAR_LOGS.glob("*.log"))
 
         # Also check backend logs
-        backend_log = Path("/home/zombie/triforce/logs")
+        backend_log = LOG_DIR
         if backend_log.exists():
             log_files.extend(backend_log.glob("*.log"))
 

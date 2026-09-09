@@ -78,3 +78,12 @@ def test_secret_redaction_is_explicit():
     result = redact({"OPENROUTER_API_KEY": "secret", "OPENROUTER_BASE_URL": "https://example.invalid"})
     assert result["OPENROUTER_API_KEY"] == "***"
     assert result["OPENROUTER_BASE_URL"] == "https://example.invalid"
+
+def test_claude_agent_compatibility_aliases_do_not_collide():
+    from app.config import Settings
+    legacy = Settings.model_validate({"CLAUDE_AGENT_ID": "legacy"}, by_alias=True, by_name=True)
+    assert legacy.claude_agent_id == "legacy"
+    assert legacy.nova_claude_agent_id == "legacy"
+    nova = Settings.model_validate({"NOVA_CLAUDE_AGENT_ID": "nova"}, by_alias=True, by_name=True)
+    assert nova.nova_claude_agent_id == "nova"
+    assert nova.claude_agent_id is None

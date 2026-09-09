@@ -71,27 +71,14 @@ else
     log "Auto-update disabled"
 fi
 
-# Environment supplied by systemd remains highest priority. For direct/dev starts,
-# read host/port from the canonical dotenv parser instead of sourcing the file.
-read_cfg() {
-    "$PYTHON_BIN" -m app.settings_store --config "$CONFIG_FILE" --get "$1" 2>/dev/null || true
-}
-HOST="${TRIFORCE_BIND_HOST:-$(read_cfg TRIFORCE_BIND_HOST)}"
-PORT="${TRIFORCE_API_PORT:-$(read_cfg TRIFORCE_API_PORT)}"
-KEEPALIVE="${TRIFORCE_KEEPALIVE:-$(read_cfg TRIFORCE_KEEPALIVE)}"
-HOST="${HOST:-127.0.0.1}"
-PORT="${PORT:-9100}"
-KEEPALIVE="${KEEPALIVE:-75}"
-
-case "$PORT" in ''|*[!0-9]*) log "Invalid TRIFORCE_API_PORT: $PORT"; exit 2;; esac
-if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then log "Invalid TRIFORCE_API_PORT: $PORT"; exit 2; fi
-case "$KEEPALIVE" in ''|*[!0-9]*) log "Invalid TRIFORCE_KEEPALIVE: $KEEPALIVE"; exit 2;; esac
-
+# Parse the configuration once as dotenv data, validate it through the canonical
+# Settings model, then export the resolved file values to the Uvicorn process.
+# This keeps legacy os.getenv() consumers consistent without source/eval.
 export TRIFORCE_CONFIG_FILE="$CONFIG_FILE"
-log "Starting uvicorn on ${HOST}:${PORT} (config=$CONFIG_FILE)..."
-"$PYTHON_BIN" -m uvicorn app.main:app --host "$HOST" --port "$PORT" --timeout-keep-alive "$KEEPALIVE" &
+log "Launching backend with canonical config: $CONFIG_FILE"
+"$PYTHON_BIN" -m app.server_launcher --config "$CONFIG_FILE" &
 MAIN_PID=$!
-log "Uvicorn PID: $MAIN_PID"
+log "Backend PID: $MAIN_PID"
 
 cleanup() {
     [ -z "$UPDATE_PID" ] || kill "$UPDATE_PID" 2>/dev/null || true

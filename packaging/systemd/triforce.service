@@ -13,6 +13,11 @@ Group=triforce
 WorkingDirectory=/opt/triforce
 Environment=PYTHONUNBUFFERED=1
 Environment=TRIFORCE_CONFIG_FILE=/etc/triforce/triforce.env
+Environment=TRIFORCE_PYTHON=/opt/triforce/runtime/bin/python
+Environment=TRIFORCE_LOG_DIR=/var/log/triforce
+Environment=TRIFORCE_STATE_DIR=/var/lib/triforce
+Environment=TRIFORCE_PROJECT_ROOT=/opt/triforce
+Environment=TRIFORCE_CONFIG_DIR=/opt/triforce/config
 ExecStart=/opt/triforce/scripts/start-triforce.sh
 Restart=on-failure
 RestartSec=10
@@ -25,6 +30,8 @@ ProtectHome=true
 ReadWritePaths=/var/lib/triforce /var/log/triforce
 StateDirectory=triforce
 StateDirectoryMode=0750
+RuntimeDirectory=triforce
+RuntimeDirectoryMode=0750
 LogsDirectory=triforce
 LogsDirectoryMode=0750
 

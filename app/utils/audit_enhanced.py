@@ -17,6 +17,8 @@ import asyncio
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+from app.paths import LOG_DIR
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 import gzip
@@ -63,7 +65,7 @@ class EnhancedAuditLogger:
     ):
         # Default: ./logs/audit
         if log_dir is None:
-            self.log_dir = Path(__file__).parent.parent.parent / "logs" / "audit"
+            self.log_dir = LOG_DIR / "audit"
         else:
             self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)

@@ -22,3 +22,31 @@ def test_helper_rejects_free_unit_or_path_arguments_by_parser_shape():
     assert "--unit" not in text
     assert "--script" not in text
     assert "--path" not in text
+
+def test_helper_uses_packaged_isolated_runtime():
+    assert HELPER.read_text().startswith("#!/opt/triforce/runtime/bin/python\n")
+
+def test_config_directory_is_group_readable_by_service_user():
+    text = HELPER.read_text()
+    assert 'shutil.chown(ETC_DIR, user="root", group="triforce")' in text
+
+def test_packaged_writable_crawler_paths_live_under_var_lib():
+    text = HELPER.read_text()
+    assert "CRAWLER_SPOOL_DIR=/var/lib/triforce/crawler_spool" in text
+    assert "CRAWLER_TRAIN_DIR=/var/lib/triforce/crawler_spool/train" in text
+
+def test_new_install_maps_legacy_tristar_into_var_lib_without_overwrite():
+    text = HELPER.read_text()
+    assert 'legacy_tristar = Path("/var/tristar")' in text
+    assert 'legacy_tristar.exists()' in text
+    assert 'legacy_tristar.symlink_to(STATE_DIR / "tristar"' in text
+
+def test_fresh_config_sanitizes_template_secrets_and_generates_local_auth():
+    text = HELPER.read_text()
+    assert "if key in SECRET_ENV_KEYS" in text
+    assert 'sanitized.append(f"{key}=")' in text
+    assert "secrets.token_urlsafe(32)" in text
+    assert "JWT_SECRET=" in text
+    assert "TRIFORCE_ADMIN_SECRET=" in text
+    assert "MCP_OAUTH_PASS=" in text
+    assert "change-this-password" not in text

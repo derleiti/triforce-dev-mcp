@@ -19,11 +19,13 @@ import os
 import logging
 from datetime import datetime, date
 from pathlib import Path
+
+from app.paths import DATA_DIR
 from typing import Dict, Optional
 
 logger = logging.getLogger("ailinux.openrouter_budget")
 
-BUDGET_FILE = Path("/home/zombie/triforce/data/openrouter_budget.json")
+BUDGET_FILE = DATA_DIR / "openrouter_budget.json"
 BUDGET_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 

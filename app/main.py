@@ -187,19 +187,23 @@ async def lifespan(app: FastAPI):
         # import logging (centralized)
         logger.warning(f"Failed to start Mesh Coordinator: {e}")
 
-    # Start Federation Manager (Server-to-Server)
-    try:
-        from .services.server_federation import federation_manager
-        from .services.federation_websocket import federation_lb
-        import socket
-        node_id_env = os.environ.get("NODE_ID")
-        _hostname = socket.gethostname().lower()
-        node_id = node_id_env or ("backup" if "backup" in _hostname else "zombie-pc" if "zombie" in _hostname else "hetzner")
-        await federation_manager.initialize(node_id=node_id)
-        await federation_lb.start()
-        logger.info("Federation Manager started")
-    except Exception as e:
-        logger.warning(f"Failed to start Federation Manager: {e}")
+    # Start Federation Manager only when explicitly configured with a secret.
+    # Fresh/local installations remain standalone and do not attempt peer calls.
+    if os.environ.get("FEDERATION_SECRET", "").strip():
+        try:
+            from .services.server_federation import federation_manager
+            from .services.federation_websocket import federation_lb
+            import socket
+            node_id_env = os.environ.get("NODE_ID")
+            _hostname = socket.gethostname().lower()
+            node_id = node_id_env or ("backup" if "backup" in _hostname else "zombie-pc" if "zombie" in _hostname else "hetzner")
+            await federation_manager.initialize(node_id=node_id)
+            await federation_lb.start()
+            logger.info("Federation Manager started")
+        except Exception as e:
+            logger.warning(f"Failed to start Federation Manager: {e}")
+    else:
+        logger.info("Federation Manager disabled (FEDERATION_SECRET not configured)")
 
     # Start Distributed Compute Manager
     try:
@@ -222,13 +226,17 @@ async def lifespan(app: FastAPI):
         # import logging (centralized)
         logger.warning(f"Failed to start MCP Brain: {e}")
 
-    # Start MCP WebSocket Server
-    try:
-        from .services.mcp_ws_server import mcp_ws_server
-        await mcp_ws_server.start()
-        logger.info(f"MCP WebSocket Server started on port {settings.mcp_ws_port}")
-    except Exception as e:
-        logger.warning(f"Failed to start MCP WebSocket Server: {e}")
+    # Start optional MCP WebSocket mesh. Existing installs retain the historical
+    # default; fresh package config explicitly sets MCP_WS_ENABLED=false.
+    if settings.mcp_ws_enabled:
+        try:
+            from .services.mcp_ws_server import mcp_ws_server
+            await mcp_ws_server.start()
+            logger.info(f"MCP WebSocket Server started on port {settings.mcp_ws_port}")
+        except Exception as e:
+            logger.warning(f"Failed to start MCP WebSocket Server: {e}")
+    else:
+        logger.info("MCP WebSocket Server disabled")
 
     # Auto-Bootstrap CLI Agents (wenn konfiguriert)
     try:

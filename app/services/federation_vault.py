@@ -11,6 +11,8 @@ import hmac
 import hashlib
 import secrets
 from pathlib import Path
+
+from app.paths import CONFIG_DIR, VAULT_DIR
 from typing import Dict, Optional, List
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -19,7 +21,7 @@ import fcntl
 
 logger = logging.getLogger(__name__)
 
-VAULT_PATH = Path("/home/zombie/triforce/.vault")
+VAULT_PATH = VAULT_DIR
 FEDERATION_VAULT_FILE = VAULT_PATH / "federation_nodes.enc"
 FEDERATION_TOKENS_FILE = VAULT_PATH / "federation_tokens.json"
 FEDERATION_LOCK_FILE = VAULT_PATH / ".federation_tokens.lock"
@@ -79,7 +81,7 @@ class FederationVault:
         # Load shared secret from env or file
         self._shared_secret = os.getenv("FEDERATION_SECRET")
         if not self._shared_secret:
-            secret_file = Path("/home/zombie/triforce/config/federation_psk.key")
+            secret_file = CONFIG_DIR / "federation_psk.key"
             if secret_file.exists():
                 self._shared_secret = secret_file.read_text().strip()
     

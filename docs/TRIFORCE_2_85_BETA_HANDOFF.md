@@ -85,3 +85,27 @@ Build-Hinweis:
 - Standalone-Bundle: `/tmp/triforce-2.85-nuitka/main.dist` (~170 MB).
 - Nuitka weist bei 4.2.1 selbst darauf hin, dass PyQt6-Unterstützung nicht perfekt ist; der Bundle-Smoke ist bestanden, diese Upstream-Einschränkung bleibt dokumentiert.
 - Für die C-Kompilierung wurden auf dem Buildhost ausschließlich `python3.14-dev` und `libpython3.14-dev` als OS-Buildheader nachinstalliert. Kein System-Python-pip und kein TriForce-Produktionsdienst wurde verändert.
+
+## Phase 3 – Paket-/Runtime-Hardening und MCP-Auth
+
+Erledigt:
+- Laufzeitpfade für paketierte Installation auf kanonische `TRIFORCE_*_DIR`-Pfade konsolidiert; Programmdateien bleiben unter `/opt/triforce`, veränderbare Daten unter `/var/lib/triforce`, Logs unter `/var/log/triforce`.
+- Legacy `/var/tristar` wird bei neuen Installationen nur dann als Kompatibilitäts-Symlink nach `/var/lib/triforce/tristar` angelegt, wenn dort nichts Bestehendes liegt.
+- Federation ist ohne `FEDERATION_SECRET` optional und fail-closed; bei Fresh-Install wird der Federation-Manager ohne Secret gar nicht gestartet.
+- Separater MCP-WebSocket-Listener ist bei Fresh-Install standardmäßig deaktiviert.
+- `/v1/settings` persistiert nun über `app.settings_store`, mit Digest-Konflikterkennung und Admin-Schutz; keine Runtime-only `os.environ`-Mutation mehr.
+- Neuer `app.server_launcher`: dotenv wird einmal als Daten geparst/validiert und als Prozessumgebung an Uvicorn weitergereicht. Damit sehen direkte `os.getenv()`-Altverbraucher denselben kanonischen Ladeweg ohne Shell-`source`/`eval`.
+- MCP-Auth verlangt jetzt standardmäßig auch auf Loopback Credentials. Ein lokaler Bypass existiert nur noch über `MCP_ALLOW_UNAUTHENTICATED_LOCAL=true`, ausschließlich für echte Loopback-Aufrufe ohne Forwarding-Header.
+- Fresh-Install übernimmt keine Secret-Platzhalter aus `triforce.env.example`; MCP/JWT/Admin-Secrets werden lokal kryptografisch erzeugt und nicht ausgegeben.
+- Privilegierter Helper verwendet die isolierte Paket-Runtime statt System-Python für Settings-Operationen.
+
+Systemd-Container-E2E:
+- Fresh install: Pakete installiert, Dienst danach `inactive` und `disabled`, Redis nicht automatisch installiert.
+- Dienststart: `active`, `/health` HTTP 200.
+- Portänderung über atomaren Config-Helper: 9100 -> 19120; nach kontrolliertem Neustart 19120 bereit, 9100 geschlossen; Boot-Autostart blieb `disabled`.
+- MCP kanonisch: 39 Core / 79 vollständige Tools, keine Duplikate; read-only `status`-Smoke bestanden.
+- MCP unauthentifiziert nach Hardening: HTTP 401; authentifizierter MCP-Smoke bestanden.
+
+Tests:
+- Gebündelter isolierter Regressionlauf: 68 passed.
+- `compileall`, `py_compile`, `bash -n`, `git diff --check` bestanden.

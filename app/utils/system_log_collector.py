@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from logging.handlers import RotatingFileHandler
 import json
+import os
 
 logger = logging.getLogger("ailinux.system.collector")
 
@@ -34,7 +35,7 @@ logger = logging.getLogger("ailinux.system.collector")
 # FIX 2026-07-11: war `.../ "triforce" / "logs"` -> ergab den Doppelpfad
 # ~/triforce/triforce/logs (Split-Brain mit dem echten ~/triforce/logs).
 # parent.parent.parent ist bereits der Projektroot ~/triforce.
-BACKEND_LOG_BASE = Path(__file__).parent.parent.parent / "logs"
+BACKEND_LOG_BASE = Path(os.environ.get("TRIFORCE_LOG_DIR", str(Path(__file__).parent.parent.parent / "logs")))
 TRIFORCE_LOG_BASE = BACKEND_LOG_BASE
 
 # Ensure directories exist

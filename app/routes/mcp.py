@@ -2600,7 +2600,8 @@ import logging
 
 _mcp_logger = logging.getLogger("ailinux.mcp.security")
 
-BACKEND_ROOT = Path("/home/zombie/triforce")
+from app.paths import PROJECT_ROOT
+BACKEND_ROOT = PROJECT_ROOT
 ALLOWED_EXTENSIONS = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".txt", ".env.example"}
 
 # Sensitive paths that should never be accessed

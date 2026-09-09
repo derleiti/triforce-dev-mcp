@@ -5,11 +5,12 @@ Fix: Keine Duplikate durch propagate=False
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-UNIFIED_LOG_PATH = Path("/home/zombie/triforce/logs/unified.log")
+UNIFIED_LOG_PATH = Path(os.environ.get("TRIFORCE_LOG_DIR", str(Path(__file__).parent.parent.parent / "logs"))) / "unified.log"
 UNIFIED_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 class UnifiedFormatter(logging.Formatter):

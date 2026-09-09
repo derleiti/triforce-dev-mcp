@@ -51,7 +51,8 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    """Update model for settings (only updatable fields)"""
+    """Update model for settings (only updatable fields)."""
+    expected_digest: Optional[str] = Field(None, min_length=64, max_length=64, description="Configuration digest used for optimistic concurrency")
     # Core Settings
     request_timeout: Optional[float] = Field(None, ge=1.0, le=300.0)
     ollama_timeout_ms: Optional[int] = Field(None, ge=1000, le=300000)
