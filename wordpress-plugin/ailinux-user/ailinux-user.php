@@ -3,7 +3,7 @@
  * Plugin Name: AILinux User Management
  * Plugin URI: https://ailinux.me
  * Description: User-Registrierung, Abo-Verwaltung und API-Zugang für AILinux Clients
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Markus Leitermann
  * License: GPL v2 or later
  *
@@ -17,9 +17,9 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('AILINUX_VERSION', '1.0.0');
-define('AILINUX_API_URL', 'https://api.ailinux.me/v1');
-define('AILINUX_WEBHOOK_SECRET', 'ailinux-webhook-secret-change-me'); // In wp-config.php überschreiben!
+define('AILINUX_VERSION', '1.1.0');
+define('AILINUX_API_URL', 'https://api.ailinux.me/v1'); // Legacy fallback; shared TriForce Settings take precedence.
+if (!defined('AILINUX_WEBHOOK_SECRET') && getenv('WEBHOOK_SECRET')) { define('AILINUX_WEBHOOK_SECRET', getenv('WEBHOOK_SECRET')); } // Set via wp-config.php or env
 
 class AILinux_User_Plugin {
     
@@ -101,7 +101,8 @@ class AILinux_User_Plugin {
         }
 
         if ($action === 'login') {
-            wp_redirect('https://login.ailinux.me/');
+            $login = function_exists('ailinux_triforce_setting') ? ailinux_triforce_setting('login_url', 'https://login.ailinux.me') : 'https://login.ailinux.me';
+            wp_redirect($login ?: 'https://login.ailinux.me/');
             exit;
         }
     }
@@ -190,13 +191,19 @@ class AILinux_User_Plugin {
      * API Request an TriForce Server
      */
     private function api_request($endpoint, $data, $method = 'POST') {
-        $url = AILINUX_API_URL . '/' . $endpoint;
+        $base = function_exists('ailinux_triforce_api_v1') ? ailinux_triforce_api_v1(true) : AILINUX_API_URL;
+        $url = rtrim($base, '/') . '/' . ltrim($endpoint, '/');
+        $signature = $this->generate_signature($data);
+        if ($signature === '') {
+            error_log('AILinux API request blocked: TriForce webhook secret is not configured');
+            return null;
+        }
         
         $args = [
             'method' => $method,
             'headers' => [
                 'Content-Type' => 'application/json',
-                'X-Webhook-Signature' => $this->generate_signature($data),
+                'X-Webhook-Signature' => $signature,
             ],
             'body' => json_encode($data),
             'timeout' => 30,
@@ -217,10 +224,11 @@ class AILinux_User_Plugin {
      * Generiert Webhook-Signatur
      */
     private function generate_signature($data) {
-        $secret = defined('AILINUX_WEBHOOK_SECRET') 
-            ? AILINUX_WEBHOOK_SECRET 
-            : 'ailinux-webhook-secret-change-me';
-        return hash_hmac('sha256', json_encode($data), $secret);
+        $secret = function_exists('ailinux_triforce_setting')
+            ? ailinux_triforce_setting('webhook_secret', '')
+            : (defined('AILINUX_WEBHOOK_SECRET') ? AILINUX_WEBHOOK_SECRET : (getenv('WEBHOOK_SECRET') ?: ''));
+        if ($secret === '') { return ''; }
+        return hash_hmac('sha256', wp_json_encode($data), $secret);
     }
     
     /**
@@ -448,7 +456,7 @@ class AILinux_User_Plugin {
             </div>
             
             <h2>API Status</h2>
-            <p>Server: <code><?php echo AILINUX_API_URL; ?></code></p>
+            <p>Server: <code><?php echo esc_html(function_exists('ailinux_triforce_api_v1') ? ailinux_triforce_api_v1(true) : AILINUX_API_URL); ?></code></p>
         </div>
         <?php
     }

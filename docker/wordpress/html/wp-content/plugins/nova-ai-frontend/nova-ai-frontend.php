@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nova AI Frontend
  * Description: AILinux AI Playground & Downloads — Chat, Vision, Media Generation + Admin Dashboard
- * Version: 6.5.8
+ * Version: 6.6.0
  * Author: zombie@ailinux
  * Text Domain: nova-ai-frontend
  */
@@ -13,7 +13,7 @@ defined('ABSPATH') || exit;
 if ( ! defined( 'NOVA_AI_BACKEND' ) )       define('NOVA_AI_BACKEND',      'http://172.18.0.1:9000');
 if ( ! defined( 'NOVA_AI_LOCAL_BACKEND' ) )  define('NOVA_AI_LOCAL_BACKEND', 'http://localhost:9000');
 if ( ! defined( 'NOVA_AI_INTERNAL_KEY' ) )   define('NOVA_AI_INTERNAL_KEY',  getenv('NOVA_AI_INTERNAL_KEY') ?: '');
-define('NOVA_AI_VERSION', '6.5.8');
+define('NOVA_AI_VERSION', '6.6.0');
 define('NOVA_AI_PLUGIN_URL',  plugin_dir_url(__FILE__));
 define('NOVA_AI_PLUGIN_DIR',  plugin_dir_path(__FILE__));
 
@@ -149,12 +149,19 @@ function nova_normalize_backend_url(?string $url, ?string $default = null): stri
 }
 
 function nova_get_backend_setting(string $key, string $fallback = ''): string {
+    if (function_exists('ailinux_triforce_setting')) {
+        $shared = ailinux_triforce_setting($key, '');
+        if ($shared !== '') { return nova_normalize_backend_url($shared, $fallback); }
+    }
     $settings = get_option('nova_ai_settings', []);
     $value = $settings[$key] ?? '';
     return nova_normalize_backend_url($value, $fallback);
 }
 
 function nova_get_backend_base(): string {
+    if (function_exists('ailinux_triforce_api_base')) {
+        return nova_normalize_backend_url(ailinux_triforce_api_base(true), NOVA_AI_BACKEND);
+    }
     $settings = get_option('nova_ai_settings', []);
     $internal = $settings['api_endpoint_internal'] ?? '';
     $primary = $settings['api_endpoint'] ?? '';
@@ -166,6 +173,9 @@ function nova_get_display_backend_base(): string {
 }
 
 function nova_get_mcp_base(): string {
+    if (function_exists('ailinux_triforce_mcp_base')) {
+        return nova_normalize_backend_url(ailinux_triforce_mcp_base(), NOVA_AI_LOCAL_BACKEND);
+    }
     $settings = get_option('nova_ai_settings', []);
     $mcp = $settings['mcp_endpoint'] ?? '';
     return nova_normalize_backend_url($mcp, NOVA_AI_LOCAL_BACKEND);
@@ -340,9 +350,9 @@ function nova_proxy_auth(string $path, string $method='GET', ?array $body=null):
         'Content-Type'=>'application/json',
         // FIX 2026-04-11: Credentials aus wp-config.php / Environment
             'Authorization'=>'Basic '.base64_encode(
-                (defined('NOVA_MCP_USER') ? NOVA_MCP_USER : (getenv('MCP_OAUTH_USER') ?: 'zombie'))
+                (function_exists('ailinux_triforce_setting') ? ailinux_triforce_setting('mcp_user', '') : (defined('NOVA_MCP_USER') ? NOVA_MCP_USER : (getenv('MCP_OAUTH_USER') ?: '')))
                 .':'.
-                (defined('NOVA_MCP_PASS') ? NOVA_MCP_PASS : (getenv('MCP_OAUTH_PASS') ?: ''))
+                (function_exists('ailinux_triforce_setting') ? ailinux_triforce_setting('mcp_pass', '') : (defined('NOVA_MCP_PASS') ? NOVA_MCP_PASS : (getenv('MCP_OAUTH_PASS') ?: '')))
             ),
     ]];
     if ($body !== null) $args['body'] = json_encode($body);
