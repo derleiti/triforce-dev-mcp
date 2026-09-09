@@ -181,10 +181,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "GEMINI_API_KEY",
             "GOOGLE_GEMINI_KEY",
-            "GOOGLE_AI_STUDIO_KEY",
-            "GOOGLE_API_KEY",
         ),
     )
+    google_ai_studio_key: str | None = Field(default=None, validation_alias="GOOGLE_AI_STUDIO_KEY")
     google_url: Optional[str] = Field(default=None, validation_alias="GOOGLE_URL")
     google_user: Optional[str] = Field(default=None, validation_alias="GOOGLE_USER")
     google_pass: Optional[str] = Field(default=None, validation_alias="GOOGLE_PASS")
@@ -269,6 +268,8 @@ class Settings(BaseSettings):
     # Cloudflare Workers AI (10,000 neurons/day free)
     cloudflare_account_id: str | None = Field(default=None, validation_alias="CLOUDFLARE_ACCOUNT_ID")
     cloudflare_api_token: str | None = Field(default=None, validation_alias="CLOUDFLARE_API_TOKEN")
+    cloudflare_zone_id: str | None = Field(default=None, validation_alias="CLOUDFLARE_ZONE_ID")
+    cloudflare_zone_api_token: str | None = Field(default=None, validation_alias="CLOUDFLARE_ZONE_API_TOKEN")
     cloudflare_default_model: str = Field(default="@cf/meta/llama-3.3-70b-instruct-fp8-fast", validation_alias="CLOUDFLARE_DEFAULT_MODEL")
 
     # GitHub Models (Free with PAT - GPT-4o, Llama, DeepSeek, etc.)

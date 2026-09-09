@@ -450,10 +450,8 @@ async def _gemini(
     settings = get_settings()
     # Production historically used GOOGLE_AI_STUDIO_KEY while Settings only
     # exposed GEMINI_API_KEY. Resolve both without moving or logging the secret.
-    api_key = _key(
-        settings, "gemini_api_key",
-        "GEMINI_API_KEY", "GOOGLE_AI_STUDIO_KEY", "GOOGLE_API_KEY",
-    )
+    from .google_genai import resolve_api_key
+    api_key = resolve_api_key()
     if not api_key:
         raise HTTPException(503, "Gemini support is not configured")
     system, gemini_contents = _gemini_contents(messages)

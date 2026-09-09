@@ -393,7 +393,7 @@ async def _vision_proxy(model: str, prompt: str, image_url: Optional[str], image
 async def _image_fallback(req: ImageRequest, exclude_prefixes: tuple[str, ...] = ()) -> Optional[Dict[str, Any]]:
     """Try configured image providers when a selected provider is unavailable."""
     candidates: list[str] = []
-    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_AI_STUDIO_KEY"):
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_GEMINI_KEY"):
         candidates.append("gemini/gemini-2.5-flash-image")
     if _openai_key():
         candidates.append("openai/gpt-image-1-mini")
@@ -542,9 +542,10 @@ async def _image_proxy(req: ImageRequest) -> Dict[str, Any]:
     _GEMINI_NATIVE_IMG = ("gemini/gemini-2.5-flash-image", "gemini/gemini-3-pro-image", "gemini/gemini-3.1-flash-image", "gemini/gemini-3.1-pro-image", "gemini/nano-banana")
     # gemini-3.1-pro-image via :predict (Imagen), but gemini-3.1-flash-image via generateContent (free)
     if any(m.startswith(p) for p in _GEMINI_NATIVE_IMG):
-        gemini_key = (os.getenv("GOOGLE_AI_STUDIO_KEY", "") or os.getenv("GEMINI_API_KEY", ""))
+        from ..services.google_genai import resolve_ai_studio_key
+        gemini_key = resolve_ai_studio_key()
         if not gemini_key:
-            raise HTTPException(status_code=400, detail="GEMINI_API_KEY missing for Gemini native image")
+            raise HTTPException(status_code=400, detail="GOOGLE_AI_STUDIO_KEY missing for Gemini native image")
         gemini_model = req.model[len("gemini/"):]
         # Map pixel size to aspect ratio string for imageConfig
         _aspect_map2 = {
@@ -565,7 +566,7 @@ async def _image_proxy(req: ImageRequest) -> Dict[str, Any]:
             },
         }
         async with httpx.AsyncClient(timeout=180.0) as client:
-            r = await client.post(url, params={"key": gemini_key}, json=payload_native)
+            r = await client.post(url, headers={"x-goog-api-key": gemini_key}, json=payload_native)
             if r.status_code >= 400:
                 try:
                     err_msg = r.json().get("error", {}).get("message", r.text)
@@ -591,9 +592,10 @@ async def _image_proxy(req: ImageRequest) -> Dict[str, Any]:
 
     # Gemini Imagen path
     if m.startswith("gemini/imagen"):
-        gemini_key = (os.getenv("GOOGLE_AI_STUDIO_KEY", "") or os.getenv("GEMINI_API_KEY", ""))
+        from ..services.google_genai import resolve_ai_studio_key
+        gemini_key = resolve_ai_studio_key()
         if not gemini_key:
-            raise HTTPException(status_code=400, detail="GEMINI_API_KEY missing for Imagen")
+            raise HTTPException(status_code=400, detail="GOOGLE_AI_STUDIO_KEY missing for Imagen")
         gemini_model = req.model[len("gemini/"):]
         aspect_map = {
             # 1:1 Square
@@ -615,7 +617,7 @@ async def _image_proxy(req: ImageRequest) -> Dict[str, Any]:
             "parameters": {"sampleCount": req.n, "aspectRatio": aspect_ratio},
         }
         async with httpx.AsyncClient(timeout=180.0) as client:
-            r = await client.post(url, params={"key": gemini_key}, json=payload_gemini)
+            r = await client.post(url, headers={"x-goog-api-key": gemini_key}, json=payload_gemini)
             if r.status_code >= 400:
                 try:
                     err_msg = r.json().get("error", {}).get("message", r.text)
@@ -923,7 +925,8 @@ async def _video_proxy(req: VideoRequest) -> Dict[str, Any]:
 
     # Gemini Veo — Google AI API (long-running operation + polling)
     if "veo" in m:
-        key = os.environ.get("GOOGLE_AI_STUDIO_KEY") or os.environ.get("GEMINI_API_KEY")
+        from ..services.google_genai import resolve_ai_studio_key
+        key = resolve_ai_studio_key()
         if not key:
             raise HTTPException(status_code=400, detail="GOOGLE_AI_STUDIO_KEY fehlt für Gemini Veo")
         size_clean = req.size.replace("\u00d7", "x").replace("×", "x").replace(" ", "")
@@ -941,7 +944,7 @@ async def _video_proxy(req: VideoRequest) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=300.0) as client:
             r = await client.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{req.model}:generateVideo",
-                params={"key": key},
+                headers={"x-goog-api-key": key},
                 json=payload
             )
             try:
@@ -971,7 +974,7 @@ async def _video_proxy(req: VideoRequest) -> Dict[str, Any]:
                 await _asyncio.sleep(5)
                 poll = await client.get(
                     f"https://generativelanguage.googleapis.com/v1beta/{op_name}",
-                    params={"key": key}
+                    headers={"x-goog-api-key": key}
                 )
                 poll_data = poll.json() if poll.status_code == 200 else {}
                 if poll_data.get("done"):
@@ -984,7 +987,7 @@ async def _video_proxy(req: VideoRequest) -> Dict[str, Any]:
                     if not video_uri:
                         logger.error("Veo returned no video URI: %s", str(poll_data)[:300])
                         raise HTTPException(status_code=500, detail="Veo video generation failed")
-                    dl = await client.get(video_uri, params={"key": key})
+                    dl = await client.get(video_uri, headers={"x-goog-api-key": key})
                     import base64 as _b64
                     b64 = _b64.b64encode(dl.content).decode()
                     return {

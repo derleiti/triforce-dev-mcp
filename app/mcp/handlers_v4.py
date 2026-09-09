@@ -135,7 +135,8 @@ class HandlerRegistry:
                 try:
                     # Try Gemini first (most reliable)
                     if provider in ("gemini", "google"):
-                        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_AI_STUDIO_KEY")
+                        from app.services.google_genai import resolve_api_key
+                        api_key = resolve_api_key()
                         if not api_key:
                             return {"error": "GEMINI_API_KEY not configured"}
                         
@@ -146,7 +147,7 @@ class HandlerRegistry:
                             contents.append({"role": "model", "parts": [{"text": "Understood."}]})
                         contents.append({"role": "user", "parts": [{"text": message}]})
                         
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent"
                         
                         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
                             async with session.post(

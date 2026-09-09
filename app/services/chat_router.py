@@ -381,8 +381,8 @@ class APIProxy:
         _PROVIDER_ENV = {
             "openai":    ("OPENAI_API_KEY",),
             "anthropic": ("ANTHROPIC_API_KEY",),
-            "google":    ("GEMINI_API_KEY", "GOOGLE_AI_STUDIO_KEY"),
-            "gemini":    ("GEMINI_API_KEY", "GOOGLE_AI_STUDIO_KEY"),
+            "google":    ("GEMINI_API_KEY", "GOOGLE_GEMINI_KEY"),
+            "gemini":    ("GEMINI_API_KEY", "GOOGLE_GEMINI_KEY"),
             "mistral":   ("MISTRAL_API_KEY",),
             "groq":      ("GROQ_API_KEY",),
             "cerebras":  ("CEREBRAS_API_KEY",),
@@ -496,26 +496,29 @@ class APIProxy:
     
     async def _gemini_chat(self, api_key: str, model: str, messages: list, temp: float, max_tokens: int) -> str:
         """Google Gemini API Call"""
-        # Messages zu Gemini-Format konvertieren
+        system_parts = []
         contents = []
         for msg in messages:
-            role = "user" if msg["role"] in ("user", "system") else "model"
-            contents.append({
-                "role": role,
-                "parts": [{"text": msg["content"]}]
-            })
-        
+            if msg["role"] == "system":
+                system_parts.append(msg["content"])
+                continue
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        payload = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temp,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        if system_parts:
+            payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+
         async with aiohttp.ClientSession(timeout=self.timeout) as session:
             async with session.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": contents,
-                    "generationConfig": {
-                        "temperature": temp,
-                        "maxOutputTokens": max_tokens
-                    }
-                }
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json=payload,
             ) as resp:
                 if resp.status != 200:
                     error = await resp.text()

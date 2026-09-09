@@ -102,6 +102,11 @@ DEFAULT_FREE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 
 class ModelAvailabilityService:
+    @staticmethod
+    def _gemini_key() -> str:
+        from .google_genai import resolve_api_key
+        return resolve_api_key() or ""
+
     def __init__(self):
         self._status: Dict[str, ModelStatus] = {}
         self._excluded_models: Set[str] = set(KNOWN_QUOTA_EXHAUSTED)
@@ -110,7 +115,7 @@ class ModelAvailabilityService:
         self._quota_cooldown = timedelta(hours=24)
         
         self._api_keys = {
-            "gemini": os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_GEMINI_KEY", "")),
+            "gemini": self._gemini_key(),
             "anthropic": os.getenv("ANTHROPIC_API_KEY", ""),
             "openai": os.getenv("OPENAI_API_KEY", ""),
             "groq": os.getenv("GROQ_API_KEY", ""),
@@ -203,7 +208,8 @@ class ModelAvailabilityService:
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
                         resp = await client.get(
-                            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+                            "https://generativelanguage.googleapis.com/v1beta/models",
+                            headers={"x-goog-api-key": key},
                         )
                         results["status"] = "healthy" if resp.status_code == 200 else f"error_{resp.status_code}"
                 except Exception as e:

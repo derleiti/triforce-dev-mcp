@@ -1056,53 +1056,35 @@ async def _stream_gemini(
     stream: bool,
     timeout: float,
 ) -> AsyncGenerator[str, None]:
-    import google.generativeai as genai
-    genai.configure(api_key=api_key)
-    # Map legacy model names to current models
-    target_model = GEMINI_MODEL_ALIASES.get(model)
-    if not target_model:
-        target_model = strip_provider_prefix(model)
-    
-    generation_config = None
-    if temperature is not None:
-        generation_config = genai.types.GenerationConfig(temperature=temperature)
+    from google.genai import types
+    from .google_genai import create_client, text_contents
 
-    # Use different variable name to avoid shadowing the 'model' parameter
-    gemini_model = genai.GenerativeModel(target_model)
-    
-    contents: List[dict[str, object]] = []
-    for message in messages:
-        role = message.get("role", "user")
-        if role == "assistant":
-            mapped_role = "model"
-        else:
-            mapped_role = "user"
-        content_text = message.get("content") or ""
-        if not content_text:
-            continue
-        parts = [{"text": content_text}]
-        contents.append({"role": mapped_role, "parts": parts})
-
+    target_model = GEMINI_MODEL_ALIASES.get(model) or strip_provider_prefix(model)
+    system_instruction, contents = text_contents(messages)
     if not contents:
         raise api_error("Messages cannot be empty", status_code=422, code="missing_messages")
 
-    if stream:
-        try:
-            response = await gemini_model.generate_content_async(contents, generation_config=generation_config, stream=True)
-            async for chunk in response:
+    config = types.GenerateContentConfig(
+        temperature=temperature,
+        system_instruction=system_instruction,
+    )
+    try:
+        client = create_client(api_key)
+        if stream:
+            async for chunk in await client.aio.models.generate_content_stream(
+                model=target_model, contents=contents, config=config
+            ):
                 if chunk.text:
                     yield chunk.text
-        except Exception as exc:
-            logger.exception("Error during Gemini streaming: %s", exc)
-            raise api_error(f"Failed to get response from Gemini: {exc}", status_code=502, code="gemini_error") from exc
-    else:
-        try:
-            response = await gemini_model.generate_content_async(contents, generation_config=generation_config, stream=False)
+        else:
+            response = await client.aio.models.generate_content(
+                model=target_model, contents=contents, config=config
+            )
             if response.text:
                 yield response.text
-        except Exception as exc:
-            logger.exception("Error during Gemini non-streaming: %s", exc)
-            raise api_error(f"Failed to get response from Gemini: {exc}", status_code=502, code="gemini_error") from exc
+    except Exception as exc:
+        logger.exception("Error during Gemini request: %s", exc)
+        raise api_error(f"Failed to get response from Gemini: {exc}", status_code=502, code="gemini_error") from exc
 
 
 async def _stream_gpt_oss(

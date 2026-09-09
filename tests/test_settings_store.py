@@ -154,3 +154,14 @@ def test_deployment_mode_is_structured_setting():
     from app.settings_store import settings_inventory
     rows = {row.env_names[0]: row for row in settings_inventory()}
     assert rows["TRIFORCE_DEPLOYMENT_MODE"].category == "Server"
+
+
+def test_cloudflare_zone_token_is_separate_and_secret():
+    from app.config import Settings
+    from app.settings_store import SECRET_ENV_KEYS, settings_inventory
+    inventory = {m.name: m for m in settings_inventory()}
+    assert Settings.model_fields["cloudflare_zone_id"].validation_alias == "CLOUDFLARE_ZONE_ID"
+    assert Settings.model_fields["cloudflare_zone_api_token"].validation_alias == "CLOUDFLARE_ZONE_API_TOKEN"
+    assert "CLOUDFLARE_ZONE_API_TOKEN" in SECRET_ENV_KEYS
+    assert inventory["cloudflare_zone_api_token"].secret is True
+    assert inventory["cloudflare_zone_id"].secret is False

@@ -589,7 +589,7 @@ class ModelRegistry:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     "https://generativelanguage.googleapis.com/v1beta/models",
-                    params={"key": settings.gemini_api_key}
+                    headers={"x-goog-api-key": settings.gemini_api_key},
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -1643,17 +1643,6 @@ registry = ModelRegistry()
 
 
 def resolve_gemini_api_key() -> str | None:
-    """Resolve Gemini API key: settings.gemini_api_key → GEMINI_API_KEY env → GOOGLE_API_KEY env.
-
-    app.config exposes get_settings() only — there is no module-level `settings`.
-    The previous `from ..config import settings` raised ImportError at call time,
-    which broke every Gemini vision request (vision.py:154).
-    """
-    import os
-    from ..config import get_settings
-    settings = get_settings()
-    return (
-        getattr(settings, "gemini_api_key", None)
-        or os.getenv("GEMINI_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-    )
+    """Resolve the canonical Gemini / AI Studio credential."""
+    from .google_genai import resolve_api_key
+    return resolve_api_key()

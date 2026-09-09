@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import httpx
-import google.generativeai as genai
 from PIL import Image
 import io
 
@@ -372,9 +371,8 @@ async def _analyze_with_gemini_data(
     *,
     api_key: str,
 ) -> str:
-    img = Image.open(io.BytesIO(image_bytes))
-    
-    return await _dispatch_gemini(model, prompt, img, api_key)
+    mime = _detect_image_mime(image_bytes) or "image/jpeg"
+    return await _dispatch_gemini(model, prompt, image_bytes, mime, api_key)
 
 
 async def _analyze_with_gemini_url(
@@ -384,18 +382,20 @@ async def _analyze_with_gemini_url(
     *,
     api_key: str,
 ) -> str:
-    _, image_data = await _download_image(image_url)
-    img = Image.open(io.BytesIO(image_data))
-    return await _dispatch_gemini(model, prompt, img, api_key=api_key)
+    mime, image_data = await _download_image(image_url)
+    return await _dispatch_gemini(model, prompt, image_data, mime, api_key=api_key)
 
 
-async def _dispatch_gemini(model_name: str, prompt: str, image: Image, api_key: str) -> str:
-    genai.configure(api_key=api_key)
+async def _dispatch_gemini(model_name: str, prompt: str, image_bytes: bytes, mime_type: str, api_key: str) -> str:
+    from google.genai import types
+    from .google_genai import create_client
     target_model = strip_provider_prefix(model_name)
-    model = genai.GenerativeModel(target_model)
-    
     try:
-        response = await model.generate_content_async([prompt, image])
+        client = create_client(api_key)
+        response = await client.aio.models.generate_content(
+            model=target_model,
+            contents=[prompt, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
+        )
     except Exception as exc:
         raise api_error(
             f"Failed to reach Gemini API: {exc}",

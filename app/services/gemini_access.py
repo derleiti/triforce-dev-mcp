@@ -28,17 +28,14 @@ settings = get_settings()
 
 # Optional: Google GenAI SDK für Function Calling
 try:
-    import google.generativeai as genai
-    from google.generativeai.types import (
-        FunctionDeclaration,
-        Tool as GeminiTool,
-        GenerationConfig,
-    )
+    from google import genai
+    from google.genai import types as genai_types
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
     genai = None
-    logger.info("google-generativeai not installed, function calling via SDK disabled")
+    genai_types = None
+    logger.info("google-genai not installed, Gemini SDK features disabled")
 
 
 class GeminiAccessPoint:
@@ -56,6 +53,7 @@ class GeminiAccessPoint:
         self._cache_ttl = 300  # 5 Minuten
         self._function_handlers: Dict[str, Callable[..., Awaitable[Any]]] = {}
         self._genai_initialized = False
+        self._genai_client = None
         self._init_genai()
 
     def _init_genai(self):
@@ -64,14 +62,15 @@ class GeminiAccessPoint:
             logger.debug("GenAI SDK not available")
             return
 
-        api_key = settings.gemini_api_key
-        if api_key:
-            try:
-                genai.configure(api_key=api_key)
+        try:
+            from .google_genai import create_client, resolve_api_key
+            api_key = resolve_api_key()
+            if api_key:
+                self._genai_client = create_client(api_key)
                 self._genai_initialized = True
-                logger.info("Gemini GenAI SDK initialized for function calling")
-            except Exception as e:
-                logger.warning(f"Failed to initialize GenAI: {e}")
+                logger.info("Google Gen AI SDK initialized for Gemini / AI Studio")
+        except Exception as e:
+            logger.warning("Failed to initialize Google Gen AI SDK: %s", e)
 
     def register_function(self, name: str, handler: Callable[..., Awaitable[Any]]):
         """Register a function handler for Gemini to call."""
@@ -562,13 +561,21 @@ Erstelle eine strukturierte Zusammenfassung und identifiziere:
 
         for attempt in range(max_retries + 1):
             try:
-                gemini_model = genai.GenerativeModel(
-                    model_name=model,
-                    tools=tools or None,
-                    generation_config=GenerationConfig(temperature=temperature),
-                )
+                if self._genai_client is None:
+                    raise RuntimeError("Google Gen AI client is not initialized")
                 response = await asyncio.wait_for(
-                    asyncio.to_thread(gemini_model.generate_content, prompt),
+                    self._genai_client.aio.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            temperature=temperature,
+                            tools=tools or None,
+                            automatic_function_calling=(
+                                genai_types.AutomaticFunctionCallingConfig(disable=True)
+                                if tools else None
+                            ),
+                        ),
+                    ),
                     timeout=timeout,
                 )
                 return response
@@ -781,17 +788,17 @@ Erstelle eine strukturierte Zusammenfassung und identifiziere:
                 if required:
                     parameters_schema["required"] = required
 
-                declaration = FunctionDeclaration(
+                declaration = genai_types.FunctionDeclaration(
                     name=tool_name,
                     description=tool.get("description", ""),
-                    parameters=parameters_schema,
+                    parameters_json_schema=parameters_schema,
                 )
                 declarations.append(declaration)
             except Exception as e:
                 logger.warning(f"Failed to create declaration for {tool_name}: {e}")
 
         if declarations:
-            return [GeminiTool(function_declarations=declarations)]
+            return [genai_types.Tool(function_declarations=declarations)]
         return []
 
     async def function_call(
@@ -1029,11 +1036,9 @@ Verfügbare Tools:
         }
 
         try:
-            # Use Gemini with code execution enabled
-            model = genai.GenerativeModel(
-                model_name="gemini-2.5-flash",
-                tools=[{"code_execution": {}}],
-            )
+            if self._genai_client is None:
+                raise RuntimeError("Google Gen AI client is not initialized")
+            code_tool = genai_types.Tool(code_execution=genai_types.ToolCodeExecution())
 
             prompt = f"""Execute this Python code and return the results:
 
@@ -1045,7 +1050,11 @@ Verfügbare Tools:
 
 Return the output, any errors, and explain what the code does."""
 
-            response = model.generate_content(prompt)
+            response = await self._genai_client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(tools=[code_tool]),
+            )
 
             # Parse response for code execution results
             output_text = response.text
