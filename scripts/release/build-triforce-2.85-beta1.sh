@@ -30,6 +30,10 @@ make_control(){
     "$pkg/usr/share/applications" "$pkg/usr/share/icons/hicolor/scalable/apps" \
     "$pkg/usr/share/polkit-1/actions" "$pkg/usr/share/doc/triforce-control-center"
   cp -a "$GUI/." "$pkg/opt/triforce-control-center/"
+  # Prune embedded/GTK/print plugin groups unused by this desktop settings UI.
+  rm -rf "$pkg/opt/triforce-control-center/PyQt6/Qt6/plugins/egldeviceintegrations" \
+         "$pkg/opt/triforce-control-center/PyQt6/Qt6/plugins/platformthemes" \
+         "$pkg/opt/triforce-control-center/PyQt6/Qt6/plugins/printsupport"
   cp "$ROOT/packaging/triforce-control-center.desktop" "$pkg/usr/share/applications/"
   cp "$ROOT/packaging/triforce-control-center.svg" "$pkg/usr/share/icons/hicolor/scalable/apps/triforce-control-center.svg"
   cp "$ROOT/packaging/polkit/me.ailinux.triforce.control.policy" "$pkg/usr/share/polkit-1/actions/"
@@ -45,7 +49,7 @@ Version: $VERSION
 Architecture: $ARCH
 Section: admin
 Priority: optional
-Depends: triforce-backend (= $VERSION), pkexec, systemd
+Depends: triforce-backend (= $VERSION), pkexec, systemd, libgl1, libegl1, libx11-6, libx11-xcb1, libxcb1, libxcb-cursor0, libxcb-glx0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render0, libxcb-render-util0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-util1, libxcb-xfixes0, libxcb-xkb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libwayland-client0, libwayland-cursor0, libwayland-egl1, libgbm1, libdrm2
 Maintainer: Markus Leitermann <admin@ailinux.me>
 Homepage: https://ailinux.me
 Description: Compiled PyQt6 Control Center for TriForce
@@ -79,7 +83,8 @@ make_backend(){
          "$pkg/opt/triforce/runtime/lib/python3.14/site-packages/mypy"* \
          "$pkg/opt/triforce/runtime/lib/python3.14/site-packages/ruff"* 2>/dev/null || true
   cp "$ROOT/packaging/triforce-admin-helper.py" "$pkg/usr/lib/triforce/triforce-admin-helper"
-  chmod 755 "$pkg/usr/lib/triforce/triforce-admin-helper" "$pkg/opt/triforce/scripts/start-triforce.sh" "$pkg/opt/triforce/bin/triforce-control"
+  cp "$ROOT/packaging/triforce-setup-runner.py" "$pkg/usr/lib/triforce/triforce-setup-runner"
+  chmod 755 "$pkg/usr/lib/triforce/triforce-admin-helper" "$pkg/usr/lib/triforce/triforce-setup-runner" "$pkg/opt/triforce/scripts/start-triforce.sh" "$pkg/opt/triforce/bin/triforce-control"
   cp "$ROOT/packaging/systemd/triforce.service" "$pkg/usr/lib/systemd/system/triforce.service"
   cat > "$pkg/usr/bin/triforce-control" <<'EOF'
 #!/bin/sh
@@ -116,12 +121,19 @@ EOF
 set -e
 if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
   /bin/systemctl stop triforce.service 2>/dev/null || true
+  /bin/systemctl disable triforce.service 2>/dev/null || true
 fi
 exit 0
 EOF
   cat > "$pkg/DEBIAN/postrm" <<'EOF'
 #!/bin/sh
 set -e
+# Program files are immutable by design. Remove only generated Python bytecode
+# and now-empty program directories that dpkg cannot know about.
+if [ -d /opt/triforce ]; then
+  find /opt/triforce -type f -name '*.pyc' -delete 2>/dev/null || true
+  find /opt/triforce -depth -type d -empty -delete 2>/dev/null || true
+fi
 /bin/systemctl daemon-reload 2>/dev/null || true
 # /etc/triforce and /var/lib/triforce are intentionally retained, including purge.
 exit 0

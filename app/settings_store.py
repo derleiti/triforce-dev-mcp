@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 import stat
 import tempfile
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, get_args, get_origin, Literal
 
 from dotenv import dotenv_values
 
@@ -30,6 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_CONFIG = Path("/etc/triforce/triforce.env")
 PROJECT_CONFIG = PROJECT_ROOT / "config" / "triforce.env"
 CONFIG_ENV = "TRIFORCE_CONFIG_FILE"
+MASKED_SECRET_VALUE = "••••••••"
 
 # Explicit classification: never infer secrecy from a field name at runtime.
 SECRET_ENV_KEYS = frozenset({
@@ -74,7 +75,15 @@ class SettingMeta:
     description: str
     secret: bool
     default: Any
+    value_type: str = "string"
+    minimum: int | float | None = None
+    maximum: int | float | None = None
+    choices: tuple[str, ...] = ()
+    dependencies: tuple[str, ...] = ()
+    storage: str = "config-file"
+    unit: str | None = None
     required_restart: bool = True
+    live_apply: bool = False
     deprecated: bool = False
     replaced_by: str | None = None
 
@@ -143,20 +152,87 @@ def _aliases(field: Any) -> tuple[str, ...]:
 def _category(name: str, env_names: Iterable[str]) -> str:
     joined = " ".join((name, *env_names)).upper()
     for marker, category in (
-        ("MEMORY", "Memory"), ("MCP_", "MCP & Sicherheit"), ("OLLAMA", "Provider & Modelle"),
+        ("MEMORY", "Memory"), ("EPISODIC", "Memory"),
+        ("MCP_", "MCP & Sicherheit"),
+        ("AGENT", "Agenten"), ("CODEX", "Agenten"), ("OPENCODE", "Agenten"),
+        ("NOVA_CLAUDE", "Agenten"), ("TRISTAR", "Agenten"),
+        ("OLLAMA", "Provider & Modelle"),
         ("GEMINI", "Provider & Modelle"), ("OPENAI", "Provider & Modelle"),
         ("OPENROUTER", "Provider & Modelle"), ("ANTHROPIC", "Provider & Modelle"),
         ("MISTRAL", "Provider & Modelle"), ("GROQ", "Provider & Modelle"),
         ("CEREBRAS", "Provider & Modelle"), ("NVIDIA", "Provider & Modelle"),
         ("CLOUDFLARE", "Provider & Modelle"), ("REDIS", "Server & Integrationen"),
         ("WORDPRESS", "Server & Integrationen"), ("MAIL_", "Server & Integrationen"),
-        ("CRAWLER", "Server & Integrationen"), ("TRIFORCE_BIND", "Server"),
+        ("CRAWLER", "Server & Integrationen"), ("FEDERATION", "Server & Integrationen"),
+        ("TELEGRAM", "Server & Integrationen"), ("N8N", "Server & Integrationen"),
+        ("SEARX", "Server & Integrationen"), ("SEARCH", "Server & Integrationen"),
+        ("TRIFORCE_BIND", "Server"),
         ("TRIFORCE_API_PORT", "Server"), ("CORS", "Server & Sicherheit"),
     ):
         if marker in joined:
             return category
     return "Erweitert"
 
+
+
+def _field_type_name(annotation: Any) -> str:
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is Literal:
+        return "choice"
+    if origin is not None:
+        if origin in (list, tuple, set):
+            return "list"
+        if origin is dict:
+            return "json"
+        non_none = [arg for arg in args if arg is not type(None)]
+        if len(non_none) == 1:
+            return _field_type_name(non_none[0])
+    if annotation is bool: return "bool"
+    if annotation is int: return "integer"
+    if annotation is float: return "number"
+    if annotation is str: return "string"
+    name = getattr(annotation, "__name__", "")
+    if name in {"AnyHttpUrl", "HttpUrl"}: return "url"
+    try:
+        from enum import Enum
+        if isinstance(annotation, type) and issubclass(annotation, Enum): return "choice"
+    except TypeError:
+        pass
+    return name or str(annotation).replace("typing.", "")
+
+
+def _field_choices(annotation: Any) -> tuple[str, ...]:
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is Literal:
+        return tuple(str(x) for x in args)
+    non_none = [arg for arg in args if arg is not type(None)] if origin is not None else []
+    if len(non_none) == 1:
+        return _field_choices(non_none[0])
+    try:
+        from enum import Enum
+        if isinstance(annotation, type) and issubclass(annotation, Enum):
+            return tuple(str(member.value) for member in annotation)
+    except TypeError:
+        pass
+    return ()
+
+
+def _field_limits(field: Any) -> tuple[int | float | None, int | float | None]:
+    minimum = maximum = None
+    for item in field.metadata:
+        for attr in ("ge", "gt"):
+            value = getattr(item, attr, None)
+            if value is not None: minimum = value
+        for attr in ("le", "lt"):
+            value = getattr(item, attr, None)
+            if value is not None: maximum = value
+        min_length = getattr(item, "min_length", None)
+        max_length = getattr(item, "max_length", None)
+        if minimum is None and min_length is not None: minimum = min_length
+        if maximum is None and max_length is not None: maximum = max_length
+    return minimum, maximum
 
 def settings_inventory() -> list[SettingMeta]:
     # Lazy import avoids a cycle: app.config imports effective_environment.
@@ -166,6 +242,7 @@ def settings_inventory() -> list[SettingMeta]:
     for name, field in Settings.model_fields.items():
         env_names = _aliases(field)
         title = name.replace("_", " ").strip().title()
+        minimum, maximum = _field_limits(field)
         result.append(SettingMeta(
             name=name,
             env_names=env_names,
@@ -174,6 +251,11 @@ def settings_inventory() -> list[SettingMeta]:
             description=field.description or "",
             secret=any(alias in SECRET_ENV_KEYS for alias in env_names),
             default=None if field.is_required() else field.default,
+            value_type=_field_type_name(field.annotation),
+            minimum=minimum,
+            maximum=maximum,
+            choices=_field_choices(field.annotation),
+            deprecated=bool(getattr(field, "deprecated", False)),
         ))
     return result
 
@@ -296,6 +378,74 @@ def restore_last_good(
     _atomic_write(target, backup.read_bytes(), mode)
     return load_snapshot(target)
 
+
+
+def redact_dotenv_text(text: str) -> str:
+    """Return dotenv text with explicitly-classified secret values masked."""
+    out: list[str] = []
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in SECRET_ENV_KEYS:
+                newline = "\n" if line.endswith("\n") else ""
+                indent = line[: len(line) - len(line.lstrip())]
+                out.append(f"{indent}{key}={MASKED_SECRET_VALUE}{newline}")
+                continue
+        out.append(line)
+    return "".join(out)
+
+
+def restore_masked_secrets(edited_text: str, original_text: str) -> str:
+    """Restore unchanged masked secret lines from the protected original text."""
+    originals: dict[str, str] = {}
+    for line in original_text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in SECRET_ENV_KEYS:
+                originals[key] = line
+    out: list[str] = []
+    for line in edited_text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            if key in SECRET_ENV_KEYS and value.strip() == MASKED_SECRET_VALUE and key in originals:
+                original = originals[key]
+                if line.endswith("\n") and not original.endswith("\n"):
+                    original += "\n"
+                elif not line.endswith("\n") and original.endswith("\n"):
+                    original = original[:-1]
+                out.append(original)
+                continue
+        out.append(line)
+    return "".join(out)
+
+
+def save_raw_text(
+    text: str,
+    *,
+    path: str | os.PathLike[str] | None = None,
+    expected_digest: str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> ConfigSnapshot:
+    """Validate and atomically save complete dotenv text, preserving its layout."""
+    target = resolve_config_path(path)
+    before = load_snapshot(target)
+    if expected_digest is not None and before.digest != expected_digest:
+        raise ConfigConflict(f"configuration changed on disk: {target}")
+    try:
+        candidate_values = dict(dotenv_values(stream=StringIO(text)))
+    except Exception as exc:
+        raise ConfigError(f"invalid dotenv data: {exc}") from exc
+    validate_supported_values(candidate_values, environ=environ)
+    mode = before.mode if before.mode is not None else 0o600
+    if target.exists():
+        backup = target.with_name(target.name + ".last-good")
+        _atomic_write(backup, _read_bytes(target), mode)
+    _atomic_write(target, text.encode("utf-8"), mode)
+    return load_snapshot(target)
 
 def redact(values: Mapping[str, Any]) -> dict[str, Any]:
     return {k: ("***" if k in SECRET_ENV_KEYS and v not in (None, "") else v) for k, v in values.items()}

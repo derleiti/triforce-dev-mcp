@@ -87,3 +87,42 @@ def test_claude_agent_compatibility_aliases_do_not_collide():
     nova = Settings.model_validate({"NOVA_CLAUDE_AGENT_ID": "nova"}, by_alias=True, by_name=True)
     assert nova.nova_claude_agent_id == "nova"
     assert nova.claude_agent_id is None
+
+def test_inventory_exposes_type_limits_choices_and_storage():
+    from app.settings_store import settings_inventory
+    inventory = {m.name: m for m in settings_inventory()}
+    port = inventory["server_port"]
+    assert port.value_type == "integer"
+    assert port.storage == "config-file"
+    assert port.required_restart is True
+    assert port.minimum == 1
+    assert port.maximum == 65535
+    assert isinstance(port.choices, tuple)
+
+def test_inventory_has_required_control_center_categories():
+    from app.settings_store import settings_inventory
+    categories = {m.category for m in settings_inventory()}
+    assert {"Provider & Modelle", "MCP & Sicherheit", "Agenten", "Memory", "Server & Integrationen"}.issubset(categories)
+
+def test_redacted_raw_roundtrip_preserves_secret_and_comments(tmp_path):
+    from app.settings_store import redact_dotenv_text, restore_masked_secrets, save_raw_text, load_snapshot
+    p = tmp_path / "triforce.env"
+    original = "# keep me\nMCP_OAUTH_PASS=secret-value\nUNKNOWN_FLAG=old\n"
+    p.write_text(original)
+    snap = load_snapshot(p)
+    redacted = redact_dotenv_text(original)
+    assert "secret-value" not in redacted
+    edited = redacted.replace("UNKNOWN_FLAG=old", "UNKNOWN_FLAG=new")
+    restored = restore_masked_secrets(edited, original)
+    assert "MCP_OAUTH_PASS=secret-value" in restored
+    save_raw_text(restored, path=p, expected_digest=snap.digest, environ={})
+    assert p.read_text() == "# keep me\nMCP_OAUTH_PASS=secret-value\nUNKNOWN_FLAG=new\n"
+
+
+def test_raw_save_detects_parallel_change(tmp_path):
+    from app.settings_store import ConfigConflict, load_snapshot, save_raw_text
+    p = tmp_path / "triforce.env"; p.write_text("REQUEST_TIMEOUT=10\n")
+    snap = load_snapshot(p); p.write_text("REQUEST_TIMEOUT=11\n")
+    import pytest
+    with pytest.raises(ConfigConflict):
+        save_raw_text("REQUEST_TIMEOUT=12\n", path=p, expected_digest=snap.digest, environ={})

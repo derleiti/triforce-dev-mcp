@@ -709,7 +709,7 @@ COMMAND_TEMPLATES = {
     "triforce_git_log":   (["bash", "-c", "cd /home/zombie/triforce && git log --oneline -10"], False, 5, "Last 10 git commits"),
     "triforce_git_status":(["bash", "-c", "cd /home/zombie/triforce && git status --short"], False, 5, "Git working tree status"),
     "ollama_models":      (["bash", "-c", "curl -s http://localhost:11434/api/tags | python3 -c \"import sys,json;[print(f'{m[\\\"name\\\"]:30s} {m[\\\"size\\\"]//1024//1024}MB') for m in json.load(sys.stdin).get('models',[])]\""], False, 10, "List Ollama models with sizes"),
-    "triforce_config":    (["bash", "-c", "grep -v '^#' /home/zombie/triforce/config/triforce.env | grep -v '^$' | grep -v 'KEY\\|PASS\\|SECRET\\|TOKEN' | head -30"], False, 5, "Show config (no secrets)"),
+    "triforce_config":    (["/opt/triforce/runtime/bin/python", "-c", "from app.settings_store import load_snapshot,redact; import json; print(json.dumps(redact(load_snapshot().values), ensure_ascii=False))"], False, 5, "Show canonical TriForce config (redacted)"),
     # Security
     "ssh_auth_log":       (["bash", "-c", "grep 'sshd' /var/log/auth.log | tail -20"], False, 5, "Recent SSH auth events"),
     "active_users":       (["who"], False, 5, "Currently logged in users"),

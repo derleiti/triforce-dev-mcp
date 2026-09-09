@@ -84,7 +84,15 @@ cleanup() {
     [ -z "$UPDATE_PID" ] || kill "$UPDATE_PID" 2>/dev/null || true
     kill -TERM "$MAIN_PID" 2>/dev/null || true
 }
-trap cleanup TERM INT
+
+on_signal() {
+    cleanup
+    set +e
+    wait "$MAIN_PID" 2>/dev/null
+    set -e
+    exit 0
+}
+trap on_signal TERM INT
 
 set +e
 wait "$MAIN_PID"

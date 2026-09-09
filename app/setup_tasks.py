@@ -64,9 +64,13 @@ def check_system() -> TaskResult:
     problems: list[str] = []
     if sys.version_info < (3, 11):
         problems.append(f"Python {sys.version_info.major}.{sys.version_info.minor} < 3.11")
-    for binary in ("systemctl", "python3"):
-        if not shutil.which(binary):
-            problems.append(f"{binary} fehlt")
+    if not shutil.which("systemctl"):
+        problems.append("systemctl fehlt")
+    # The Debian package deliberately ships an isolated Python runtime. Do not
+    # require an unrelated global `python3` shim when this checker itself is
+    # already executing on a supported interpreter.
+    if not Path(sys.executable).is_file():
+        problems.append("aktive Python-Laufzeit fehlt")
     free = shutil.disk_usage("/").free
     if free < 1_000_000_000:
         problems.append("weniger als 1 GB freier Speicher")

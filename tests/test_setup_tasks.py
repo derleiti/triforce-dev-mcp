@@ -27,3 +27,11 @@ def test_unknown_task_is_rejected():
         pass
     else:
         raise AssertionError("unknown task must be rejected")
+
+
+def test_system_check_does_not_require_global_python3_shim(monkeypatch):
+    import app.setup_tasks as setup_tasks
+    real_which = setup_tasks.shutil.which
+    monkeypatch.setattr(setup_tasks.shutil, "which", lambda name: None if name == "python3" else real_which(name))
+    result = setup_tasks.check_system()
+    assert result.ok, result.message

@@ -109,3 +109,39 @@ Systemd-Container-E2E:
 Tests:
 - Gebündelter isolierter Regressionlauf: 68 passed.
 - `compileall`, `py_compile`, `bash -n`, `git diff --check` bestanden.
+
+## Finale Beta-1-Abnahme (2026-09-09)
+
+Der aktuelle Kandidat wurde nach den letzten Settings-/Setup-Korrekturen vollständig neu gebaut und erneut geprüft.
+
+### Erledigt und getestet
+
+- Zentrale Konfiguration: Prozess-Environment → `/etc/triforce/triforce.env` → Defaults; keine produktiven Python-Fallbacks mehr auf `/home/zombie/triforce/.env`.
+- TriStar-, Anthropic- und Flarum-Konfigurationszugriffe auf den zentralen Settings-Store umgestellt.
+- Geschützter Raw-Editor: `config-read` liefert ausschließlich redigierte Secrets; `config-raw-update` stellt unveränderte Masken aus der root-lesbaren Originaldatei wieder her, validiert und schreibt atomar mit `.last-good`.
+- Persistente Setup-Aufträge über den festen transienten systemd-Job `triforce-setup-job`; Abhängigkeiten werden vor Mutationen geprüft.
+- Setup-Abbruch ist auf genau diesen festen Unit-Namen begrenzt und wurde gegen echtes systemd getestet.
+- GUI-System-/Admin-Aktionen laufen über `QProcess` bzw. Worker statt blockierend im Qt-Eventloop.
+- Vollständiger Testlauf: **253/253 passed**.
+- Neu gebautes Nuitka-Standalone-GUI: Offscreen-Smoke **5 Seiten / 152 Settings-Zeilen**.
+- Fresh install der finalen `.deb`: Dienst standardmäßig **disabled/inactive**, Config `root:triforce` `0640`, GUI als normaler Benutzer startbar.
+- Setup-Runner auf Fresh Install: `runtime-init`, `config-init`, `service-install` jeweils `completed`.
+- API Health: HTTP 200.
+- MCP: ohne Auth HTTP 401; mit frisch generierten lokalen Credentials Tool-Discovery erfolgreich (**39 Core-Tools**).
+- Sauberer systemd-Stop: `Result=success`.
+- Synthetischer Upgrade-Test `2.85.0~beta0 → 2.85.0~beta1`: Config, lokales Secret, State und Enable-Zustand bleiben erhalten.
+- `remove` und `purge`: Programmdateien/Enable-Link werden entfernt; Betreiber-Config unter `/etc/triforce` und State unter `/var/lib/triforce` bleiben absichtlich erhalten.
+
+### Finale Artefakte
+
+- `triforce-backend_2.85.0~beta1_amd64.deb`
+  - SHA256 `fb172b36b153722998a0eaa262ab2bb5528ce941053368acb39362ebe2c20e5b`
+- `triforce-control-center_2.85.0~beta1_amd64.deb`
+  - SHA256 `ee3dd562cc5525849d0028839bf06a03a453024a8010a44f22c461e3b77276e9`
+
+### Bewusste Grenzen von Beta 1
+
+- Verifiziert auf **Ubuntu 26.04.1 LTS amd64 / Python 3.14**. Ubuntu 24.04/Noble ist mit diesem Build nicht verifiziert.
+- Die Installations-/Upgrade-Abnahme lief in einem privilegierten Ubuntu-26.04-systemd-Container mit echtem systemd als PID 1; kein separater QEMU-VM-Test.
+- Provider-Verbindungstests werden nicht automatisch beim Start ausgelöst. Das ist absichtlich fail-safe und vermeidet Kosten/Rate-Limits/Nebenwirkungen.
+- Alte breit wirkende Installationsskripte mit globalen Paket-/npm-Eingriffen sind nicht als Root-Buttons im Control Center exponiert.

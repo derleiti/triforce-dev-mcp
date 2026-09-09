@@ -29,3 +29,23 @@ Server-Start und Boot-Autostart sind unabhängig. Der Desktop-Autostart des Cont
 Programmdateien: `/opt/triforce`. Konfiguration: `/etc/triforce`. Persistente Daten: `/var/lib/triforce`. Logs: journald und `/var/log/triforce` für Komponenten, die Dateilogging benötigen.
 
 Bei `remove` wird ein laufender TriForce-Dienst gestoppt. Konfiguration und persistente Daten werden auch bei `purge` absichtlich **nicht automatisch gelöscht**. Damit kann eine Paketentfernung keine produktiven Daten still vernichten; eine spätere manuelle Datenlöschung bleibt eine bewusste Administratoraktion.
+
+## Setup-Aufträge und Abbruch
+
+Das Control Center und `triforce-control` benutzen dieselben deklarativen Setup-Aufträge. Verändernde Aufträge werden über PolicyKit an den festen Helper delegiert und als transienter systemd-Job `triforce-setup-job` ausgeführt. Deklarierte Abhängigkeiten werden vor der Mutation geprüft.
+
+CLI-Beispiele:
+
+```bash
+triforce-control tasks
+triforce-control plan runtime-init
+triforce-control run runtime-init
+triforce-control job
+triforce-control cancel
+```
+
+`cancel` kann ausschließlich den festen TriForce-Setup-Job stoppen; ein beliebiger Unit-Name kann nicht übergeben werden.
+
+## Deinstallation
+
+`remove` und `purge` löschen die installierten Programmdateien und deaktivieren die Unit. `/etc/triforce` und `/var/lib/triforce` werden aus Sicherheitsgründen nicht automatisch gelöscht, damit Betreiber-Konfiguration, lokale Secrets und Zustandsdaten nicht versehentlich verloren gehen.

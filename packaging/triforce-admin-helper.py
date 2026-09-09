@@ -16,6 +16,8 @@ import secrets
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True
+
 INSTALL_ROOT = Path("/opt/triforce")
 ETC_DIR = Path("/etc/triforce")
 CONFIG = ETC_DIR / "triforce.env"
@@ -24,6 +26,8 @@ LOG_DIR = Path("/var/log/triforce")
 UNIT_SOURCE = INSTALL_ROOT / "packaging/systemd/triforce.service"
 UNIT_DEST = Path("/etc/systemd/system/triforce.service")
 SERVICE = "triforce.service"
+SETUP_RUNNER = Path("/usr/lib/triforce/triforce-setup-runner")
+SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install"})
 
 
 def require_root() -> None:
@@ -76,12 +80,28 @@ def config_init() -> None:
                 sanitized.append(f"{key}=")
                 continue
         sanitized.append(line)
-    text = "\n".join(sanitized).rstrip() + "\n"
+    generated = {
+        "MCP_OAUTH_PASS": secrets.token_urlsafe(32),
+        "JWT_SECRET": secrets.token_urlsafe(48),
+        "TRIFORCE_ADMIN_SECRET": secrets.token_urlsafe(32),
+    }
+    rendered: list[str] = []
+    seen_generated: set[str] = set()
+    for line in sanitized:
+        stripped = line.lstrip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in generated:
+                rendered.append(f"{key}={generated[key]}")
+                seen_generated.add(key)
+                continue
+        rendered.append(line)
+    for key, value in generated.items():
+        if key not in seen_generated:
+            rendered.append(f"{key}={value}")
+    text = "\n".join(rendered).rstrip() + "\n"
     # Local authentication secrets are generated here and never emitted to
     # stdout, package metadata, process arguments, or build logs.
-    text += f"MCP_OAUTH_PASS={secrets.token_urlsafe(32)}\n"
-    text += f"JWT_SECRET={secrets.token_urlsafe(48)}\n"
-    text += f"TRIFORCE_ADMIN_SECRET={secrets.token_urlsafe(32)}\n"
     text += "TRIFORCE_BIND_HOST=127.0.0.1\nTRIFORCE_API_PORT=9100\nCRAWLER_SPOOL_DIR=/var/lib/triforce/crawler_spool\nCRAWLER_TRAIN_DIR=/var/lib/triforce/crawler_spool/train\nMCP_WS_ENABLED=false\nMCP_ALLOW_UNAUTHENTICATED_LOCAL=false\n"
     fd = os.open(CONFIG, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
     with os.fdopen(fd, "w") as fh:
@@ -109,6 +129,63 @@ def service_action(action: str) -> None:
     }
     run_fixed("/bin/systemctl", *mapping[action], SERVICE)
 
+
+
+def setup_start(task: str) -> None:
+    if task not in SETUP_TASKS:
+        raise SystemExit("invalid setup task")
+    if not SETUP_RUNNER.is_file():
+        raise SystemExit("packaged setup runner missing")
+    # systemd owns the job after this command returns; closing the GUI therefore
+    # cannot terminate an in-progress setup operation.
+    run_fixed(
+        "/usr/bin/systemd-run", "--unit=triforce-setup-job", "--service-type=exec",
+        "--property=TimeoutStartSec=15min", "--property=NoNewPrivileges=true",
+        str(SETUP_RUNNER), task,
+    )
+
+
+
+def setup_cancel() -> None:
+    """Cancel only the single fixed TriForce setup transient unit."""
+    run_fixed("/bin/systemctl", "stop", "triforce-setup-job.service")
+    status_file = Path("/run/triforce-control-center/setup-job.json")
+    try:
+        current = json.loads(status_file.read_text(encoding="utf-8"))
+    except Exception:
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    current.update({"state": "cancelled", "message": "Setup-Auftrag wurde abgebrochen."})
+    status_file.parent.mkdir(parents=True, exist_ok=True)
+    status_file.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.chmod(status_file, 0o644)
+
+def config_read() -> None:
+    sys.path.insert(0, str(INSTALL_ROOT))
+    from app.settings_store import MASKED_SECRET_VALUE, SECRET_ENV_KEYS, load_snapshot, redact_dotenv_text
+    snap = load_snapshot(CONFIG)
+    values = {k: (MASKED_SECRET_VALUE if k in SECRET_ENV_KEYS and v not in (None, "") else v) for k, v in snap.values.items()}
+    payload = {
+        "path": str(CONFIG),
+        "digest": snap.digest,
+        "values": values,
+        "raw": redact_dotenv_text(CONFIG.read_text(encoding="utf-8")),
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def config_raw_update() -> None:
+    payload = json.load(sys.stdin)
+    if set(payload) != {"expected_digest", "text"} or not isinstance(payload["text"], str):
+        raise SystemExit("invalid raw config payload")
+    sys.path.insert(0, str(INSTALL_ROOT))
+    from app.settings_store import restore_masked_secrets, save_raw_text
+    original = CONFIG.read_text(encoding="utf-8")
+    restored = restore_masked_secrets(payload["text"], original)
+    save_raw_text(restored, path=CONFIG, expected_digest=str(payload["expected_digest"]), environ={})
+    os.chmod(CONFIG, 0o640)
+    shutil.chown(CONFIG, user="root", group="triforce")
 
 def config_update() -> None:
     # JSON comes through stdin so secrets never appear in process arguments.
@@ -140,15 +217,26 @@ def main() -> int:
     parser.add_argument("action", choices=[
         "runtime-init", "config-init", "service-install",
         "service-start", "service-stop", "service-restart",
-        "service-enable", "service-disable", "config-update", "config-restore",
+        "service-enable", "service-disable", "config-read", "config-update", "config-raw-update", "config-restore",
+        "setup-start", "setup-cancel",
     ])
-    action = parser.parse_args().action
+    parser.add_argument("task", nargs="?", choices=sorted(SETUP_TASKS))
+    args = parser.parse_args()
+    action = args.action
+    if action == "setup-start" and args.task is None:
+        parser.error("setup-start requires a fixed task id")
+    if action != "setup-start" and args.task is not None:
+        parser.error("task argument is only valid for setup-start")
     if action == "runtime-init": runtime_init()
     elif action == "config-init": config_init()
     elif action == "service-install": service_install()
     elif action in {"service-start", "service-stop", "service-restart", "service-enable", "service-disable"}: service_action(action)
+    elif action == "config-read": config_read()
     elif action == "config-update": config_update()
+    elif action == "config-raw-update": config_raw_update()
     elif action == "config-restore": config_restore()
+    elif action == "setup-start": setup_start(args.task)
+    elif action == "setup-cancel": setup_cancel()
     return 0
 
 

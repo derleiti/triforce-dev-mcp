@@ -31,15 +31,13 @@ ANTHROPIC_VERSION = "2023-06-01"
 
 def _get_api_key() -> str:
     api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        for path in ["/home/zombie/triforce/config/triforce.env", "/home/zombie/triforce/.env"]:
-            if os.path.exists(path):
-                with open(path) as f:
-                    for line in f:
-                        if line.startswith("ANTHROPIC_API_KEY="):
-                            api_key = line.split("=", 1)[1].strip()
-                            break
-    return api_key
+    if api_key:
+        return api_key
+    try:
+        from app.settings_store import load_snapshot
+        return str(load_snapshot().values.get("ANTHROPIC_API_KEY") or "")
+    except Exception:
+        return ""
 
 
 def _headers(beta: str = None) -> dict:
