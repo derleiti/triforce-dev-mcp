@@ -225,7 +225,17 @@ def _set_deployment_mode(mode: str) -> None:
     sys.path.insert(0, str(INSTALL_ROOT))
     from app.settings_store import load_snapshot, save_updates
     snap = load_snapshot(CONFIG)
-    save_updates({"TRIFORCE_DEPLOYMENT_MODE": mode}, path=CONFIG, expected_digest=snap.digest, environ={})
+    updates = {"TRIFORCE_DEPLOYMENT_MODE": mode}
+    if mode == "server":
+        # A server profile must be reachable by the local reverse proxy,
+        # federation peers and MCP clients. The package's conservative fresh
+        # config defaults (127.0.0.1:9100) are intentionally promoted here to
+        # the production server endpoint used by TriForce deployments.
+        updates.update({
+            "TRIFORCE_BIND_HOST": "0.0.0.0",
+            "TRIFORCE_API_PORT": 9000,
+        })
+    save_updates(updates, path=CONFIG, expected_digest=snap.digest, environ={})
     os.chmod(CONFIG, 0o640)
     shutil.chown(CONFIG, user="root", group="triforce")
 

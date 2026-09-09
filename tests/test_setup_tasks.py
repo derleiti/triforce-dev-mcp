@@ -59,6 +59,7 @@ def test_profiles_have_distinct_docker_policy():
     server = TASKS["profile-server"]
     node = TASKS["profile-node"]
     assert server.helper_action == "profile-server"
+    assert "0.0.0.0:9000" in " ".join(server.changes)
     assert node.helper_action == "profile-node"
     assert any("Docker Engine" in change for change in server.changes)
     assert any("Docker-Installation unverändert" in change for change in node.changes)

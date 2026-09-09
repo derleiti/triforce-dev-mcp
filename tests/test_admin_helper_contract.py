@@ -102,7 +102,8 @@ def test_deployment_profiles_are_fixed_and_keep_docker_node_optional():
     text = HELPER.read_text()
     assert 'def deployment_profile(mode: str)' in text
     assert 'if mode not in {"server", "node"}' in text
-    assert 'save_updates({"TRIFORCE_DEPLOYMENT_MODE": mode}' in text
+    assert 'updates = {"TRIFORCE_DEPLOYMENT_MODE": mode}' in text
+    assert 'save_updates(updates, path=CONFIG' in text
     assert 'run_fixed("/bin/systemctl", "enable", "--now", SERVICE)' in text
     assert 'if mode == "server":\n        docker_install()' in text
     assert 'elif action == "profile-node": deployment_profile("node")' in text
@@ -115,3 +116,10 @@ def test_legacy_import_uses_fixed_migrator():
     assert 'from app.legacy_settings import apply_import' in text
     assert 'apply_import(CONFIG)' in text
     assert 'elif action == "legacy-import": legacy_import()' in text
+
+
+def test_server_profile_sets_production_bind_and_port():
+    text = HELPER.read_text()
+    assert 'if mode == "server":' in text
+    assert '"TRIFORCE_BIND_HOST": "0.0.0.0"' in text
+    assert '"TRIFORCE_API_PORT": 9000' in text
