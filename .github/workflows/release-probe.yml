@@ -1,0 +1,8 @@
+name: Release Probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo RELEASE_PROBE_OK
