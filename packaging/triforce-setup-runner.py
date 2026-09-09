@@ -28,6 +28,8 @@ TASK_ACTIONS = {
     "config-init": "config-init",
     "service-install": "service-install",
     "docker-install": "docker-install",
+    "profile-server": "profile-server",
+    "profile-node": "profile-node",
 }
 
 

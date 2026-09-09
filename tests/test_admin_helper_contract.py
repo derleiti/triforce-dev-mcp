@@ -56,7 +56,7 @@ def test_fresh_config_sanitizes_template_secrets_and_generates_local_auth():
 
 def test_setup_start_is_fixed_systemd_job_not_arbitrary_command():
     text = HELPER.read_text()
-    assert 'SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install"})' in text
+    assert 'SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node"})' in text
     assert '"/usr/bin/systemd-run", "--unit=triforce-setup-job"' in text
     assert 'str(SETUP_RUNNER), task' in text
     assert 'parser.add_argument("task", nargs="?", choices=sorted(SETUP_TASKS))' in text
@@ -95,3 +95,14 @@ def test_service_repair_targets_package_managed_unit_path():
     text = HELPER.read_text()
     assert 'UNIT_DEST = Path("/usr/lib/systemd/system/triforce.service")' in text
     assert 'UNIT_DEST = Path("/etc/systemd/system/triforce.service")' not in text
+
+
+def test_deployment_profiles_are_fixed_and_keep_docker_node_optional():
+    text = HELPER.read_text()
+    assert 'def deployment_profile(mode: str)' in text
+    assert 'if mode not in {"server", "node"}' in text
+    assert 'save_updates({"TRIFORCE_DEPLOYMENT_MODE": mode}' in text
+    assert 'run_fixed("/bin/systemctl", "enable", "--now", SERVICE)' in text
+    assert 'if mode == "server":\n        docker_install()' in text
+    assert 'elif action == "profile-node": deployment_profile("node")' in text
+    assert 'elif action == "profile-server": deployment_profile("server")' in text

@@ -126,3 +126,9 @@ def test_raw_save_detects_parallel_change(tmp_path):
     import pytest
     with pytest.raises(ConfigConflict):
         save_raw_text("REQUEST_TIMEOUT=12\n", path=p, expected_digest=snap.digest, environ={})
+
+
+def test_deployment_mode_is_structured_setting():
+    from app.settings_store import settings_inventory
+    rows = {row.env_names[0]: row for row in settings_inventory()}
+    assert rows["TRIFORCE_DEPLOYMENT_MODE"].category == "Server"

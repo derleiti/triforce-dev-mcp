@@ -27,7 +27,7 @@ UNIT_SOURCE = INSTALL_ROOT / "packaging/systemd/triforce.service"
 UNIT_DEST = Path("/usr/lib/systemd/system/triforce.service")
 SERVICE = "triforce.service"
 SETUP_RUNNER = Path("/usr/lib/triforce/triforce-setup-runner")
-SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install"})
+SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node"})
 
 
 def require_root() -> None:
@@ -166,6 +166,29 @@ def service_action(action: str) -> None:
 
 
 
+
+def _set_deployment_mode(mode: str) -> None:
+    if mode not in {"server", "node"}:
+        raise SystemExit("invalid deployment mode")
+    config_init()
+    sys.path.insert(0, str(INSTALL_ROOT))
+    from app.settings_store import load_snapshot, save_updates
+    snap = load_snapshot(CONFIG)
+    save_updates({"TRIFORCE_DEPLOYMENT_MODE": mode}, path=CONFIG, expected_digest=snap.digest, environ={})
+    os.chmod(CONFIG, 0o640)
+    shutil.chown(CONFIG, user="root", group="triforce")
+
+
+def deployment_profile(mode: str) -> None:
+    """Apply one of the two fixed installation profiles."""
+    runtime_init()
+    config_init()
+    _set_deployment_mode(mode)
+    service_install()
+    run_fixed("/bin/systemctl", "enable", "--now", SERVICE)
+    if mode == "server":
+        docker_install()
+
 def setup_start(task: str) -> None:
     if task not in SETUP_TASKS:
         raise SystemExit("invalid setup task")
@@ -250,7 +273,7 @@ def main() -> int:
     require_root()
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=[
-        "runtime-init", "config-init", "service-install", "docker-install",
+        "runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node",
         "service-start", "service-stop", "service-restart",
         "service-enable", "service-disable", "config-read", "config-update", "config-raw-update", "config-restore",
         "setup-start", "setup-cancel",
@@ -266,6 +289,8 @@ def main() -> int:
     elif action == "config-init": config_init()
     elif action == "service-install": service_install()
     elif action == "docker-install": docker_install()
+    elif action == "profile-server": deployment_profile("server")
+    elif action == "profile-node": deployment_profile("node")
     elif action in {"service-start", "service-stop", "service-restart", "service-enable", "service-disable"}: service_action(action)
     elif action == "config-read": config_read()
     elif action == "config-update": config_update()

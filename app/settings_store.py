@@ -170,7 +170,7 @@ def _category(name: str, env_names: Iterable[str]) -> str:
         ("CRAWLER", "Server & Integrationen"), ("FEDERATION", "Server & Integrationen"),
         ("TELEGRAM", "Server & Integrationen"), ("N8N", "Server & Integrationen"),
         ("SEARX", "Server & Integrationen"), ("SEARCH", "Server & Integrationen"),
-        ("TRIFORCE_BIND", "Server"),
+        ("TRIFORCE_DEPLOYMENT", "Server"), ("TRIFORCE_BIND", "Server"),
         ("TRIFORCE_API_PORT", "Server"), ("CORS", "Server & Sicherheit"),
     ):
         if marker in joined:

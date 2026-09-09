@@ -146,6 +146,46 @@ def check_redis() -> TaskResult:
                       {"host": "127.0.0.1", "port": 6379})
 
 
+
+def _service_running_enabled() -> tuple[bool, dict[str, str]]:
+    if not shutil.which("systemctl"):
+        return False, {"error": "systemctl fehlt"}
+    cp = _command(["systemctl", "show", "triforce.service", "--property=LoadState,ActiveState,UnitFileState", "--no-pager"])
+    values: dict[str, str] = {}
+    for line in cp.stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    ok = cp.returncode == 0 and values.get("LoadState") == "loaded" and values.get("ActiveState") == "active" and values.get("UnitFileState") == "enabled"
+    return ok, values
+
+
+def check_deployment_profile(mode: str) -> TaskResult:
+    from .settings_store import load_snapshot, resolve_config_path
+    path = resolve_config_path()
+    values = load_snapshot(path).values if path.is_file() else {}
+    mode_ok = values.get("TRIFORCE_DEPLOYMENT_MODE") == mode
+    service_ok, service = _service_running_enabled()
+    docker = check_docker() if mode == "server" else None
+    ok = mode_ok and service_ok and (docker.ok if docker is not None else True)
+    details: dict[str, object] = {"deployment_mode": values.get("TRIFORCE_DEPLOYMENT_MODE"), "service": service}
+    if docker is not None:
+        details["docker"] = docker.to_dict()
+    title = "Server" if mode == "server" else "Node"
+    return TaskResult(
+        f"profile-{mode}", ok, "configured" if ok else "incomplete",
+        f"TriForce {title}-Profil ist vollständig eingerichtet" if ok else f"TriForce {title}-Profil ist noch nicht vollständig eingerichtet",
+        details,
+    )
+
+
+def check_server_profile() -> TaskResult:
+    return check_deployment_profile("server")
+
+
+def check_node_profile() -> TaskResult:
+    return check_deployment_profile("node")
+
 def check_memory_worker() -> TaskResult:
     binary = shutil.which("claude-mem")
     return TaskResult("memory-worker", bool(binary), "available" if binary else "optional-missing",
@@ -168,6 +208,8 @@ def diagnose() -> TaskResult:
 
 TASKS: dict[str, SetupTask] = {
     "system-check": SetupTask("system-check", "System prüfen", "Prüft Laufzeit, systemd und Speicherplatz.", False, False, (), (), "Nur lesend.", check_system),
+    "profile-server": SetupTask("profile-server", "Als Server einrichten", "Richtet TriForce als dauerhaft laufenden Server ein: Runtime, Konfiguration, systemd-Dienst, Autostart und Docker Engine/Compose v2. Docker-Stacks selbst bleiben gestoppt.", True, True, ("system-check",), ("TriForce Runtime/Konfiguration einrichten", "TRIFORCE_DEPLOYMENT_MODE=server setzen", "triforce.service installieren/reparieren", "triforce.service aktivieren und starten", "Docker Engine und Compose v2 bei Bedarf installieren", "docker.service aktivieren und starten", "keine Docker-Stacks automatisch starten"), "Idempotentes Komplettprofil; vorhandene Secrets und benutzerdefinierte Netzwerkwerte bleiben erhalten.", check_server_profile, "profile-server"),
+    "profile-node": SetupTask("profile-node", "Als Node einrichten", "Richtet TriForce als dauerhaft laufenden Node ein: Runtime, Konfiguration, systemd-Dienst und Autostart. Docker wird nicht verändert.", True, True, ("system-check",), ("TriForce Runtime/Konfiguration einrichten", "TRIFORCE_DEPLOYMENT_MODE=node setzen", "triforce.service installieren/reparieren", "triforce.service aktivieren und starten", "Docker-Installation unverändert lassen"), "Idempotentes Node-Profil; vorhandene Secrets und benutzerdefinierte Netzwerkwerte bleiben erhalten.", check_node_profile, "profile-node"),
     "runtime-init": SetupTask("runtime-init", "TriForce-Laufzeit einrichten", "Legt feste Programm-/Datenverzeichnisse und den Dienstbenutzer an.", True, True, ("system-check",), ("Benutzer triforce", "/var/lib/triforce", "/var/log/triforce"), "Idempotent; vorhandene passende Objekte bleiben erhalten.", check_runtime, "runtime-init"),
     "config-init": SetupTask("config-init", "Konfiguration initialisieren", "Erstellt /etc/triforce/triforce.env nur wenn sie fehlt.", True, True, ("runtime-init",), ("/etc/triforce/triforce.env"), "Vorhandene Konfiguration und Secrets werden nicht überschrieben.", check_config, "config-init"),
     "service-install": SetupTask("service-install", "TriForce-Dienst installieren/reparieren", "Installiert ausschließlich die paketierte triforce.service-Unit; startet oder aktiviert sie nicht automatisch.", True, True, ("runtime-init", "config-init"), ("/usr/lib/systemd/system/triforce.service", "systemctl daemon-reload"), "Unit kann sicher erneut installiert werden; Enable/Start bleiben separat.", check_service, "service-install"),

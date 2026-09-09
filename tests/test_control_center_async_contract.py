@@ -56,3 +56,20 @@ def test_setup_page_has_explicit_triforce_service_install_button():
     text = GUI.read_text()
     assert 'task.task_id == "service-install"' in text
     assert 'QPushButton("TriForce-Dienst installieren")' in text
+
+
+def test_setup_page_has_server_and_node_profile_buttons():
+    text = GUI.read_text()
+    assert 'task.task_id == "profile-server"' in text
+    assert 'QPushButton("Server einrichten")' in text
+    assert 'task.task_id == "profile-node"' in text
+    assert 'QPushButton("Node einrichten")' in text
+
+
+def test_services_page_exposes_install_start_stop_restart_and_autostart():
+    text = GUI.read_text()
+    assert 'QPushButton("Dienst installieren/reparieren")' in text
+    assert '("Start", "service-start")' in text
+    assert '("Stopp", "service-stop")' in text
+    assert '("Neustart", "service-restart")' in text
+    assert 'service-enable" if checked else "service-disable' in text

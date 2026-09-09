@@ -2,7 +2,7 @@
 VERSION = "2.85 Beta 1"
 
 from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, AnyHttpUrl, Field
 
@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     server_host: str = Field("127.0.0.1", validation_alias="TRIFORCE_BIND_HOST")
     server_port: int = Field(9100, ge=1, le=65535, validation_alias="TRIFORCE_API_PORT")
     server_keepalive: int = Field(75, ge=5, le=600, validation_alias="TRIFORCE_KEEPALIVE")
+    deployment_mode: Literal["server", "node"] = Field("server", validation_alias="TRIFORCE_DEPLOYMENT_MODE")
 
     # Episodic history is optional and separate from curated TriForce memory.
     episodic_memory_enabled: bool = Field(False, validation_alias="TRIFORCE_EPISODIC_MEMORY_ENABLED")

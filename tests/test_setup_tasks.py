@@ -2,14 +2,14 @@ from app.setup_tasks import TASKS, get_task
 
 
 def test_catalog_has_fixed_expected_tasks():
-    assert {"system-check", "runtime-init", "config-init", "service-install", "docker-install", "redis-check", "memory-worker", "agents-check", "diagnose"} <= set(TASKS)
+    assert {"system-check", "profile-server", "profile-node", "runtime-init", "config-init", "service-install", "docker-install", "redis-check", "memory-worker", "agents-check", "diagnose"} <= set(TASKS)
 
 
 def test_mutating_tasks_are_narrow_admin_helper_actions():
     for task in TASKS.values():
         if task.mutating:
             assert task.requires_admin
-            assert task.helper_action in {"runtime-init", "config-init", "service-install", "docker-install"}
+            assert task.helper_action in {"runtime-init", "config-init", "service-install", "docker-install", "profile-server", "profile-node"}
 
 
 def test_no_task_exposes_arbitrary_script_or_shell_parameter():
@@ -53,3 +53,14 @@ def test_service_install_task_repairs_package_managed_unit():
     assert task.title == "TriForce-Dienst installieren/reparieren"
     assert "/usr/lib/systemd/system/triforce.service" in task.changes
     assert not any("/etc/systemd/system/triforce.service" == change for change in task.changes)
+
+
+def test_profiles_have_distinct_docker_policy():
+    server = TASKS["profile-server"]
+    node = TASKS["profile-node"]
+    assert server.helper_action == "profile-server"
+    assert node.helper_action == "profile-node"
+    assert any("Docker Engine" in change for change in server.changes)
+    assert any("Docker-Installation unverändert" in change for change in node.changes)
+    assert any("triforce.service aktivieren und starten" in change for change in server.changes)
+    assert any("triforce.service aktivieren und starten" in change for change in node.changes)

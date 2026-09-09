@@ -392,6 +392,8 @@ class ServicesPage(QWidget):
         row = QHBoxLayout()
         for text, action in (("Start", "service-start"), ("Stopp", "service-stop"), ("Neustart", "service-restart")):
             btn = QPushButton(text); btn.clicked.connect(lambda _=False, a=action: self.admin_action(a)); row.addWidget(btn)
+        install_btn = QPushButton("Dienst installieren/reparieren")
+        install_btn.clicked.connect(lambda: self.admin_action("service-install")); row.addWidget(install_btn)
         layout.addLayout(row)
         self.boot = QCheckBox("TriForce Server beim Hochfahren starten")
         self.desktop = QCheckBox("Control Center bei Desktop-Anmeldung öffnen")
@@ -464,7 +466,11 @@ class SetupPage(QWidget):
             self.tasks.setItem(row, 0, QTableWidgetItem(task.title))
             self.tasks.setItem(row, 1, QTableWidgetItem("Admin" if task.requires_admin else "Prüfung"))
             self.tasks.setItem(row, 2, QTableWidgetItem("nicht geprüft"))
-            if task.task_id == "docker-install":
+            if task.task_id == "profile-server":
+                button = QPushButton("Server einrichten")
+            elif task.task_id == "profile-node":
+                button = QPushButton("Node einrichten")
+            elif task.task_id == "docker-install":
                 button = QPushButton("Docker installieren")
             elif task.task_id == "service-install":
                 button = QPushButton("TriForce-Dienst installieren")
