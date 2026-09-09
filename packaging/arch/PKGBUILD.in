@@ -1,0 +1,35 @@
+pkgname=triforce-bin
+pkgver=2.85.0_beta1
+pkgrel=1
+pkgdesc='TriForce AI backend with MCP and compiled Control Center support'
+arch=('x86_64')
+url='https://ailinux.me'
+license=('custom')
+depends=('python>=3.14' 'python<3.15' 'systemd' 'zlib' 'expat')
+optdepends=('redis: caching and coordination' 'docker: optional service integrations')
+provides=('triforce')
+conflicts=('triforce')
+install=triforce.install
+_deb='triforce-backend_2.85.0~beta1_amd64.deb'
+source=("${_deb}::@SOURCE@")
+sha256sums=('@SHA256@')
+
+package() {
+  local work="$srcdir/deb-payload"
+  rm -rf "$work"
+  mkdir -p "$work"
+  cd "$work"
+  ar x "$srcdir/$_deb"
+  local data
+  data=$(find . -maxdepth 1 -type f -name 'data.tar.*' -print -quit)
+  [[ -n "$data" ]] || { echo 'Debian payload missing data.tar.*' >&2; return 1; }
+  bsdtar -xf "$data" -C "$pkgdir"
+
+  # The embedded venv contains Python packages, while Arch supplies Python 3.14.
+  # Replace the Debian interpreter target with Arch's /usr/bin/python.
+  rm -f "$pkgdir/opt/triforce/runtime/bin/python3.14"
+  ln -s /usr/bin/python "$pkgdir/opt/triforce/runtime/bin/python3.14"
+
+  install -Dm644 "$pkgdir/opt/triforce/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,0 +1,205 @@
+name: TriForce 2.85 Pre-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Create/update the GitHub pre-release after every build passes'
+        required: true
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag'
+        required: true
+        type: string
+        default: 'v2.85.0-beta1'
+      windows_version:
+        description: 'AIWindows artifact version'
+        required: true
+        type: string
+        default: '1.0.0-beta1'
+  push:
+    tags:
+      - 'v2.85.0-beta*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Install locked runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-lock-2.85-beta1.txt
+          pip check
+      - name: Full test suite
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q
+      - name: Packaging contracts
+        run: git diff --check
+
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf gcc g++
+      - name: Build locked backend runtime and compiled Control Center
+        env:
+          PYTHON_BIN: python3.14
+          BACKEND_RUNTIME: ${{ runner.temp }}/triforce-2.85-backend-runtime
+          GUI_VENV: ${{ runner.temp }}/triforce-2.85-gui-build-venv
+          GUI_OUT: ${{ runner.temp }}/triforce-2.85-nuitka
+        run: scripts/release/prepare-triforce-2.85-ci-build.sh
+      - name: Build Debian packages
+        env:
+          BACKEND_RUNTIME: ${{ runner.temp }}/triforce-2.85-backend-runtime
+          GUI_BUNDLE: ${{ runner.temp }}/triforce-2.85-nuitka/main.dist
+          OUT_DIR: ${{ runner.temp }}/release-linux
+        run: scripts/release/build-triforce-2.85-beta1.sh
+      - name: Verify Debian artifacts
+        run: |
+          set -eu
+          cd '${{ runner.temp }}/release-linux'
+          sha256sum -c SHA256SUMS
+          dpkg-deb --info triforce-backend_2.85.0~beta1_amd64.deb >/dev/null
+          dpkg-deb --info triforce-control-center_2.85.0~beta1_amd64.deb >/dev/null
+          tmp=$(mktemp -d)
+          dpkg-deb -x triforce-backend_2.85.0~beta1_amd64.deb "$tmp"
+          test "$(readlink "$tmp/opt/triforce/runtime/bin/python3.14")" = '/usr/bin/python3.14'
+          grep -q 'google-genai==2.18.1' "$tmp/opt/triforce/requirements-lock-2.85-beta1.txt"
+          ! grep -q '^google-generativeai' "$tmp/opt/triforce/requirements-lock-2.85-beta1.txt"
+          rm -rf "$tmp"
+          echo DEBIAN_RELEASE_SMOKE_OK
+      - uses: actions/upload-artifact@v7
+        with:
+          name: triforce-linux-2.85-beta1
+          if-no-files-found: error
+          path: ${{ runner.temp }}/release-linux/*
+
+  arch:
+    needs: linux
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build tools
+        run: pacman -Syu --noconfirm base-devel python systemd zlib expat libarchive git sudo
+      - name: Require Python 3.14 ABI
+        run: python -c "import sys; assert sys.version_info[:2] == (3,14), sys.version"
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: triforce-linux-2.85-beta1
+          path: /tmp/linux-artifacts
+      - name: Render release and local PKGBUILDs
+        run: |
+          set -eu
+          mkdir -p /tmp/arch-build
+          cp /tmp/linux-artifacts/triforce-backend_2.85.0~beta1_amd64.deb /tmp/arch-build/
+          TAG='${{ inputs.tag }}'
+          if [ -z "$TAG" ]; then TAG='${GITHUB_REF_NAME}'; fi
+          RELEASE_URL="https://github.com/derleiti/triforce-dev-mcp/releases/download/${TAG}/triforce-backend_2.85.0~beta1_amd64.deb"
+          scripts/release/render-arch-pkgbuild.sh /tmp/arch-build/triforce-backend_2.85.0~beta1_amd64.deb /tmp/arch-release "$RELEASE_URL"
+          cp /tmp/arch-release/PKGBUILD /tmp/arch-build/PKGBUILD.release
+          cp packaging/arch/triforce.install /tmp/arch-build/
+          SHA=$(sha256sum /tmp/arch-build/triforce-backend_2.85.0~beta1_amd64.deb | awk '{print $1}')
+          sed -e 's#source=(.*#source=("triforce-backend_2.85.0~beta1_amd64.deb")#' \
+              -e "s#sha256sums=.*#sha256sums=('${SHA}')#" \
+              packaging/arch/PKGBUILD.in > /tmp/arch-build/PKGBUILD
+      - name: Build Arch package with makepkg
+        run: |
+          useradd -m builder
+          chown -R builder:builder /tmp/arch-build
+          cd /tmp/arch-build
+          sudo -u builder makepkg --noconfirm --cleanbuild
+          ls -lh *.pkg.tar.zst
+      - name: Install and import-smoke Arch package
+        run: |
+          cd /tmp/arch-build
+          pacman -U --noconfirm ./*.pkg.tar.zst
+          test -f /usr/lib/systemd/system/triforce.service
+          test "$(readlink /opt/triforce/runtime/bin/python3.14)" = '/usr/bin/python'
+          PYTHONPATH=/opt/triforce /opt/triforce/runtime/bin/python - <<'PY'
+          from app.config import VERSION
+          from google import genai
+          print('ARCH_PACKAGE_SMOKE_OK', VERSION, getattr(genai, '__version__', 'unknown'))
+          PY
+      - name: Collect Arch release artifacts
+        run: |
+          mkdir -p /tmp/arch-artifacts
+          cp /tmp/arch-build/*.pkg.tar.zst /tmp/arch-artifacts/
+          cp /tmp/arch-build/PKGBUILD.release /tmp/arch-artifacts/PKGBUILD
+          cp packaging/arch/triforce.install /tmp/arch-artifacts/
+          (cd /tmp/arch-artifacts && sha256sum *.pkg.tar.zst > SHA256SUMS-arch.txt)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: triforce-arch-2.85-beta1
+          if-no-files-found: error
+          path: /tmp/arch-artifacts/*
+
+  windows:
+    needs: test
+    uses: derleiti/aiwindows-client/.github/workflows/build-windows.yml@70ad03437b646c6e16929ce3d85f57ee4614eed3
+    with:
+      version: ${{ inputs.windows_version || '1.0.0-beta1' }}
+
+  release:
+    needs: [test, linux, arch, windows]
+    if: ${{ github.event_name == 'push' || inputs.publish == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate combined checksum manifest
+        run: |
+          cd release-assets
+          find . -maxdepth 1 -type f \( -name '*.deb' -o -name '*.zst' -o -name '*.exe' -o -name 'PKGBUILD' -o -name 'triforce.install' \) -print0 \
+            | sort -z | xargs -0 sha256sum > SHA256SUMS
+          cat SHA256SUMS
+      - name: Build release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## TriForce 2.85 Beta 1
+
+          Pre-release for real-world installation and upgrade testing.
+
+          ### Artifacts
+          - Debian/Ubuntu: `triforce-backend` and compiled PyQt6 `triforce-control-center`
+          - Arch Linux: tested `triforce-bin` package plus `PKGBUILD`
+          - Windows: portable AIWindows Client executable and Inno Setup installer
+
+          ### Important
+          - This is a beta/pre-release. Back up production configuration before package migration.
+          - The backend service is not automatically enabled or started by the package.
+          - API credentials are never shipped in release artifacts.
+          EOF
+      - name: Create or update GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='${{ inputs.tag }}'
+          if [ -z "$TAG" ]; then TAG="$GITHUB_REF_NAME"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+            gh release edit "$TAG" --prerelease --title 'TriForce 2.85 Beta 1' --notes-file release-notes.md
+          else
+            gh release create "$TAG" release-assets/* --prerelease --title 'TriForce 2.85 Beta 1' --notes-file release-notes.md --target "$GITHUB_SHA"
+          fi

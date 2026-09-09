@@ -77,6 +77,11 @@ make_backend(){
   cp "$ROOT/packaging/systemd/triforce.service" "$pkg/opt/triforce/packaging/systemd/"
   cp "$ROOT/VERSION" "$ROOT/LICENSE" "$ROOT/requirements.txt" "$ROOT/requirements-lock-2.85-beta1.txt" "$pkg/opt/triforce/"
   cp -a "$RUNTIME" "$pkg/opt/triforce/runtime"
+  # Venv interpreter links created by actions/setup-python can point into the
+  # ephemeral runner toolcache. The package explicitly depends on python3.14,
+  # so normalize the interpreter target to the distro-managed executable.
+  rm -f "$pkg/opt/triforce/runtime/bin/python3.14"
+  ln -s /usr/bin/python3.14 "$pkg/opt/triforce/runtime/bin/python3.14"
   # Remove build-only caches/tooling from shipped runtime while preserving imports.
   find "$pkg/opt/triforce/runtime" -type d -name '__pycache__' -prune -exec rm -rf {} + || true
   rm -rf "$pkg/opt/triforce/runtime/lib/python3.14/site-packages/pytest"* \
