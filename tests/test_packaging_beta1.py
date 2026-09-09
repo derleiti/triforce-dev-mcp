@@ -84,4 +84,7 @@ def test_release_actions_contract():
     assert "DEBIAN_RELEASE_SMOKE_OK" in text
     assert "ARCH_PACKAGE_SMOKE_OK" in text
     assert "--prerelease" in text
-    assert "aiwindows-client/.github/workflows/build-windows.yml@70ad034" in text
+    assert "repository: derleiti/aiwindows-client" in text
+    assert "windows-latest" in text
+    assert "WINDOWS_EXE_SMOKE_OK" in text
+    assert "WINDOWS_SETUP_SMOKE_OK" in text

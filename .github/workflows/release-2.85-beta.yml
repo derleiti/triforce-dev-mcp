@@ -154,9 +154,97 @@ jobs:
 
   windows:
     needs: test
-    uses: derleiti/aiwindows-client/.github/workflows/build-windows.yml@70ad03437b646c6e16929ce3d85f57ee4614eed3
-    with:
-      version: ${{ inputs.windows_version || '1.0.0-beta1' }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout pinned AIWindows client
+        uses: actions/checkout@v7
+        with:
+          repository: derleiti/aiwindows-client
+          ref: 70ad03437b646c6e16929ce3d85f57ee4614eed3
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+      - name: Validate Windows package imports
+        shell: pwsh
+        run: |
+          python -m compileall -q aiwindows_client
+          python -c "from aiwindows_client.core.hardware_detect import hardware_detector; from aiwindows_client.core.local_mcp import LocalMCPExecutor; from aiwindows_client.core.cli_agents import agent_detector; from aiwindows_client.core.planning_prompt import DEFAULT_SYSTEM_PROMPT; from aiwindows_client.core.mcp_stdio_server import MCPStdioServer; print('WINDOWS_IMPORT_SMOKE_OK')"
+      - name: Resolve artifact version
+        id: version
+        shell: bash
+        run: |
+          VERSION='${{ inputs.windows_version }}'
+          if [ -z "$VERSION" ]; then VERSION='1.0.0-beta1'; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build portable EXE
+        shell: pwsh
+        run: |
+          python -c "from PIL import Image; img=Image.open('icon.jpg'); img.save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
+          pyinstaller `
+            --name="AIWindows-Client" `
+            --onefile `
+            --windowed `
+            --icon="icon.ico" `
+            --add-data="aiwindows_client/ui;aiwindows_client/ui" `
+            --add-data="aiwindows_client/core;aiwindows_client/core" `
+            --add-data="aiwindows_client/translations;aiwindows_client/translations" `
+            --add-data="aiwindows_client/assets;aiwindows_client/assets" `
+            --add-data="icon.jpg;." `
+            --hidden-import=PyQt6.QtWebEngineWidgets `
+            --hidden-import=PyQt6.QtWebEngineCore `
+            --hidden-import=httpx `
+            --hidden-import=aiohttp `
+            --hidden-import=websockets `
+            --hidden-import=cryptography `
+            --hidden-import=PIL `
+            --hidden-import=winpty `
+            --hidden-import=pyte `
+            --clean --noconfirm aiwindows_client/main.py
+          $version = '${{ steps.version.outputs.version }}'
+          Move-Item dist/AIWindows-Client.exe "dist/AIWindows-Client-$version.exe"
+      - name: Smoke-test portable EXE
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $exe = Resolve-Path "dist/AIWindows-Client-$version.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList '--hwinfo' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "portable EXE smoke failed with exit code $($p.ExitCode)" }
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw 'EXE has no MZ header' }
+          Write-Host 'WINDOWS_EXE_SMOKE_OK'
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $version = '${{ steps.version.outputs.version }}'
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $iscc)) { throw "ISCC not found: $iscc" }
+          & $iscc "/DMyAppVersion=$version" "/DMyAppExe=AIWindows-Client-$version.exe" installer/AIWindows-Client.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Resolve-Path "dist/AIWindows-Client-Setup-$version.exe"
+          $bytes = [System.IO.File]::ReadAllBytes($setup)
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw 'Setup has no MZ header' }
+          Write-Host 'WINDOWS_SETUP_SMOKE_OK'
+      - name: Generate Windows checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum AIWindows-Client-${{ steps.version.outputs.version }}.exe AIWindows-Client-Setup-${{ steps.version.outputs.version }}.exe > SHA256SUMS-windows.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aiwindows-1.0.0-beta1
+          if-no-files-found: error
+          path: |
+            dist/AIWindows-Client-${{ steps.version.outputs.version }}.exe
+            dist/AIWindows-Client-Setup-${{ steps.version.outputs.version }}.exe
+            dist/SHA256SUMS-windows.txt
 
   release:
     needs: [test, linux, arch, windows]
