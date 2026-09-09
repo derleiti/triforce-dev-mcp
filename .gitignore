@@ -237,3 +237,5 @@ data/n8n/crash.journal
 !tests/test_unified_registry_unittest.py
 !tests/test_mcp_swarm_runtime_contract_unittest.py
 !tests/test_settings_store.py
+!tests/test_setup_tasks.py
+!tests/test_admin_helper_contract.py

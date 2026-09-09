@@ -1,0 +1,32 @@
+[Unit]
+Description=TriForce AI Backend Server
+Documentation=https://ailinux.me/docs/triforce
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=triforce
+Group=triforce
+WorkingDirectory=/opt/triforce
+Environment=PYTHONUNBUFFERED=1
+Environment=TRIFORCE_CONFIG_FILE=/etc/triforce/triforce.env
+ExecStart=/opt/triforce/scripts/start-triforce.sh
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/triforce /var/log/triforce
+StateDirectory=triforce
+StateDirectoryMode=0750
+LogsDirectory=triforce
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

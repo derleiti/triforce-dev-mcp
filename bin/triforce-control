@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Headless companion CLI for the TriForce Control Center."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+from app.setup_tasks import TASKS, get_task, run_check
+from app.settings_store import load_snapshot, redact, settings_inventory
+
+
+def emit(obj: object) -> None:
+    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+
+
+def helper_path() -> str:
+    installed = Path("/usr/lib/triforce/triforce-admin-helper")
+    if installed.is_file():
+        return str(installed)
+    dev = Path(__file__).resolve().parents[1] / "packaging" / "triforce-admin-helper.py"
+    return str(dev)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="triforce-control")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("tasks")
+    p = sub.add_parser("plan"); p.add_argument("task")
+    p = sub.add_parser("check"); p.add_argument("task")
+    p = sub.add_parser("run"); p.add_argument("task")
+    sub.add_parser("settings")
+    args = parser.parse_args()
+
+    if args.cmd == "tasks":
+        emit([task.plan() for task in TASKS.values()]); return 0
+    if args.cmd == "plan":
+        emit(get_task(args.task).plan()); return 0
+    if args.cmd == "check":
+        result = run_check(args.task); emit(result.to_dict()); return 0 if result.ok else 1
+    if args.cmd == "run":
+        task = get_task(args.task)
+        if not task.mutating:
+            result = task.checker(); emit(result.to_dict()); return 0 if result.ok else 1
+        if not task.helper_action:
+            print("Task besitzt keine freigegebene Admin-Aktion", file=sys.stderr); return 2
+        # Import locally so read-only commands do not require it.
+        import shutil
+        helper = helper_path(); command = [helper, task.helper_action]
+        if os.geteuid() != 0:
+            pkexec = shutil.which("pkexec")
+            if not pkexec:
+                print("pkexec ist nicht verfügbar", file=sys.stderr); return 3
+            command.insert(0, pkexec)
+        cp = subprocess.run(command, check=False)
+        if cp.returncode != 0: return cp.returncode
+        result = task.checker(); emit(result.to_dict()); return 0 if result.ok else 4
+    if args.cmd == "settings":
+        snap = load_snapshot()
+        inventory = {m.name: m for m in settings_inventory()}
+        emit({"path": str(snap.path), "digest": snap.digest,
+              "values": redact(snap.values), "schema_fields": len(inventory)})
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

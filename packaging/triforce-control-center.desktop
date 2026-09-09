@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TriForce Control Center
+Comment=TriForce konfigurieren, Dienste verwalten und Diagnose ausführen
+Exec=triforce-control-center
+Icon=triforce-control-center
+Terminal=false
+Categories=System;Settings;Development;
+StartupNotify=true

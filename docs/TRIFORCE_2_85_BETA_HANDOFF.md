@@ -61,3 +61,27 @@ Getestet:
 ## Schutz der Produktion
 
 Bis zu diesem Stand wurden weder `/home/zombie/triforce`, `/etc/systemd/system/triforce.service` noch der laufende Produktionsdienst verändert oder neu gestartet.
+
+## Phase 2 – Setup, Admin-Helper und Control Center
+
+Erledigt:
+- Gemeinsamer deklarativer Setup-Taskkatalog (`app/setup_tasks.py`) für CLI und GUI.
+- Headless-CLI `bin/triforce-control` mit Task-/Plan-/Check-/Run-/Settings-Kommandos.
+- Eng begrenzter Admin-Helper mit festen Aktionen und festem `triforce.service`; keine freie Unit-, Script- oder Shell-Weiterleitung.
+- Paket-Servicevorlage für eigenen Benutzer `triforce`, `/etc/triforce`, `/var/lib/triforce`, journald und getrennte Enable/Start-Aktionen.
+- PyQt6 Control Center mit Übersicht, vollständiger Schema-/Experteneinstellungstabelle, Suche/Filter, Secret-Maskierung, Dienstbedienung, getrenntem Server-/Desktop-Autostart, Setup-Aufgaben und redigierter Diagnose.
+- Desktop-Datei und skalierbares SVG-Icon.
+
+Getestet:
+- 13 fokussierte Settings/Setup/Helper-Tests bestanden.
+- Python-Syntax/compileall und `git diff --check` bestanden.
+- PyQt6 6.11.0 / Qt 6.11.x offscreen aus bereinigter Umgebung: 5 Seiten, 151 Settings-Zeilen.
+- Nuitka 4.2.1 Standalone-Build auf Ubuntu 26.04.1 amd64 erfolgreich.
+- Kompiliertes Bundle außerhalb des Quellverzeichnisses mit `QT_QPA_PLATFORM=offscreen`: `GUI_SMOKE_OK pages=5 settings_rows=151`.
+- Gerenderter Smoke-Screenshot: 1180x760 PNG.
+
+Build-Hinweis:
+- Temporäre Build-venv: `/tmp/triforce-2.85-gui-build-venv`.
+- Standalone-Bundle: `/tmp/triforce-2.85-nuitka/main.dist` (~170 MB).
+- Nuitka weist bei 4.2.1 selbst darauf hin, dass PyQt6-Unterstützung nicht perfekt ist; der Bundle-Smoke ist bestanden, diese Upstream-Einschränkung bleibt dokumentiert.
+- Für die C-Kompilierung wurden auf dem Buildhost ausschließlich `python3.14-dev` und `libpython3.14-dev` als OS-Buildheader nachinstalliert. Kein System-Python-pip und kein TriForce-Produktionsdienst wurde verändert.
