@@ -34,6 +34,8 @@ import shlex
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.paths import LOG_DIR
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ailinux.tristar_mcp")
@@ -83,7 +85,7 @@ class TriStarMCPService:
             log_files = list(TRISTAR_LOGS.glob("*.log"))
 
         # Also check backend logs
-        backend_log = Path("/home/zombie/triforce/logs")
+        backend_log = LOG_DIR
         if backend_log.exists():
             log_files.extend(backend_log.glob("*.log"))
 
@@ -256,28 +258,24 @@ class TriStarMCPService:
         config_files = [
             TRISTAR_BASE / "config.json",
             TRISTAR_AGENTS / "agents.json",
-            Path("/home/zombie/triforce/.env"),
         ]
 
         for config_file in config_files:
             if config_file.exists():
                 try:
-                    if config_file.suffix == ".json":
-                        settings[config_file.stem] = json.loads(config_file.read_text())
-                    elif config_file.name == ".env":
-                        # Parse .env file
-                        env_vars = {}
-                        for line in config_file.read_text().split("\n"):
-                            line = line.strip()
-                            if line and not line.startswith("#") and "=" in line:
-                                key, _, value = line.partition("=")
-                                # Mask sensitive values
-                                if any(s in key.upper() for s in ["KEY", "SECRET", "PASSWORD", "TOKEN"]):
-                                    value = value[:4] + "****" if len(value) > 4 else "****"
-                                env_vars[key] = value
-                        settings["env"] = env_vars
+                    settings[config_file.stem] = json.loads(config_file.read_text())
                 except Exception as e:
                     settings[config_file.stem] = {"error": str(e)}
+
+        try:
+            from app.settings_store import SECRET_ENV_KEYS, load_snapshot
+            snapshot = load_snapshot()
+            settings["env"] = {
+                key: ("********" if key in SECRET_ENV_KEYS and value else value)
+                for key, value in snapshot.values.items()
+            }
+        except Exception as e:
+            settings["env"] = {"error": str(e)}
 
         return {"settings": settings, "count": len(settings)}
 

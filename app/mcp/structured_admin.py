@@ -205,6 +205,18 @@ async def handle_container_control(a):
         return {"action":act,"container":ctr,**(await _run(["docker","logs","--tail",n,ctr]))}
     return {"error":f"Unknown action: {act}"}
 
+async def handle_docker_stack(a):
+    """Operate the fixed packaged TriForce Docker blueprint."""
+    from app.docker_stack import ACTIONS, PROFILES, run as run_docker_stack
+    action = a.get("action", "status")
+    profile = a.get("profile", "all")
+    if action not in ACTIONS:
+        return {"error": f"Unsupported Docker stack action: {action}"}
+    if profile not in PROFILES:
+        return {"error": f"Unsupported Docker profile: {profile}"}
+    return await run_docker_stack(action, profile)
+
+
 async def handle_file_ops(a):
     act,p=a.get("action"),a.get("path","")
     if act in ("read","list","find","size"):
@@ -293,6 +305,9 @@ STRUCTURED_ADMIN_TOOLS = [
     {"name":"container_control","description":"Manage Docker containers: list, status, start, stop, restart, view logs, or get resource stats.",
      "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list","status","start","stop","restart","logs","stats"]},"container":{"type":"string","enum":CONTAINERS},"lines":{"type":"integer"}},"required":["action"]},
      "annotations":{"title":"Container Manager","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False}},
+    {"name":"docker_stack","description":"Manage the fixed TriForce Docker blueprint by profile. Uses canonical TriForce settings and never accepts an arbitrary compose path or shell command.",
+     "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["validate","status","up","down","restart","pull","logs"]},"profile":{"type":"string","enum":["all","redis","wordpress","flarum","searxng","n8n","repository","mailserver"]}},"required":["action"]},
+     "annotations":{"title":"TriForce Docker Stack","readOnlyHint":False,"destructiveHint":True,"idempotentHint":True,"openWorldHint":True}},
     {"name":"file_ops","description":"Filesystem operations: read, write, append files, list directories, find files, check sizes. Paths validated against allowlist.",
      "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["read","write","append","list","find","size"]},"path":{"type":"string"},"content":{"type":"string"},"pattern":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"}},"required":["action","path"]},
      "annotations":{"title":"File Operations","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False}},
@@ -709,7 +724,7 @@ COMMAND_TEMPLATES = {
     "triforce_git_log":   (["bash", "-c", "cd /home/zombie/triforce && git log --oneline -10"], False, 5, "Last 10 git commits"),
     "triforce_git_status":(["bash", "-c", "cd /home/zombie/triforce && git status --short"], False, 5, "Git working tree status"),
     "ollama_models":      (["bash", "-c", "curl -s http://localhost:11434/api/tags | python3 -c \"import sys,json;[print(f'{m[\\\"name\\\"]:30s} {m[\\\"size\\\"]//1024//1024}MB') for m in json.load(sys.stdin).get('models',[])]\""], False, 10, "List Ollama models with sizes"),
-    "triforce_config":    (["bash", "-c", "grep -v '^#' /home/zombie/triforce/config/triforce.env | grep -v '^$' | grep -v 'KEY\\|PASS\\|SECRET\\|TOKEN' | head -30"], False, 5, "Show config (no secrets)"),
+    "triforce_config":    (["/opt/triforce/runtime/bin/python", "-c", "from app.settings_store import load_snapshot,redact; import json; print(json.dumps(redact(load_snapshot().values), ensure_ascii=False))"], False, 5, "Show canonical TriForce config (redacted)"),
     # Security
     "ssh_auth_log":       (["bash", "-c", "grep 'sshd' /var/log/auth.log | tail -20"], False, 5, "Recent SSH auth events"),
     "active_users":       (["who"], False, 5, "Currently logged in users"),

@@ -1,10 +1,12 @@
 # TriForce Backend Version
-VERSION = "2.81"
+VERSION = "2.85 Beta 1"
 
 from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, AnyHttpUrl, Field
+
+from .settings_store import effective_environment
 
 DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost",
@@ -26,9 +28,16 @@ DEFAULT_ALLOWED_ORIGINS = [
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="allow",
-        env_file=".env",
-        env_file_encoding="utf-8",
+        env_file=None,
+        populate_by_name=True,
     )
+
+    # Canonical server bind settings. These are consumed by the service launcher
+    # and shown by the Control Center; changing them requires a controlled restart.
+    server_host: str = Field("127.0.0.1", validation_alias="TRIFORCE_BIND_HOST")
+    server_port: int = Field(9100, ge=1, le=65535, validation_alias="TRIFORCE_API_PORT")
+    server_keepalive: int = Field(75, ge=5, le=600, validation_alias="TRIFORCE_KEEPALIVE")
+    deployment_mode: Literal["server", "node"] = Field("server", validation_alias="TRIFORCE_DEPLOYMENT_MODE")
 
     # Episodic history is optional and separate from curated TriForce memory.
     episodic_memory_enabled: bool = Field(False, validation_alias="TRIFORCE_EPISODIC_MEMORY_ENABLED")
@@ -58,6 +67,76 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
 
+    # --- Docker Blueprint ---
+    # These settings describe the shipped lightweight Compose blueprint only.
+    # They never grant Docker socket access and never select an arbitrary compose file.
+    docker_project_name: str = Field(default="triforce", validation_alias="DOCKER_PROJECT_NAME")
+    docker_restart_policy: str = Field(default="unless-stopped", validation_alias="DOCKER_RESTART_POLICY")
+    docker_log_tail: int = Field(default=100, ge=10, le=5000, validation_alias="DOCKER_LOG_TAIL")
+    docker_network_name: str = Field(default="triforce-net", validation_alias="DOCKER_NETWORK_NAME")
+
+    docker_redis_image: str = Field(default="redis:7-alpine", validation_alias="DOCKER_REDIS_IMAGE")
+    docker_redis_container: str = Field(default="triforce-redis", validation_alias="DOCKER_REDIS_CONTAINER")
+    docker_redis_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_REDIS_BIND")
+    docker_redis_port: int = Field(default=6379, ge=1, le=65535, validation_alias="DOCKER_REDIS_PORT")
+
+    docker_wordpress_image: str = Field(default="wordpress:latest", validation_alias="DOCKER_WORDPRESS_IMAGE")
+    docker_wordpress_container: str = Field(default="triforce-wordpress", validation_alias="DOCKER_WORDPRESS_CONTAINER")
+    docker_wordpress_db_image: str = Field(default="mariadb:11", validation_alias="DOCKER_WORDPRESS_DB_IMAGE")
+    docker_wordpress_db_container: str = Field(default="triforce-wordpress-db", validation_alias="DOCKER_WORDPRESS_DB_CONTAINER")
+    docker_wordpress_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_WORDPRESS_BIND")
+    docker_wordpress_port: int = Field(default=8080, ge=1, le=65535, validation_alias="DOCKER_WORDPRESS_PORT")
+    docker_wordpress_db_name: str = Field(default="wordpress", validation_alias="DOCKER_WORDPRESS_DB_NAME")
+    docker_wordpress_db_user: str = Field(default="wordpress", validation_alias="DOCKER_WORDPRESS_DB_USER")
+    docker_wordpress_db_password: str = Field(default="", validation_alias="DOCKER_WORDPRESS_DB_PASSWORD")
+    docker_wordpress_db_root_password: str = Field(default="", validation_alias="DOCKER_WORDPRESS_DB_ROOT_PASSWORD")
+
+    docker_flarum_image: str = Field(default="mondedie/flarum:latest", validation_alias="DOCKER_FLARUM_IMAGE")
+    docker_flarum_container: str = Field(default="triforce-flarum", validation_alias="DOCKER_FLARUM_CONTAINER")
+    docker_flarum_db_image: str = Field(default="mariadb:11", validation_alias="DOCKER_FLARUM_DB_IMAGE")
+    docker_flarum_db_container: str = Field(default="triforce-flarum-db", validation_alias="DOCKER_FLARUM_DB_CONTAINER")
+    docker_flarum_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_FLARUM_BIND")
+    docker_flarum_port: int = Field(default=9080, ge=1, le=65535, validation_alias="DOCKER_FLARUM_PORT")
+    docker_flarum_db_name: str = Field(default="flarum", validation_alias="DOCKER_FLARUM_DB_NAME")
+    docker_flarum_db_user: str = Field(default="flarum", validation_alias="DOCKER_FLARUM_DB_USER")
+    docker_flarum_db_password: str = Field(default="", validation_alias="DOCKER_FLARUM_DB_PASSWORD")
+    docker_flarum_db_root_password: str = Field(default="", validation_alias="DOCKER_FLARUM_DB_ROOT_PASSWORD")
+    docker_flarum_assets_path: str = Field(default="./flarum/assets", validation_alias="DOCKER_FLARUM_ASSETS_PATH")
+    docker_flarum_extensions_path: str = Field(default="./flarum/extensions", validation_alias="DOCKER_FLARUM_EXTENSIONS_PATH")
+    docker_flarum_storage_path: str = Field(default="./flarum/storage", validation_alias="DOCKER_FLARUM_STORAGE_PATH")
+
+    docker_searxng_image: str = Field(default="searxng/searxng:latest", validation_alias="DOCKER_SEARXNG_IMAGE")
+    docker_searxng_container: str = Field(default="triforce-searxng", validation_alias="DOCKER_SEARXNG_CONTAINER")
+    docker_searxng_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_SEARXNG_BIND")
+    docker_searxng_port: int = Field(default=8888, ge=1, le=65535, validation_alias="DOCKER_SEARXNG_PORT")
+    docker_searxng_base_url: str = Field(default="http://localhost:8888/", validation_alias="DOCKER_SEARXNG_BASE_URL")
+    docker_searxng_secret: str = Field(default="", validation_alias="DOCKER_SEARXNG_SECRET")
+    docker_searxng_config_path: str = Field(default="./searxng", validation_alias="DOCKER_SEARXNG_CONFIG_PATH")
+
+    docker_n8n_image: str = Field(default="n8nio/n8n:latest", validation_alias="DOCKER_N8N_IMAGE")
+    docker_n8n_container: str = Field(default="triforce-n8n", validation_alias="DOCKER_N8N_CONTAINER")
+    docker_n8n_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_N8N_BIND")
+    docker_n8n_port: int = Field(default=5678, ge=1, le=65535, validation_alias="DOCKER_N8N_PORT")
+    docker_n8n_host: str = Field(default="localhost", validation_alias="DOCKER_N8N_HOST")
+    docker_n8n_protocol: str = Field(default="http", validation_alias="DOCKER_N8N_PROTOCOL")
+
+    docker_repository_image: str = Field(default="nginx:alpine", validation_alias="DOCKER_REPOSITORY_IMAGE")
+    docker_repository_container: str = Field(default="triforce-repository", validation_alias="DOCKER_REPOSITORY_CONTAINER")
+    docker_repository_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_REPOSITORY_BIND")
+    docker_repository_port: int = Field(default=8081, ge=1, le=65535, validation_alias="DOCKER_REPOSITORY_PORT")
+    docker_repository_data_path: str = Field(default="./repository/repo", validation_alias="DOCKER_REPOSITORY_DATA_PATH")
+
+    docker_mailserver_image: str = Field(default="mailserver/docker-mailserver:latest", validation_alias="DOCKER_MAILSERVER_IMAGE")
+    docker_mailserver_container: str = Field(default="triforce-mailserver", validation_alias="DOCKER_MAILSERVER_CONTAINER")
+    docker_mailserver_hostname: str = Field(default="mail", validation_alias="DOCKER_MAILSERVER_HOSTNAME")
+    docker_mail_smtp_bind: str = Field(default="0.0.0.0", validation_alias="DOCKER_MAIL_SMTP_BIND")
+    docker_mail_smtp_port: int = Field(default=25, ge=1, le=65535, validation_alias="DOCKER_MAIL_SMTP_PORT")
+    docker_mail_submission_bind: str = Field(default="0.0.0.0", validation_alias="DOCKER_MAIL_SUBMISSION_BIND")
+    docker_mail_submission_port: int = Field(default=587, ge=1, le=65535, validation_alias="DOCKER_MAIL_SUBMISSION_PORT")
+    docker_mail_imaps_bind: str = Field(default="0.0.0.0", validation_alias="DOCKER_MAIL_IMAPS_BIND")
+    docker_mail_imaps_port: int = Field(default=993, ge=1, le=65535, validation_alias="DOCKER_MAIL_IMAPS_PORT")
+    docker_mailserver_config_path: str = Field(default="./mailserver", validation_alias="DOCKER_MAILSERVER_CONFIG_PATH")
+
     # --- Providers / Backends ---
     ollama_base: AnyHttpUrl = Field(default="http://localhost:11434", validation_alias="OLLAMA_BASE")
     ollama_bearer_token: Optional[str] = Field(default=None, validation_alias="OLLAMA_BEARER_TOKEN")
@@ -80,12 +159,14 @@ class Settings(BaseSettings):
     # MCP Authentication (User/Password only - no API keys)
     mcp_oauth_user: Optional[str] = Field(default=None, validation_alias="MCP_OAUTH_USER")
     mcp_oauth_pass: Optional[str] = Field(default=None, validation_alias="MCP_OAUTH_PASS")
+    mcp_allow_unauthenticated_local: bool = Field(default=False, validation_alias="MCP_ALLOW_UNAUTHENTICATED_LOCAL")
     mcp_dev_allowed_roots: Optional[str] = Field(
         default=None,
         validation_alias="MCP_DEV_ALLOWED_ROOTS",
     )
 
     # MCP Mesh WebSocket
+    mcp_ws_enabled: bool = Field(default=True, validation_alias="MCP_WS_ENABLED")
     mcp_ws_host: str = Field(default="0.0.0.0", validation_alias="MCP_WS_HOST")
     mcp_ws_port: int = Field(default=44433, validation_alias="MCP_WS_PORT")
     mcp_ws_enable_ipv6: bool = Field(default=False, validation_alias="MCP_WS_ENABLE_IPV6")
@@ -216,7 +297,7 @@ class Settings(BaseSettings):
     nova_claude_user: Optional[str] = Field(default=None, validation_alias=AliasChoices("NOVA_CLAUDE_USER", "CLAUDE_USER"))
     nova_claude_pass: Optional[str] = Field(default=None, validation_alias=AliasChoices("NOVA_CLAUDE_PASS", "CLAUDE_PASS"))
     nova_claude_agent_id: Optional[str] = Field(default=None, validation_alias=AliasChoices("NOVA_CLAUDE_AGENT_ID", "CLAUDE_AGENT_ID"))
-    claude_agent_id: Optional[str] = Field(default=None, validation_alias=AliasChoices("CLAUDE_AGENT_ID", "NOVA_CLAUDE_AGENT_ID"))
+    claude_agent_id: Optional[str] = Field(default=None, validation_alias="CLAUDE_AGENT_ID")
     nova_mistral_url: Optional[str] = Field(default=None, validation_alias="NOVA_MISTRAL_URL")
     nova_mistral_user: Optional[str] = Field(default=None, validation_alias="NOVA_MISTRAL_USER")
     nova_mistral_pass: Optional[str] = Field(default=None, validation_alias="NOVA_MISTRAL_PASS")
@@ -266,4 +347,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # One deterministic loading path: process environment > canonical config file
+    # > schema defaults. The file parser treats dotenv content as data, never shell.
+    values, _origins = effective_environment()
+    return Settings.model_validate(values, by_alias=True, by_name=True)

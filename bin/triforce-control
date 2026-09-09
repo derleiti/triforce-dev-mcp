@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Headless companion CLI for the TriForce Control Center."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+from app.setup_tasks import TASKS, get_task, run_check
+from app.setup_job import job_is_running, read_setup_job
+from app.settings_store import load_snapshot, redact, settings_inventory
+
+
+def emit(obj: object) -> None:
+    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+
+
+def helper_path() -> str:
+    installed = Path("/usr/lib/triforce/triforce-admin-helper")
+    if installed.is_file():
+        return str(installed)
+    dev = Path(__file__).resolve().parents[1] / "packaging" / "triforce-admin-helper.py"
+    return str(dev)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="triforce-control")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("tasks")
+    p = sub.add_parser("plan"); p.add_argument("task")
+    p = sub.add_parser("check"); p.add_argument("task")
+    p = sub.add_parser("run"); p.add_argument("task"); p.add_argument("--no-wait", action="store_true")
+    sub.add_parser("job")
+    sub.add_parser("cancel")
+    sub.add_parser("settings")
+    args = parser.parse_args()
+
+    if args.cmd == "tasks":
+        emit([task.plan() for task in TASKS.values()]); return 0
+    if args.cmd == "plan":
+        emit(get_task(args.task).plan()); return 0
+    if args.cmd == "check":
+        result = run_check(args.task); emit(result.to_dict()); return 0 if result.ok else 1
+    if args.cmd == "run":
+        task = get_task(args.task)
+        if not task.mutating:
+            result = task.checker(); emit(result.to_dict()); return 0 if result.ok else 1
+        if not task.helper_action:
+            print("Task besitzt keine freigegebene Admin-Aktion", file=sys.stderr); return 2
+        # Import locally so read-only commands do not require it.
+        import shutil
+        if job_is_running():
+            emit(read_setup_job() or {"state": "running"}); return 5
+        helper = helper_path(); command = [helper, "setup-start", task.task_id]
+        if os.geteuid() != 0:
+            pkexec = shutil.which("pkexec")
+            if not pkexec:
+                print("pkexec ist nicht verfügbar", file=sys.stderr); return 3
+            command.insert(0, pkexec)
+        cp = subprocess.run(command, check=False)
+        if cp.returncode != 0: return cp.returncode
+        if args.no_wait:
+            emit(read_setup_job() or {"task_id": task.task_id, "state": "queued"}); return 0
+        deadline = time.monotonic() + 930
+        while time.monotonic() < deadline:
+            status = read_setup_job()
+            if status and status.get("task_id") == task.task_id and not job_is_running(status):
+                emit(status); return 0 if status.get("state") == "completed" else 4
+            time.sleep(0.5)
+        emit({"task_id": task.task_id, "state": "unknown", "message": "Zeitlimit beim Warten auf Setup-Status"}); return 124
+    if args.cmd == "job":
+        emit(read_setup_job() or {"state": "none"}); return 0
+    if args.cmd == "cancel":
+        import shutil
+        helper = helper_path(); command = [helper, "setup-cancel"]
+        if os.geteuid() != 0:
+            pkexec = shutil.which("pkexec")
+            if not pkexec:
+                print("pkexec ist nicht verfügbar", file=sys.stderr); return 3
+            command.insert(0, pkexec)
+        cp = subprocess.run(command, check=False)
+        if cp.returncode != 0: return cp.returncode
+        emit(read_setup_job() or {"state": "cancelled"}); return 0
+    if args.cmd == "settings":
+        snap = load_snapshot()
+        inventory = {m.name: m for m in settings_inventory()}
+        emit({"path": str(snap.path), "digest": snap.digest,
+              "values": redact(snap.values), "schema_fields": len(inventory)})
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

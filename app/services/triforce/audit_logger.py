@@ -21,6 +21,8 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional, Dict, Any, List, Set
 from pathlib import Path
+
+from app.paths import LOG_DIR
 import logging
 
 logger = logging.getLogger("ailinux.triforce.audit")
@@ -79,11 +81,11 @@ class AuditLogger:
 
     def __init__(
         self,
-        log_dir: str = "/home/zombie/triforce/logs",
+        log_dir: str | None = None,
         buffer_size: int = 1000,
         flush_threshold: int = 100
     ):
-        self.log_dir = Path(log_dir)
+        self.log_dir = Path(log_dir) if log_dir is not None else LOG_DIR
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         self.buffer_size = buffer_size

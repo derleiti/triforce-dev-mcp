@@ -11,6 +11,8 @@ import os
 import json
 import base64
 from pathlib import Path
+
+from app.paths import VAULT_DIR
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,7 +24,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-VAULT_PATH = Path("/home/zombie/triforce/.vault")
+VAULT_PATH = VAULT_DIR
 VAULT_FILE = VAULT_PATH / "api_keys.enc"
 SALT_FILE = VAULT_PATH / "salt"
 

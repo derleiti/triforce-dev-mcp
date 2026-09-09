@@ -236,3 +236,14 @@ data/n8n/crash.journal
 !tests/test_episodic_memory.py
 !tests/test_unified_registry_unittest.py
 !tests/test_mcp_swarm_runtime_contract_unittest.py
+!tests/test_settings_store.py
+!tests/test_setup_tasks.py
+!tests/test_admin_helper_contract.py
+!tests/test_packaging_beta1.py
+!tests/test_federation_optional.py
+!tests/test_settings_route_persistence.py
+!tests/test_mcp_auth_default.py
+!tests/test_server_launcher.py
+!tests/test_setup_job.py
+!tests/test_setup_runner_contract.py
+!tests/test_control_center_async_contract.py

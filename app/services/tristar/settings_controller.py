@@ -13,6 +13,8 @@ import asyncio
 import base64
 import hashlib
 from pathlib import Path
+
+from app.settings_store import resolve_config_path, save_updates
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -23,7 +25,6 @@ logger = logging.getLogger(__name__)
 TRISTAR_BASE = Path(os.getenv("TRISTAR_BASE", "/var/tristar"))
 SETTINGS_FILE = TRISTAR_BASE / "settings" / "global_settings.json"
 SECRETS_FILE = TRISTAR_BASE / "settings" / ".secrets.json"  # Separate file for API keys
-ENV_FILE = Path("/home/zombie/triforce/.env")
 
 # Simple obfuscation key (not true encryption, but prevents casual reading)
 _OBFUSCATION_KEY = "tristar-ailinux-2024"
@@ -617,34 +618,16 @@ class SettingsController:
             logger.error(f"Failed to save settings: {e}")
 
     async def _update_env_file(self, updates: Dict[str, Any]) -> None:
-        """Update .env file with new values"""
+        """Persist backend env settings through the canonical TriForce store."""
+        if not updates:
+            return
         try:
-            if not ENV_FILE.exists():
-                return
-
-            lines = ENV_FILE.read_text().splitlines()
-            new_lines = []
-            updated_keys = set()
-
-            for line in lines:
-                stripped = line.strip()
-                if stripped and not stripped.startswith("#") and "=" in stripped:
-                    key = stripped.split("=", 1)[0]
-                    if key in updates:
-                        new_lines.append(f"{key}={updates[key]}")
-                        updated_keys.add(key)
-                        continue
-                new_lines.append(line)
-
-            # Add new keys that weren't in the file
-            for key, value in updates.items():
-                if key not in updated_keys:
-                    new_lines.append(f"{key}={value}")
-
-            ENV_FILE.write_text("\n".join(new_lines) + "\n")
-            logger.info(f"Updated .env with {len(updates)} values")
+            target = resolve_config_path()
+            save_updates({key: str(value) for key, value in updates.items()}, path=target)
+            logger.info("Updated canonical TriForce config %s with %d values", target, len(updates))
         except Exception as e:
-            logger.error(f"Failed to update .env: {e}")
+            logger.error("Failed to update canonical TriForce config: %s", e)
+            raise
 
     # =========================================================================
     # Global Settings

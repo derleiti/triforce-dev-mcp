@@ -917,7 +917,8 @@ def _load_visibility_config() -> Dict:
     if _VISIBILITY_CONFIG is not None:
         return _VISIBILITY_CONFIG
     
-    config_path = Path("/home/zombie/triforce/config/mcp/tool_visibility.json")
+    from app.paths import CONFIG_DIR
+    config_path = CONFIG_DIR / "mcp" / "tool_visibility.json"
     if config_path.exists():
         try:
             _VISIBILITY_CONFIG = json.loads(config_path.read_text())

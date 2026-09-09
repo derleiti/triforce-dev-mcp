@@ -25,11 +25,13 @@ import subprocess
 import importlib.util
 import logging
 from pathlib import Path
+
+from app.paths import PROJECT_ROOT as TRIFORCE_PROJECT_ROOT, STATE_DIR
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ailinux.mcp.tool_builder")
 
-PROJECT_ROOT   = Path("/home/zombie/triforce")
+PROJECT_ROOT   = TRIFORCE_PROJECT_ROOT
 USER_TOOLS_DIR = PROJECT_ROOT / "app" / "mcp" / "user_tools"
 EVOLUTION_LOG  = PROJECT_ROOT / "triforce" / "memory" / "mcp_evolution.jsonl"
 VENV_PYTHON    = PROJECT_ROOT / ".venv" / "bin" / "python"

@@ -28,26 +28,17 @@ FLARUM_API   = os.getenv("FLARUM_API", "http://127.0.0.1:9080/api")
 
 
 def _env_value(name: str) -> Optional[str]:
-    """Read config from process env first, then local dotenv-style files."""
+    """Read config from process env first, then the canonical TriForce store."""
     value = os.environ.get(name)
     if value:
         return value
-    for env_path in ("/home/zombie/triforce/.env", "/home/zombie/triforce/.env.local", "/etc/triforce.env"):
-        try:
-            with open(env_path, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    s = line.strip()
-                    if not s or s.startswith("#") or "=" not in s:
-                        continue
-                    key, raw = s.split("=", 1)
-                    if key.strip() == name:
-                        val = raw.strip().strip('"').strip("'")
-                        return val or None
-        except FileNotFoundError:
-            continue
-        except Exception as exc:
-            logger.debug("Could not read env file %s: %s", env_path, exc)
-    return None
+    try:
+        from app.settings_store import load_snapshot
+        raw = load_snapshot().values.get(name)
+        return str(raw) if raw not in (None, "") else None
+    except Exception as exc:
+        logger.debug("Could not read canonical TriForce config: %s", exc)
+        return None
 
 
 FLARUM_TOKEN = _env_value("FLARUM_TOKEN")

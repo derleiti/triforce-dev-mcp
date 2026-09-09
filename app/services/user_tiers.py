@@ -13,6 +13,8 @@ from datetime import datetime
 import json
 from pathlib import Path
 
+from app.paths import VAULT_DIR
+
 class UserTier(str, Enum):
     GUEST = "guest"
     REGISTERED = "registered"
@@ -128,8 +130,7 @@ TIER_CONFIGS: Dict[UserTier, TierConfig] = {
 
 class UserTierService:
     def __init__(self, users_path: Path = None):
-        paths = [Path(".vault/users"), Path("/opt/triforce/.vault/users"), Path("/home/zombie/triforce/.vault/users")]
-        self.users_path = users_path or next((p for p in paths if p.parent.exists()), Path(".vault/users"))
+        self.users_path = users_path or (VAULT_DIR / "users")
         self.users_path.mkdir(parents=True, exist_ok=True)
         self._token_usage: Dict[str, Dict] = {}
     

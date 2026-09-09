@@ -13,6 +13,7 @@ This enables TriStar to access all system logs for analysis and debugging.
 """
 
 import asyncio
+import os
 import json
 import logging
 import time
@@ -22,6 +23,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+
+from app.paths import LOG_DIR
 from typing import Any, Dict, List, Optional, Set
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -262,7 +265,7 @@ class TriForceCentralLogger:
     ):
         # Default: ./logs/central
         if log_dir is None:
-            self.log_dir = Path(__file__).parent.parent.parent / "logs" / "central"
+            self.log_dir = LOG_DIR / "central"
         else:
             self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -777,7 +780,7 @@ class MultiFileLogger:
     def __init__(self, log_dir: Optional[str] = None):
         # Default: ./logs
         if log_dir is None:
-            self.log_dir = Path(__file__).parent.parent.parent / "logs"
+            self.log_dir = LOG_DIR
         else:
             self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)

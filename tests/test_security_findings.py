@@ -425,9 +425,19 @@ def _mock_mcp_request(headers=None, host="127.0.0.1"):
 
 class TestMcpRuntimeSecurity:
     @pytest.mark.asyncio
-    async def test_get_mcp_health_does_not_reference_missing_params(self):
+    async def test_get_mcp_health_requires_auth_by_default(self):
         from app.routes.mcp import mcp_health_or_sse
 
+        with pytest.raises(HTTPException) as caught:
+            await mcp_health_or_sse(_mock_mcp_request())
+        assert caught.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_get_mcp_health_does_not_reference_missing_params_with_explicit_local_bypass(self, monkeypatch):
+        from app.routes.mcp import mcp_health_or_sse
+        from app.utils import mcp_auth
+
+        monkeypatch.setattr(mcp_auth, "MCP_ALLOW_UNAUTHENTICATED_LOCAL", True)
         response = await mcp_health_or_sse(_mock_mcp_request())
         payload = json.loads(response.body)
 

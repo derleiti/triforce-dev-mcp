@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 from pathlib import Path
 
+from app.paths import PROJECT_ROOT
+
 from .crawler.user_crawler import get_user_crawler
 from .crawler.manager import crawler_manager
 from .wordpress import wordpress_service
@@ -35,7 +37,7 @@ from .remote_task import remote_task_service, TaskType, TaskStatus
 from .nova_chat_agent import nova_chat_agent_service as account_specialists
 
 # Constants
-BACKEND_ROOT = Path("/home/zombie/triforce")
+BACKEND_ROOT = PROJECT_ROOT
 # Comprehensive file extensions for codebase search
 ALLOWED_EXTENSIONS = {
     # Python

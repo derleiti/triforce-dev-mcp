@@ -6,6 +6,8 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.paths import PROJECT_ROOT
+
 from ..services.rag_service import RagPathNotAllowed, rag_service
 
 
@@ -14,7 +16,7 @@ router = APIRouter(prefix="/rag", tags=["RAG"])
 
 class RagIndexRequest(BaseModel):
     project: str = Field(default="triforce", min_length=1, max_length=80)
-    path: str = Field(default="/home/zombie/triforce", min_length=1, max_length=4096)
+    path: str = Field(default=str(PROJECT_ROOT), min_length=1, max_length=4096)
     include_globs: Optional[List[str]] = Field(default=None)
     exclude_dirs: List[str] = Field(default_factory=list)
     chunk_chars: int = Field(default=2200, ge=500, le=12000)

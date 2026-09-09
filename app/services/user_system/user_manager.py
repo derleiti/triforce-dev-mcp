@@ -18,6 +18,8 @@ import secrets
 import hashlib
 import asyncio
 from pathlib import Path
+
+from app.paths import USERS_DIR
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict, field
@@ -31,7 +33,7 @@ import logging
 logger = logging.getLogger("ailinux.user_system")
 
 # Basis-Pfad für User-Daten
-USERS_BASE = Path("/home/zombie/triforce/users")
+USERS_BASE = USERS_DIR
 USERS_BASE.mkdir(parents=True, exist_ok=True)
 
 
