@@ -135,9 +135,9 @@ Der aktuelle Kandidat wurde nach den letzten Settings-/Setup-Korrekturen vollst√
 ### Finale Artefakte
 
 - `triforce-backend_2.85.0~beta1_amd64.deb`
-  - SHA256 `fb172b36b153722998a0eaa262ab2bb5528ce941053368acb39362ebe2c20e5b`
+  - SHA256 `71802185316f6761c04536a3c522162ed7eaf36947f5da89dd558cd3fc98c33a`
 - `triforce-control-center_2.85.0~beta1_amd64.deb`
-  - SHA256 `ee3dd562cc5525849d0028839bf06a03a453024a8010a44f22c461e3b77276e9`
+  - SHA256 `0af074e4c90bbde8e8708ea3215fadd52d819295bd995b9a0234bccdf94fa1bc`
 
 ### Bewusste Grenzen von Beta 1
 
@@ -145,3 +145,16 @@ Der aktuelle Kandidat wurde nach den letzten Settings-/Setup-Korrekturen vollst√
 - Die Installations-/Upgrade-Abnahme lief in einem privilegierten Ubuntu-26.04-systemd-Container mit echtem systemd als PID 1; kein separater QEMU-VM-Test.
 - Provider-Verbindungstests werden nicht automatisch beim Start ausgel√∂st. Das ist absichtlich fail-safe und vermeidet Kosten/Rate-Limits/Nebenwirkungen.
 - Alte breit wirkende Installationsskripte mit globalen Paket-/npm-Eingriffen sind nicht als Root-Buttons im Control Center exponiert.
+
+
+### Docker-Blueprint / MCP-Workflow
+
+- Paketierter schlanker Blueprint unter `/opt/triforce/docker/blueprint` fuer Redis, WordPress/MariaDB, Flarum/MariaDB, SearXNG, n8n, Repository/nginx und docker-mailserver.
+- Nur Compose, README, leere Strukturordner und Wartungsskripte; kein produktives WordPress-HTML, kein Repository-Mirror und keine Docker-Volumes.
+- **59 strukturierte Docker-Settings** im zentralen TriForce-Settings-Store und Control Center.
+- Fresh Install generiert getrennte lokale Secrets fuer WordPress-DB, Flarum-DB und SearXNG; geschuetzter Config-Read redigiert diese Werte.
+- MCP-Tool `docker_stack` mit festen Actions `validate/status/up/down/restart/pull/logs` und festen Profiles `all/redis/wordpress/flarum/searxng/n8n/repository/mailserver`.
+- Keine freie Compose-Datei, kein freier Shell-Befehl, kein automatisches Hinzufuegen des Dienstbenutzers zur Docker-Gruppe.
+- Compose-Blueprint mit Docker Compose v5.5.1 fuer alle Profiles validiert.
+- MCP-Discovery und Dispatch ueber echten HTTP-Endpunkt getestet.
+- Vollstaendige Regression nach Docker-Integration: **261/261 passed**.

@@ -58,6 +58,7 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "restart": "admin",
     "service_control": "admin",
     "container_control": "admin",
+    "docker_stack": "admin",
     "safe_probe": "admin",
     "service_status": "admin",
     "container_status": "admin",
@@ -137,7 +138,7 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
 # for compatibility, but are intentionally hidden from model discovery.
 CANONICAL_TOOL_NAMES = frozenset({
     # Core operations
-    "shell", "status", "service_control", "container_control", "hot_reload",
+    "shell", "status", "service_control", "container_control", "docker_stack", "hot_reload",
     "log_viewer", "mcp_analytics", "config", "config_set",
     # Files/code
     "file_ops", "code_search", "code_edit", "code_tree", "git",

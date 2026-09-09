@@ -66,6 +66,76 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
 
+    # --- Docker Blueprint ---
+    # These settings describe the shipped lightweight Compose blueprint only.
+    # They never grant Docker socket access and never select an arbitrary compose file.
+    docker_project_name: str = Field(default="triforce", validation_alias="DOCKER_PROJECT_NAME")
+    docker_restart_policy: str = Field(default="unless-stopped", validation_alias="DOCKER_RESTART_POLICY")
+    docker_log_tail: int = Field(default=100, ge=10, le=5000, validation_alias="DOCKER_LOG_TAIL")
+    docker_network_name: str = Field(default="triforce-net", validation_alias="DOCKER_NETWORK_NAME")
+
+    docker_redis_image: str = Field(default="redis:7-alpine", validation_alias="DOCKER_REDIS_IMAGE")
+    docker_redis_container: str = Field(default="triforce-redis", validation_alias="DOCKER_REDIS_CONTAINER")
+    docker_redis_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_REDIS_BIND")
+    docker_redis_port: int = Field(default=6379, ge=1, le=65535, validation_alias="DOCKER_REDIS_PORT")
+
+    docker_wordpress_image: str = Field(default="wordpress:latest", validation_alias="DOCKER_WORDPRESS_IMAGE")
+    docker_wordpress_container: str = Field(default="triforce-wordpress", validation_alias="DOCKER_WORDPRESS_CONTAINER")
+    docker_wordpress_db_image: str = Field(default="mariadb:11", validation_alias="DOCKER_WORDPRESS_DB_IMAGE")
+    docker_wordpress_db_container: str = Field(default="triforce-wordpress-db", validation_alias="DOCKER_WORDPRESS_DB_CONTAINER")
+    docker_wordpress_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_WORDPRESS_BIND")
+    docker_wordpress_port: int = Field(default=8080, ge=1, le=65535, validation_alias="DOCKER_WORDPRESS_PORT")
+    docker_wordpress_db_name: str = Field(default="wordpress", validation_alias="DOCKER_WORDPRESS_DB_NAME")
+    docker_wordpress_db_user: str = Field(default="wordpress", validation_alias="DOCKER_WORDPRESS_DB_USER")
+    docker_wordpress_db_password: str = Field(default="", validation_alias="DOCKER_WORDPRESS_DB_PASSWORD")
+    docker_wordpress_db_root_password: str = Field(default="", validation_alias="DOCKER_WORDPRESS_DB_ROOT_PASSWORD")
+
+    docker_flarum_image: str = Field(default="mondedie/flarum:latest", validation_alias="DOCKER_FLARUM_IMAGE")
+    docker_flarum_container: str = Field(default="triforce-flarum", validation_alias="DOCKER_FLARUM_CONTAINER")
+    docker_flarum_db_image: str = Field(default="mariadb:11", validation_alias="DOCKER_FLARUM_DB_IMAGE")
+    docker_flarum_db_container: str = Field(default="triforce-flarum-db", validation_alias="DOCKER_FLARUM_DB_CONTAINER")
+    docker_flarum_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_FLARUM_BIND")
+    docker_flarum_port: int = Field(default=9080, ge=1, le=65535, validation_alias="DOCKER_FLARUM_PORT")
+    docker_flarum_db_name: str = Field(default="flarum", validation_alias="DOCKER_FLARUM_DB_NAME")
+    docker_flarum_db_user: str = Field(default="flarum", validation_alias="DOCKER_FLARUM_DB_USER")
+    docker_flarum_db_password: str = Field(default="", validation_alias="DOCKER_FLARUM_DB_PASSWORD")
+    docker_flarum_db_root_password: str = Field(default="", validation_alias="DOCKER_FLARUM_DB_ROOT_PASSWORD")
+    docker_flarum_assets_path: str = Field(default="./flarum/assets", validation_alias="DOCKER_FLARUM_ASSETS_PATH")
+    docker_flarum_extensions_path: str = Field(default="./flarum/extensions", validation_alias="DOCKER_FLARUM_EXTENSIONS_PATH")
+    docker_flarum_storage_path: str = Field(default="./flarum/storage", validation_alias="DOCKER_FLARUM_STORAGE_PATH")
+
+    docker_searxng_image: str = Field(default="searxng/searxng:latest", validation_alias="DOCKER_SEARXNG_IMAGE")
+    docker_searxng_container: str = Field(default="triforce-searxng", validation_alias="DOCKER_SEARXNG_CONTAINER")
+    docker_searxng_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_SEARXNG_BIND")
+    docker_searxng_port: int = Field(default=8888, ge=1, le=65535, validation_alias="DOCKER_SEARXNG_PORT")
+    docker_searxng_base_url: str = Field(default="http://localhost:8888/", validation_alias="DOCKER_SEARXNG_BASE_URL")
+    docker_searxng_secret: str = Field(default="", validation_alias="DOCKER_SEARXNG_SECRET")
+    docker_searxng_config_path: str = Field(default="./searxng", validation_alias="DOCKER_SEARXNG_CONFIG_PATH")
+
+    docker_n8n_image: str = Field(default="n8nio/n8n:latest", validation_alias="DOCKER_N8N_IMAGE")
+    docker_n8n_container: str = Field(default="triforce-n8n", validation_alias="DOCKER_N8N_CONTAINER")
+    docker_n8n_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_N8N_BIND")
+    docker_n8n_port: int = Field(default=5678, ge=1, le=65535, validation_alias="DOCKER_N8N_PORT")
+    docker_n8n_host: str = Field(default="localhost", validation_alias="DOCKER_N8N_HOST")
+    docker_n8n_protocol: str = Field(default="http", validation_alias="DOCKER_N8N_PROTOCOL")
+
+    docker_repository_image: str = Field(default="nginx:alpine", validation_alias="DOCKER_REPOSITORY_IMAGE")
+    docker_repository_container: str = Field(default="triforce-repository", validation_alias="DOCKER_REPOSITORY_CONTAINER")
+    docker_repository_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_REPOSITORY_BIND")
+    docker_repository_port: int = Field(default=8081, ge=1, le=65535, validation_alias="DOCKER_REPOSITORY_PORT")
+    docker_repository_data_path: str = Field(default="./repository/repo", validation_alias="DOCKER_REPOSITORY_DATA_PATH")
+
+    docker_mailserver_image: str = Field(default="mailserver/docker-mailserver:latest", validation_alias="DOCKER_MAILSERVER_IMAGE")
+    docker_mailserver_container: str = Field(default="triforce-mailserver", validation_alias="DOCKER_MAILSERVER_CONTAINER")
+    docker_mailserver_hostname: str = Field(default="mail", validation_alias="DOCKER_MAILSERVER_HOSTNAME")
+    docker_mail_smtp_bind: str = Field(default="0.0.0.0", validation_alias="DOCKER_MAIL_SMTP_BIND")
+    docker_mail_smtp_port: int = Field(default=25, ge=1, le=65535, validation_alias="DOCKER_MAIL_SMTP_PORT")
+    docker_mail_submission_bind: str = Field(default="0.0.0.0", validation_alias="DOCKER_MAIL_SUBMISSION_BIND")
+    docker_mail_submission_port: int = Field(default=587, ge=1, le=65535, validation_alias="DOCKER_MAIL_SUBMISSION_PORT")
+    docker_mail_imaps_bind: str = Field(default="0.0.0.0", validation_alias="DOCKER_MAIL_IMAPS_BIND")
+    docker_mail_imaps_port: int = Field(default=993, ge=1, le=65535, validation_alias="DOCKER_MAIL_IMAPS_PORT")
+    docker_mailserver_config_path: str = Field(default="./mailserver", validation_alias="DOCKER_MAILSERVER_CONFIG_PATH")
+
     # --- Providers / Backends ---
     ollama_base: AnyHttpUrl = Field(default="http://localhost:11434", validation_alias="OLLAMA_BASE")
     ollama_bearer_token: Optional[str] = Field(default=None, validation_alias="OLLAMA_BEARER_TOKEN")

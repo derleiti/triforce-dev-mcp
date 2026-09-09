@@ -84,6 +84,11 @@ def config_init() -> None:
         "MCP_OAUTH_PASS": secrets.token_urlsafe(32),
         "JWT_SECRET": secrets.token_urlsafe(48),
         "TRIFORCE_ADMIN_SECRET": secrets.token_urlsafe(32),
+        "DOCKER_WORDPRESS_DB_PASSWORD": secrets.token_urlsafe(32),
+        "DOCKER_WORDPRESS_DB_ROOT_PASSWORD": secrets.token_urlsafe(32),
+        "DOCKER_FLARUM_DB_PASSWORD": secrets.token_urlsafe(32),
+        "DOCKER_FLARUM_DB_ROOT_PASSWORD": secrets.token_urlsafe(32),
+        "DOCKER_SEARXNG_SECRET": secrets.token_urlsafe(32),
     }
     rendered: list[str] = []
     seen_generated: set[str] = set()

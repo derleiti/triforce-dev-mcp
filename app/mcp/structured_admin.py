@@ -205,6 +205,18 @@ async def handle_container_control(a):
         return {"action":act,"container":ctr,**(await _run(["docker","logs","--tail",n,ctr]))}
     return {"error":f"Unknown action: {act}"}
 
+async def handle_docker_stack(a):
+    """Operate the fixed packaged TriForce Docker blueprint."""
+    from app.docker_stack import ACTIONS, PROFILES, run as run_docker_stack
+    action = a.get("action", "status")
+    profile = a.get("profile", "all")
+    if action not in ACTIONS:
+        return {"error": f"Unsupported Docker stack action: {action}"}
+    if profile not in PROFILES:
+        return {"error": f"Unsupported Docker profile: {profile}"}
+    return await run_docker_stack(action, profile)
+
+
 async def handle_file_ops(a):
     act,p=a.get("action"),a.get("path","")
     if act in ("read","list","find","size"):
@@ -293,6 +305,9 @@ STRUCTURED_ADMIN_TOOLS = [
     {"name":"container_control","description":"Manage Docker containers: list, status, start, stop, restart, view logs, or get resource stats.",
      "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list","status","start","stop","restart","logs","stats"]},"container":{"type":"string","enum":CONTAINERS},"lines":{"type":"integer"}},"required":["action"]},
      "annotations":{"title":"Container Manager","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False}},
+    {"name":"docker_stack","description":"Manage the fixed TriForce Docker blueprint by profile. Uses canonical TriForce settings and never accepts an arbitrary compose path or shell command.",
+     "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["validate","status","up","down","restart","pull","logs"]},"profile":{"type":"string","enum":["all","redis","wordpress","flarum","searxng","n8n","repository","mailserver"]}},"required":["action"]},
+     "annotations":{"title":"TriForce Docker Stack","readOnlyHint":False,"destructiveHint":True,"idempotentHint":True,"openWorldHint":True}},
     {"name":"file_ops","description":"Filesystem operations: read, write, append files, list directories, find files, check sizes. Paths validated against allowlist.",
      "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["read","write","append","list","find","size"]},"path":{"type":"string"},"content":{"type":"string"},"pattern":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"}},"required":["action","path"]},
      "annotations":{"title":"File Operations","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False}},

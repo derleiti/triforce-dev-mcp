@@ -47,6 +47,9 @@ SECRET_ENV_KEYS = frozenset({
     "STABLE_DIFFUSION_API_KEY", "STABLE_DIFFUSION_PASSWORD", "TOGETHER_API_KEY",
     "TRIFORCE_ADMIN_SECRET", "TRISTAR_GUI_PASSWORD", "USER_MASTER_KEY",
     "WEBHOOK_SECRET", "WORDPRESS_PASSWORD",
+    "DOCKER_WORDPRESS_DB_PASSWORD", "DOCKER_WORDPRESS_DB_ROOT_PASSWORD",
+    "DOCKER_FLARUM_DB_PASSWORD", "DOCKER_FLARUM_DB_ROOT_PASSWORD",
+    "DOCKER_SEARXNG_SECRET",
 })
 
 
@@ -153,6 +156,7 @@ def _category(name: str, env_names: Iterable[str]) -> str:
     joined = " ".join((name, *env_names)).upper()
     for marker, category in (
         ("MEMORY", "Memory"), ("EPISODIC", "Memory"),
+        ("DOCKER_", "Docker"),
         ("MCP_", "MCP & Sicherheit"),
         ("AGENT", "Agenten"), ("CODEX", "Agenten"), ("OPENCODE", "Agenten"),
         ("NOVA_CLAUDE", "Agenten"), ("TRISTAR", "Agenten"),

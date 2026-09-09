@@ -72,6 +72,8 @@ make_backend(){
   cp "$ROOT/scripts/start-triforce.sh" "$pkg/opt/triforce/scripts/"
   cp "$ROOT/bin/triforce-control" "$pkg/opt/triforce/bin/"
   cp "$ROOT/config/triforce.env.example" "$pkg/opt/triforce/config/"
+  mkdir -p "$pkg/opt/triforce/docker"
+  cp -a "$ROOT/docker/blueprint" "$pkg/opt/triforce/docker/blueprint"
   cp "$ROOT/packaging/systemd/triforce.service" "$pkg/opt/triforce/packaging/systemd/"
   cp "$ROOT/VERSION" "$ROOT/LICENSE" "$ROOT/requirements.txt" "$ROOT/requirements-lock-2.85-beta1.txt" "$pkg/opt/triforce/"
   cp -a "$RUNTIME" "$pkg/opt/triforce/runtime"
@@ -100,7 +102,7 @@ Architecture: $ARCH
 Section: net
 Priority: optional
 Depends: python3.14, systemd
-Suggests: redis-server
+Suggests: redis-server, docker.io, docker-compose-v2
 Maintainer: Markus Leitermann <admin@ailinux.me>
 Homepage: https://ailinux.me
 Description: TriForce 2.85 Beta 1 AI backend

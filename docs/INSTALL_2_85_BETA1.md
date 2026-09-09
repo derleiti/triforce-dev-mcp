@@ -49,3 +49,23 @@ triforce-control cancel
 ## Deinstallation
 
 `remove` und `purge` löschen die installierten Programmdateien und deaktivieren die Unit. `/etc/triforce` und `/var/lib/triforce` werden aus Sicherheitsgründen nicht automatisch gelöscht, damit Betreiber-Konfiguration, lokale Secrets und Zustandsdaten nicht versehentlich verloren gehen.
+
+
+## Optionaler Docker-Blueprint
+
+Beta 1 liefert unter `/opt/triforce/docker/blueprint` eine schlanke
+Compose-Grundstruktur fuer Redis, WordPress/MariaDB, Flarum/MariaDB, SearXNG,
+n8n, Repository/nginx und docker-mailserver. Produktive WordPress-Dateien,
+Repository-Mirror, Datenbanken, Maildaten und Volumes sind nicht Bestandteil
+des Pakets.
+
+Die Docker-Parameter werden in derselben `/etc/triforce/triforce.env` wie die
+Backend-Einstellungen verwaltet und erscheinen im Control Center in der
+Kategorie `Docker`. Secrets fuer WordPress/Flarum-Datenbanken und SearXNG werden
+bei Fresh Install lokal generiert und im Editor redigiert.
+
+Das MCP-Tool `docker_stack` bietet feste Aktionen `validate`, `status`, `up`,
+`down`, `restart`, `pull` und `logs` fuer feste Profiles. Das Paket fuegt den
+Dienstbenutzer **nicht** automatisch der Gruppe `docker` hinzu. Docker-Socket-
+Zugriff ist praktisch Root-Zugriff und muss daher separat und bewusst vom
+Betreiber freigegeben werden.

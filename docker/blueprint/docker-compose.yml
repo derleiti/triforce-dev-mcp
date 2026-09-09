@@ -1,0 +1,125 @@
+name: ${DOCKER_PROJECT_NAME:-triforce}
+
+x-defaults: &defaults
+  restart: ${DOCKER_RESTART_POLICY:-unless-stopped}
+  networks: [triforce]
+
+services:
+  redis:
+    <<: *defaults
+    image: ${DOCKER_REDIS_IMAGE:-redis:7-alpine}
+    container_name: ${DOCKER_REDIS_CONTAINER:-triforce-redis}
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["${DOCKER_REDIS_BIND:-127.0.0.1}:${DOCKER_REDIS_PORT:-6379}:6379"]
+    volumes: ["redis-data:/data"]
+    profiles: ["redis"]
+
+  wordpress-db:
+    <<: *defaults
+    image: ${DOCKER_WORDPRESS_DB_IMAGE:-mariadb:11}
+    container_name: ${DOCKER_WORDPRESS_DB_CONTAINER:-triforce-wordpress-db}
+    environment:
+      MARIADB_DATABASE: ${DOCKER_WORDPRESS_DB_NAME:-wordpress}
+      MARIADB_USER: ${DOCKER_WORDPRESS_DB_USER:-wordpress}
+      MARIADB_PASSWORD: ${DOCKER_WORDPRESS_DB_PASSWORD:-}
+      MARIADB_ROOT_PASSWORD: ${DOCKER_WORDPRESS_DB_ROOT_PASSWORD:-}
+    volumes: ["wordpress-db:/var/lib/mysql"]
+    profiles: ["wordpress"]
+
+  wordpress:
+    <<: *defaults
+    image: ${DOCKER_WORDPRESS_IMAGE:-wordpress:latest}
+    container_name: ${DOCKER_WORDPRESS_CONTAINER:-triforce-wordpress}
+    depends_on: [wordpress-db]
+    environment:
+      WORDPRESS_DB_HOST: wordpress-db:3306
+      WORDPRESS_DB_NAME: ${DOCKER_WORDPRESS_DB_NAME:-wordpress}
+      WORDPRESS_DB_USER: ${DOCKER_WORDPRESS_DB_USER:-wordpress}
+      WORDPRESS_DB_PASSWORD: ${DOCKER_WORDPRESS_DB_PASSWORD:-}
+    ports: ["${DOCKER_WORDPRESS_BIND:-127.0.0.1}:${DOCKER_WORDPRESS_PORT:-8080}:80"]
+    volumes: ["wordpress-html:/var/www/html"]
+    profiles: ["wordpress"]
+
+  flarum-db:
+    <<: *defaults
+    image: ${DOCKER_FLARUM_DB_IMAGE:-mariadb:11}
+    container_name: ${DOCKER_FLARUM_DB_CONTAINER:-triforce-flarum-db}
+    environment:
+      MARIADB_DATABASE: ${DOCKER_FLARUM_DB_NAME:-flarum}
+      MARIADB_USER: ${DOCKER_FLARUM_DB_USER:-flarum}
+      MARIADB_PASSWORD: ${DOCKER_FLARUM_DB_PASSWORD:-}
+      MARIADB_ROOT_PASSWORD: ${DOCKER_FLARUM_DB_ROOT_PASSWORD:-}
+    volumes: ["flarum-db:/var/lib/mysql"]
+    profiles: ["flarum"]
+
+  flarum:
+    <<: *defaults
+    image: ${DOCKER_FLARUM_IMAGE:-mondedie/flarum:latest}
+    container_name: ${DOCKER_FLARUM_CONTAINER:-triforce-flarum}
+    depends_on: [flarum-db]
+    ports: ["${DOCKER_FLARUM_BIND:-127.0.0.1}:${DOCKER_FLARUM_PORT:-9080}:8888"]
+    volumes:
+      - "${DOCKER_FLARUM_ASSETS_PATH:-./flarum/assets}:/flarum/app/public/assets"
+      - "${DOCKER_FLARUM_EXTENSIONS_PATH:-./flarum/extensions}:/flarum/app/extensions"
+      - "${DOCKER_FLARUM_STORAGE_PATH:-./flarum/storage}:/flarum/app/storage"
+    profiles: ["flarum"]
+
+  searxng:
+    <<: *defaults
+    image: ${DOCKER_SEARXNG_IMAGE:-searxng/searxng:latest}
+    container_name: ${DOCKER_SEARXNG_CONTAINER:-triforce-searxng}
+    ports: ["${DOCKER_SEARXNG_BIND:-127.0.0.1}:${DOCKER_SEARXNG_PORT:-8888}:8080"]
+    environment:
+      SEARXNG_BASE_URL: ${DOCKER_SEARXNG_BASE_URL:-http://localhost:8888/}
+      SEARXNG_SECRET: ${DOCKER_SEARXNG_SECRET:-}
+    volumes: ["${DOCKER_SEARXNG_CONFIG_PATH:-./searxng}:/etc/searxng"]
+    profiles: ["searxng"]
+
+  n8n:
+    <<: *defaults
+    image: ${DOCKER_N8N_IMAGE:-n8nio/n8n:latest}
+    container_name: ${DOCKER_N8N_CONTAINER:-triforce-n8n}
+    ports: ["${DOCKER_N8N_BIND:-127.0.0.1}:${DOCKER_N8N_PORT:-5678}:5678"]
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      N8N_HOST: ${DOCKER_N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${DOCKER_N8N_PROTOCOL:-http}
+    volumes: ["n8n-data:/home/node/.n8n"]
+    profiles: ["n8n"]
+
+  repository:
+    <<: *defaults
+    image: ${DOCKER_REPOSITORY_IMAGE:-nginx:alpine}
+    container_name: ${DOCKER_REPOSITORY_CONTAINER:-triforce-repository}
+    ports: ["${DOCKER_REPOSITORY_BIND:-127.0.0.1}:${DOCKER_REPOSITORY_PORT:-8081}:80"]
+    volumes: ["${DOCKER_REPOSITORY_DATA_PATH:-./repository/repo}:/usr/share/nginx/html:ro"]
+    profiles: ["repository"]
+
+  mailserver:
+    <<: *defaults
+    image: ${DOCKER_MAILSERVER_IMAGE:-mailserver/docker-mailserver:latest}
+    container_name: ${DOCKER_MAILSERVER_CONTAINER:-triforce-mailserver}
+    hostname: ${DOCKER_MAILSERVER_HOSTNAME:-mail}
+    ports:
+      - "${DOCKER_MAIL_SMTP_BIND:-0.0.0.0}:${DOCKER_MAIL_SMTP_PORT:-25}:25"
+      - "${DOCKER_MAIL_SUBMISSION_BIND:-0.0.0.0}:${DOCKER_MAIL_SUBMISSION_PORT:-587}:587"
+      - "${DOCKER_MAIL_IMAPS_BIND:-0.0.0.0}:${DOCKER_MAIL_IMAPS_PORT:-993}:993"
+    volumes:
+      - mail-data:/var/mail
+      - mail-state:/var/mail-state
+      - "${DOCKER_MAILSERVER_CONFIG_PATH:-./mailserver}:/tmp/docker-mailserver"
+    profiles: ["mailserver"]
+
+networks:
+  triforce:
+    name: ${DOCKER_NETWORK_NAME:-triforce-net}
+    driver: bridge
+
+volumes:
+  redis-data:
+  wordpress-db:
+  wordpress-html:
+  flarum-db:
+  n8n-data:
+  mail-data:
+  mail-state:
