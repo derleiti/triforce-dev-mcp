@@ -88,3 +88,16 @@ def test_release_actions_contract():
     assert "windows-latest" in text
     assert "WINDOWS_EXE_SMOKE_OK" in text
     assert "WINDOWS_SETUP_SMOKE_OK" in text
+    assert "release-ci" in text
+    assert "startsWith(github.ref, 'refs/tags/')" in text
+
+
+def test_release_prunes_non_ascii_runtime_aliases():
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    assert 'LC_ALL=C' in text
+    assert r'*[!\ -~]*' in text
+
+
+def test_arch_preserves_prebuilt_wheels_without_debug_split():
+    text = (ROOT / "packaging/arch/PKGBUILD.in").read_text()
+    assert "options=('!strip' '!debug')" in text

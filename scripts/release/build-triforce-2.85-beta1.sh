@@ -82,6 +82,15 @@ make_backend(){
   # so normalize the interpreter target to the distro-managed executable.
   rm -f "$pkg/opt/triforce/runtime/bin/python3.14"
   ln -s /usr/bin/python3.14 "$pkg/opt/triforce/runtime/bin/python3.14"
+  # Drop accidental/non-portable non-ASCII aliases from the venv bin directory.
+  # Keep canonical console entry points and interpreter links only.
+  LC_ALL=C
+  for entry in "$pkg/opt/triforce/runtime/bin/"*; do
+    base="${entry##*/}"
+    case "$base" in
+      *[!\ -~]*) rm -f -- "$entry" ;;
+    esac
+  done
   # Remove build-only caches/tooling from shipped runtime while preserving imports.
   find "$pkg/opt/triforce/runtime" -type d -name '__pycache__' -prune -exec rm -rf {} + || true
   rm -rf "$pkg/opt/triforce/runtime/lib/python3.14/site-packages/pytest"* \

@@ -9,6 +9,7 @@ depends=('python>=3.14' 'python<3.15' 'systemd' 'zlib' 'expat')
 optdepends=('redis: caching and coordination' 'docker: optional service integrations')
 provides=('triforce')
 conflicts=('triforce')
+options=('!strip' '!debug')
 install=triforce.install
 _deb='triforce-backend_2.85.0~beta1_amd64.deb'
 source=("${_deb}::@SOURCE@")
