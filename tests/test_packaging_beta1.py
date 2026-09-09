@@ -60,6 +60,7 @@ def test_ci_prepare_script_builds_runtime_and_gui():
     text = (ROOT / "scripts/release/prepare-triforce-2.85-ci-build.sh").read_text()
     assert 'requirements-lock-2.85-beta1.txt' in text
     assert 'nuitka==4.2.1' in text
+    assert 'pydantic-settings==2.15.0' in text
     assert '--smoke-test' in text
     assert '--mode=standalone' in text
 

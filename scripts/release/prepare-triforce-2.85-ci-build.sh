@@ -20,7 +20,10 @@ PY
 
 "$PYTHON_BIN" -m venv "$GUI_VENV"
 "$GUI_VENV/bin/python" -m pip install --upgrade pip
-"$GUI_VENV/bin/pip" install 'PyQt6==6.11.0' 'nuitka==4.2.1' ordered-set zstandard patchelf
+"$GUI_VENV/bin/pip" install \
+  'PyQt6==6.11.0' \
+  'pydantic-settings==2.15.0' \
+  'nuitka==4.2.1' ordered-set zstandard patchelf
 QT_QPA_PLATFORM=offscreen PYTHONPATH="$ROOT" "$GUI_VENV/bin/python" "$ROOT/control_center/main.py" --smoke-test
 "$GUI_VENV/bin/python" -m nuitka \
   --mode=standalone \
