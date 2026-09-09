@@ -1,10 +1,12 @@
 # TriForce Backend Version
-VERSION = "2.81"
+VERSION = "2.85 Beta 1"
 
 from functools import lru_cache
 from typing import Dict, List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, AnyHttpUrl, Field
+
+from .settings_store import effective_environment
 
 DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost",
@@ -26,9 +28,15 @@ DEFAULT_ALLOWED_ORIGINS = [
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="allow",
-        env_file=".env",
-        env_file_encoding="utf-8",
+        env_file=None,
+        populate_by_name=True,
     )
+
+    # Canonical server bind settings. These are consumed by the service launcher
+    # and shown by the Control Center; changing them requires a controlled restart.
+    server_host: str = Field("127.0.0.1", validation_alias="TRIFORCE_BIND_HOST")
+    server_port: int = Field(9100, ge=1, le=65535, validation_alias="TRIFORCE_API_PORT")
+    server_keepalive: int = Field(75, ge=5, le=600, validation_alias="TRIFORCE_KEEPALIVE")
 
     # Episodic history is optional and separate from curated TriForce memory.
     episodic_memory_enabled: bool = Field(False, validation_alias="TRIFORCE_EPISODIC_MEMORY_ENABLED")
@@ -266,4 +274,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # One deterministic loading path: process environment > canonical config file
+    # > schema defaults. The file parser treats dotenv content as data, never shell.
+    values, _origins = effective_environment()
+    return Settings.model_validate(values, by_alias=True, by_name=True)
