@@ -464,7 +464,10 @@ class SetupPage(QWidget):
             self.tasks.setItem(row, 0, QTableWidgetItem(task.title))
             self.tasks.setItem(row, 1, QTableWidgetItem("Admin" if task.requires_admin else "Prüfung"))
             self.tasks.setItem(row, 2, QTableWidgetItem("nicht geprüft"))
-            button = QPushButton("Prüfen" if not task.mutating else "Plan / Ausführen")
+            if task.task_id == "docker-install":
+                button = QPushButton("Docker installieren")
+            else:
+                button = QPushButton("Prüfen" if not task.mutating else "Plan / Ausführen")
             button.clicked.connect(lambda _=False, tid=task.task_id, r=row: self.task_action(tid, r))
             self.tasks.setCellWidget(row, 3, button)
         self.progress = QProgressBar(); self.progress.setRange(0, 0); self.progress.hide(); layout.addWidget(self.progress)

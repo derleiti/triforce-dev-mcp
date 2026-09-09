@@ -43,3 +43,10 @@ def test_setup_cancel_uses_async_qprocess_and_fixed_helper_action():
     text = GUI.read_text()
     assert 'proc.setArguments([str(ADMIN_HELPER), "setup-cancel"])' in text
     assert 'def cancel_job(self):' in text
+
+
+def test_setup_page_has_explicit_docker_install_button():
+    text = GUI.read_text()
+    assert 'task.task_id == "docker-install"' in text
+    assert 'QPushButton("Docker installieren")' in text
+    assert '"setup-start", task_id' in text

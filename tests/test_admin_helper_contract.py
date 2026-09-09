@@ -56,7 +56,7 @@ def test_fresh_config_sanitizes_template_secrets_and_generates_local_auth():
 
 def test_setup_start_is_fixed_systemd_job_not_arbitrary_command():
     text = HELPER.read_text()
-    assert 'SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install"})' in text
+    assert 'SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install"})' in text
     assert '"/usr/bin/systemd-run", "--unit=triforce-setup-job"' in text
     assert 'str(SETUP_RUNNER), task' in text
     assert 'parser.add_argument("task", nargs="?", choices=sorted(SETUP_TASKS))' in text
@@ -76,3 +76,16 @@ def test_setup_cancel_targets_only_fixed_transient_unit():
     assert '"setup-cancel"' in text
     assert 'run_fixed("/bin/systemctl", "stop", "triforce-setup-job.service")' in text
     assert 'parser.add_argument("--unit"' not in text
+
+
+def test_docker_install_uses_only_fixed_distro_packages_and_no_group_mutation():
+    text = HELPER.read_text()
+    assert 'def docker_install()' in text
+    assert 'packages.append("docker.io")' in text
+    assert 'packages.append("docker-compose-v2")' in text
+    assert '["/usr/bin/apt-get", "install", "-y", "--no-install-recommends", *packages]' in text
+    assert 'run_fixed("/bin/systemctl", "enable", "--now", "docker.service")' in text
+    assert 'usermod' not in text
+    assert 'gpasswd' not in text
+    assert 'groupadd' not in text
+    assert 'docker compose up' not in text

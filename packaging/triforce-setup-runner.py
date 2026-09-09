@@ -27,6 +27,7 @@ TASK_ACTIONS = {
     "runtime-init": "runtime-init",
     "config-init": "config-init",
     "service-install": "service-install",
+    "docker-install": "docker-install",
 }
 
 

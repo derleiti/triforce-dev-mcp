@@ -9,6 +9,7 @@ def test_runner_has_fixed_tasks_and_no_shell_execution():
     assert '"runtime-init": "runtime-init"' in text
     assert '"config-init": "config-init"' in text
     assert '"service-install": "service-install"' in text
+    assert '"docker-install": "docker-install"' in text
     assert "shell=True" not in text
     assert "subprocess.run([str(HELPER), TASK_ACTIONS[task]]" in text
 

@@ -2,14 +2,14 @@ from app.setup_tasks import TASKS, get_task
 
 
 def test_catalog_has_fixed_expected_tasks():
-    assert {"system-check", "runtime-init", "config-init", "service-install", "redis-check", "memory-worker", "agents-check", "diagnose"} <= set(TASKS)
+    assert {"system-check", "runtime-init", "config-init", "service-install", "docker-install", "redis-check", "memory-worker", "agents-check", "diagnose"} <= set(TASKS)
 
 
 def test_mutating_tasks_are_narrow_admin_helper_actions():
     for task in TASKS.values():
         if task.mutating:
             assert task.requires_admin
-            assert task.helper_action in {"runtime-init", "config-init", "service-install"}
+            assert task.helper_action in {"runtime-init", "config-init", "service-install", "docker-install"}
 
 
 def test_no_task_exposes_arbitrary_script_or_shell_parameter():
@@ -35,3 +35,14 @@ def test_system_check_does_not_require_global_python3_shim(monkeypatch):
     monkeypatch.setattr(setup_tasks.shutil, "which", lambda name: None if name == "python3" else real_which(name))
     result = setup_tasks.check_system()
     assert result.ok, result.message
+
+
+def test_docker_install_task_is_fixed_and_does_not_grant_socket_privileges():
+    task = TASKS["docker-install"]
+    assert task.mutating and task.requires_admin
+    assert task.dependencies == ("system-check",)
+    assert task.helper_action == "docker-install"
+    text = repr(task.plan()).lower()
+    assert "docker.io" in text
+    assert "docker-compose-v2" in text
+    assert "docker-gruppe" in text

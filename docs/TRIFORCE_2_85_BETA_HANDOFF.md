@@ -135,9 +135,9 @@ Der aktuelle Kandidat wurde nach den letzten Settings-/Setup-Korrekturen vollst√
 ### Finale Artefakte
 
 - `triforce-backend_2.85.0~beta1_amd64.deb`
-  - SHA256 `71802185316f6761c04536a3c522162ed7eaf36947f5da89dd558cd3fc98c33a`
+  - SHA256 `0f336091d47483967bdebe783d4ddc2c1169725a826b8e6244b656d92d5df611`
 - `triforce-control-center_2.85.0~beta1_amd64.deb`
-  - SHA256 `0af074e4c90bbde8e8708ea3215fadd52d819295bd995b9a0234bccdf94fa1bc`
+  - SHA256 `2f786b9142e965234ade0f88de9dc10eadec9508c7354be774f839e80adc2378`
 
 ### Bewusste Grenzen von Beta 1
 
@@ -158,3 +158,15 @@ Der aktuelle Kandidat wurde nach den letzten Settings-/Setup-Korrekturen vollst√
 - Compose-Blueprint mit Docker Compose v5.5.1 fuer alle Profiles validiert.
 - MCP-Discovery und Dispatch ueber echten HTTP-Endpunkt getestet.
 - Vollstaendige Regression nach Docker-Integration: **261/261 passed**.
+
+
+### Docker-Ein-Klick-Installation
+
+- Setup-Seite enthaelt einen expliziten Button **Docker installieren**.
+- Der Button startet den festen, ueberwachten Setup-Task `docker-install` ueber PolicyKit/systemd-run.
+- Funktionale Vorpruefung: vorhandenes `docker --version`, `docker compose version` und `docker.service`; eine bereits funktionierende Installation wird nicht ersetzt.
+- Falls erforderlich werden ausschliesslich die festen Pakete `docker.io` und `docker-compose-v2` mit `--no-install-recommends` installiert.
+- Danach wird nur `docker.service` mit `systemctl enable --now` aktiviert/gestartet. Keine Compose-Profile werden automatisch gestartet.
+- Der Dienstbenutzer `triforce` wird nicht zur Gruppe `docker` hinzugefuegt.
+- Reale Fresh-Install-Pruefung im Ubuntu-26.04-systemd-Container: Docker 29.1.3 und Compose v2 2.40.3 installiert, Dienst enabled+active, Setup-Job `completed`, `triforce` weiterhin nur in eigener Gruppe.
+- Regression nach Ein-Klick-Integration: **264/264 passed**.

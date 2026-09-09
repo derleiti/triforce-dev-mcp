@@ -69,3 +69,10 @@ Das MCP-Tool `docker_stack` bietet feste Aktionen `validate`, `status`, `up`,
 Dienstbenutzer **nicht** automatisch der Gruppe `docker` hinzu. Docker-Socket-
 Zugriff ist praktisch Root-Zugriff und muss daher separat und bewusst vom
 Betreiber freigegeben werden.
+
+
+### Docker mit einem Klick installieren
+
+Auf der Setup-Seite des Control Centers steht der Button **Docker installieren** zur Verfuegung. Nach PolicyKit-Autorisierung startet ein ueberwachter Setup-Job. Wenn Docker Engine und Compose v2 bereits funktionieren, wird die vorhandene Installation beibehalten. Andernfalls installiert TriForce ausschliesslich `docker.io` und `docker-compose-v2` aus den konfigurierten Debian/Ubuntu-Paketquellen und aktiviert `docker.service`.
+
+Der Installer fuegt den Benutzer `triforce` absichtlich **nicht** zur Gruppe `docker` hinzu und startet keine Docker-Stacks. Docker-Socket-Rechte und das Starten einzelner Profiles bleiben eine separate Betreiberentscheidung.

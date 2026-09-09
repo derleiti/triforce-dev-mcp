@@ -108,6 +108,32 @@ def check_service() -> TaskResult:
                       {"systemctl": cp.stdout.strip()})
 
 
+
+def check_docker() -> TaskResult:
+    docker = shutil.which("docker")
+    compose_ok = False
+    docker_version = ""
+    compose_version = ""
+    if docker:
+        cp = _command([docker, "--version"], timeout=5)
+        docker_version = (cp.stdout or cp.stderr).strip()
+        if cp.returncode == 0:
+            compose = _command([docker, "compose", "version"], timeout=5)
+            compose_ok = compose.returncode == 0
+            compose_version = (compose.stdout or compose.stderr).strip()
+    service_ok = False
+    service_state = "systemctl fehlt"
+    if shutil.which("systemctl"):
+        cp = _command(["systemctl", "show", "docker.service", "--property=LoadState,ActiveState,UnitFileState", "--no-pager"], timeout=5)
+        service_state = cp.stdout.strip()
+        service_ok = cp.returncode == 0 and "LoadState=loaded" in cp.stdout and "ActiveState=active" in cp.stdout
+    ok = bool(docker) and compose_ok and service_ok
+    return TaskResult(
+        "docker-install", ok, "installed" if ok else "missing",
+        "Docker Engine und Compose v2 sind betriebsbereit" if ok else "Docker Engine/Compose v2 muss installiert oder gestartet werden",
+        {"binary": docker, "docker_version": docker_version, "compose_version": compose_version, "service": service_state},
+    )
+
 def check_redis() -> TaskResult:
     try:
         with socket.create_connection(("127.0.0.1", 6379), timeout=0.5):
@@ -145,6 +171,7 @@ TASKS: dict[str, SetupTask] = {
     "runtime-init": SetupTask("runtime-init", "TriForce-Laufzeit einrichten", "Legt feste Programm-/Datenverzeichnisse und den Dienstbenutzer an.", True, True, ("system-check",), ("Benutzer triforce", "/var/lib/triforce", "/var/log/triforce"), "Idempotent; vorhandene passende Objekte bleiben erhalten.", check_runtime, "runtime-init"),
     "config-init": SetupTask("config-init", "Konfiguration initialisieren", "Erstellt /etc/triforce/triforce.env nur wenn sie fehlt.", True, True, ("runtime-init",), ("/etc/triforce/triforce.env"), "Vorhandene Konfiguration und Secrets werden nicht überschrieben.", check_config, "config-init"),
     "service-install": SetupTask("service-install", "Dienst installieren/reparieren", "Installiert ausschließlich die paketierte triforce.service-Unit; startet oder aktiviert sie nicht automatisch.", True, True, ("runtime-init", "config-init"), ("/etc/systemd/system/triforce.service", "systemctl daemon-reload"), "Unit kann sicher erneut installiert werden; Enable/Start bleiben separat.", check_service, "service-install"),
+    "docker-install": SetupTask("docker-install", "Docker installieren", "Installiert Docker Engine und Docker Compose v2 aus den freigegebenen Debian/Ubuntu-Paketen und startet Docker.", True, True, ("system-check",), ("Paketquellen aktualisieren", "docker.io installieren, falls Docker fehlt", "docker-compose-v2 installieren, falls Compose v2 fehlt", "docker.service aktivieren und starten"), "Idempotent: eine bereits funktionierende Docker-/Compose-Installation wird nicht ersetzt; TriForce wird nicht zur docker-Gruppe hinzugefügt und Container werden nicht automatisch gestartet.", check_docker, "docker-install"),
     "redis-check": SetupTask("redis-check", "Redis prüfen", "Prüft lokalen Redis ohne ihn automatisch zu installieren.", False, False, (), (), "Nur lesend.", check_redis),
     "memory-worker": SetupTask("memory-worker", "Memory-Worker prüfen", "Prüft optionalen Claude-Mem Worker; keine automatische Aktivierung von Recall/Recording/Promotion.", False, False, (), (), "Nur lesend; Memory-Flags bleiben unverändert.", check_memory_worker),
     "agents-check": SetupTask("agents-check", "CLI-Agenten prüfen", "Prüft Claude, Codex, Gemini und OpenCode ohne Installationen zu verändern.", False, False, (), (), "Nur lesend; keine Deinstallation oder globale Bereinigung.", check_agents),

@@ -27,7 +27,7 @@ UNIT_SOURCE = INSTALL_ROOT / "packaging/systemd/triforce.service"
 UNIT_DEST = Path("/etc/systemd/system/triforce.service")
 SERVICE = "triforce.service"
 SETUP_RUNNER = Path("/usr/lib/triforce/triforce-setup-runner")
-SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install"})
+SETUP_TASKS = frozenset({"runtime-init", "config-init", "service-install", "docker-install"})
 
 
 def require_root() -> None:
@@ -126,6 +126,36 @@ def service_install() -> None:
     run_fixed("/bin/systemctl", "daemon-reload")
 
 
+
+def _command_ok(*args: str) -> bool:
+    try:
+        return subprocess.run(list(args), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, check=False).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def docker_install() -> None:
+    """Install the fixed distro Docker packages only when functionality is missing."""
+    docker = shutil.which("docker")
+    engine_ok = bool(docker) and _command_ok(docker, "--version")
+    compose_ok = bool(docker) and _command_ok(docker, "compose", "version")
+
+    packages: list[str] = []
+    if not engine_ok:
+        packages.append("docker.io")
+    if not compose_ok:
+        packages.append("docker-compose-v2")
+    if packages:
+        subprocess.run(["/usr/bin/apt-get", "update"], check=True, timeout=300)
+        subprocess.run(["/usr/bin/apt-get", "install", "-y", "--no-install-recommends", *packages], check=True, timeout=900)
+
+    # Starting/enabling Docker is explicit behavior of this setup task. Never
+    # grant docker-group membership and never start a Compose profile here.
+    run_fixed("/bin/systemctl", "enable", "--now", "docker.service")
+    docker = shutil.which("docker")
+    if not docker or not _command_ok(docker, "--version") or not _command_ok(docker, "compose", "version"):
+        raise SystemExit("Docker Engine oder Docker Compose v2 ist nach der Installation nicht betriebsbereit")
+
 def service_action(action: str) -> None:
     mapping = {
         "service-start": ("start",), "service-stop": ("stop",),
@@ -220,7 +250,7 @@ def main() -> int:
     require_root()
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=[
-        "runtime-init", "config-init", "service-install",
+        "runtime-init", "config-init", "service-install", "docker-install",
         "service-start", "service-stop", "service-restart",
         "service-enable", "service-disable", "config-read", "config-update", "config-raw-update", "config-restore",
         "setup-start", "setup-cancel",
@@ -235,6 +265,7 @@ def main() -> int:
     if action == "runtime-init": runtime_init()
     elif action == "config-init": config_init()
     elif action == "service-install": service_install()
+    elif action == "docker-install": docker_install()
     elif action in {"service-start", "service-stop", "service-restart", "service-enable", "service-disable"}: service_action(action)
     elif action == "config-read": config_read()
     elif action == "config-update": config_update()
