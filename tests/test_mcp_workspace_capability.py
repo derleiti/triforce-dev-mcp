@@ -566,3 +566,24 @@ def test_resume_ticket_is_one_shot_and_does_not_expose_resume_token():
     consumed = sessions.consume_workspace_resume_ticket(ticket)
     assert consumed == token
     assert sessions.consume_workspace_resume_ticket(ticket) == ''
+
+
+def test_persisted_mcp_alias_restores_lease_without_workspace_token(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('alias-persist-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'stable-mcp-affinity')
+    lease_id = first['lease_id']
+
+    sessions._SESSION_WORKSPACE.clear()
+    sessions._WEB_PAIR.clear()
+    sessions._RESUME_INDEX.clear()
+
+    restored = sessions.workspace_status('stable-mcp-affinity')
+    assert restored['state'] == 'ready'
+    assert restored['connected'] is True
+    assert restored['transport_state'] == 'offline'
+    assert restored['lease_id'] == lease_id
+    assert restored['access_mode'] == 'write'

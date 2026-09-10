@@ -28,6 +28,7 @@ MAX_WEB_PAIR_TICKETS = 2048
 RESUME_TICKET_TTL_SECONDS = 60
 REDIS_LEASE_PREFIX = "triforce:workspace:lease:"
 REDIS_RESUME_PREFIX = "triforce:workspace:resume:"
+REDIS_ALIAS_PREFIX = "triforce:workspace:alias:"
 
 # Legacy/session-first pairing.
 _SESSION_PAIR: dict[str, dict[str, Any]] = {}
@@ -92,6 +93,9 @@ def _persist_lease(item: dict[str, Any]) -> None:
     try:
         client.setex(REDIS_LEASE_PREFIX + lease_id, ttl, json.dumps(payload, separators=(",", ":")))
         client.setex(REDIS_RESUME_PREFIX + resume_hash, ttl, lease_id)
+        for alias in payload["paired_session_ids"]:
+            if alias:
+                client.setex(REDIS_ALIAS_PREFIX + hashlib.sha256(str(alias).encode("utf-8")).hexdigest(), ttl, lease_id)
     except Exception:
         pass
 
@@ -109,6 +113,9 @@ def _delete_persisted_lease(item: dict[str, Any]) -> None:
         keys.append(REDIS_LEASE_PREFIX + lease_id)
     if resume_hash:
         keys.append(REDIS_RESUME_PREFIX + resume_hash)
+    for alias in item.get("paired_session_ids") or []:
+        if alias:
+            keys.append(REDIS_ALIAS_PREFIX + hashlib.sha256(str(alias).encode("utf-8")).hexdigest())
     if keys:
         try:
             client.delete(*keys)
@@ -658,6 +665,88 @@ def get_workspace(session_id: str | None) -> Optional[dict[str, Any]]:
     return dict(item)
 
 
+def _restore_workspace_for_alias(session_id: str) -> Optional[dict[str, Any]]:
+    client = _redis_client()
+    if client is None:
+        return None
+    try:
+        alias_key = REDIS_ALIAS_PREFIX + hashlib.sha256(str(session_id).encode("utf-8")).hexdigest()
+        lease_id = client.get(alias_key)
+        if not lease_id:
+            # Backward compatibility for leases persisted before alias indexes
+            # existed: do one bounded Redis scan, then cache the discovered map.
+            scanned = 0
+            for key in client.scan_iter(match=REDIS_LEASE_PREFIX + "*", count=100):
+                scanned += 1
+                if scanned > MAX_WEB_PAIR_TICKETS:
+                    break
+                candidate_raw = client.get(key)
+                if not candidate_raw:
+                    continue
+                try:
+                    candidate = json.loads(candidate_raw)
+                except Exception:
+                    continue
+                aliases = {str(x) for x in (candidate.get("paired_session_ids") or []) if str(x)}
+                legacy = str(candidate.get("paired_session_id") or "")
+                if legacy:
+                    aliases.add(legacy)
+                if str(session_id) in aliases:
+                    lease_id = str(candidate.get("lease_id") or str(key).removeprefix(REDIS_LEASE_PREFIX))
+                    ttl = max(1, int(float(candidate.get("expires_at") or 0) - time.time()))
+                    client.setex(alias_key, ttl, lease_id)
+                    break
+        if not lease_id:
+            return None
+        raw = client.get(REDIS_LEASE_PREFIX + str(lease_id))
+        if not raw:
+            return None
+        data = json.loads(raw)
+        now = time.time()
+        if float(data.get("expires_at") or 0) <= now:
+            return None
+        resume_hash = str(data.get("resume_hash") or "")
+        pair_key = "resume:" + resume_hash if resume_hash else ""
+        item = {
+            "code": "",
+            "created_at": now,
+            "expires_at": float(data.get("expires_at") or (now + LEASE_TTL_SECONDS)),
+            "pair_expires_at": 0,
+            "connection": None,
+            "connection_id": None,
+            "client_id": "",
+            "mode": normalize_workspace_access_mode(data.get("mode")),
+            "task": str(data.get("task") or ""),
+            "capabilities": list(data.get("capabilities") or []),
+            "paired_session_id": data.get("paired_session_id"),
+            "paired_session_ids": list(data.get("paired_session_ids") or []),
+            "lease_id": str(data.get("lease_id") or lease_id),
+            "resume_hash": resume_hash,
+            "helper_connected_at": float(data.get("helper_connected_at") or 0),
+        }
+        if pair_key:
+            _WEB_PAIR[pair_key] = item
+            _RESUME_INDEX[resume_hash] = pair_key
+        binding = {
+            "session_id": str(session_id),
+            "connection": None,
+            "connection_id": None,
+            "client_id": "",
+            "mode": item["mode"],
+            "task": item["task"],
+            "capabilities": list(item["capabilities"]),
+            "reconnect_pair_key": pair_key or None,
+            "lease_id": item["lease_id"],
+            "transport_active": True,
+            "reconnect_until": item["expires_at"],
+            "bound_at": now,
+        }
+        _SESSION_WORKSPACE[str(session_id)] = binding
+        return binding
+    except Exception:
+        return None
+
+
 def get_workspace_lease(session_id: str | None) -> Optional[dict[str, Any]]:
     """Return the logical workspace lease independently from executor transport state."""
     if not session_id:
@@ -670,6 +759,8 @@ def get_workspace_lease(session_id: str | None) -> Optional[dict[str, Any]]:
         })
         return live
     item = _SESSION_WORKSPACE.get(session_id)
+    if not item:
+        item = _restore_workspace_for_alias(str(session_id))
     if not item:
         return None
     if float(item.get("reconnect_until") or 0) <= time.time():
