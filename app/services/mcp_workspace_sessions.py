@@ -195,15 +195,19 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     if legacy:
         aliases.add(legacy)
     if not _connection_live(item):
-        # A previously paired lease remains valid while the browser transport
-        # reconnects. The same high-entropy code may authorize another MCP
-        # transport alias without pretending that the browser is currently live.
-        if not aliases or not str(item.get("lease_id") or ""):
+        # The pairing code itself is the authorization. Once a browser has
+        # registered this ticket at least once, an MCP client may claim it even
+        # if mobile backgrounding suspended the physical WebSocket milliseconds
+        # earlier. This removes the browser->chat app-switch timing race. The
+        # resulting lease is explicitly suspended until the same browser code
+        # reconnects; no local tool can execute while connection is None.
+        if not item.get("helper_connected_at"):
             raise RuntimeError("Local workspace browser has not connected for this code yet")
         aliases.add(session_id)
-        lease_id = str(item.get("lease_id"))
+        lease_id = str(item.get("lease_id") or uuid.uuid4().hex)
         item["paired_session_id"] = session_id
         item["paired_session_ids"] = sorted(aliases)
+        item["lease_id"] = lease_id
         item["expires_at"] = time.time() + RECONNECT_TTL_SECONDS
         return bind_workspace(
             session_id, None,

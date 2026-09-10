@@ -403,3 +403,33 @@ async def test_bridge_reports_workspace_suspended_instead_of_required():
     assert result['structuredContent']['state'] == 'suspended'
     assert result['structuredContent']['reconnectable'] is True
     assert result['structuredContent']['access_mode'] == 'write'
+
+
+def test_first_claim_succeeds_after_waiting_browser_suspends():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('mobile-race')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['code_tree', 'file_read'])
+    sessions.suspend_connection(conn)
+
+    bound = sessions.claim_waiting_workspace(code, 'chatgpt-after-switch')
+    status = sessions.workspace_status('chatgpt-after-switch')
+
+    assert bound['connection'] is None
+    assert status['state'] == 'suspended'
+    assert status['connected'] is False
+    assert status['reconnectable'] is True
+    assert status['access_mode'] == 'write'
+    assert status['lease_id']
+
+    replacement = DummyConnection('mobile-race-reconnected')
+    rebound = sessions.reconnect_web_workspace(
+        code, replacement, mode='write', capabilities=['code_tree', 'file_read']
+    )
+    assert rebound['lease_id'] == status['lease_id']
+    assert sessions.workspace_status('chatgpt-after-switch')['state'] == 'connected'
+
+
+def test_unseen_browser_ticket_cannot_be_claimed_while_offline():
+    code = sessions.create_web_pair_code()
+    with pytest.raises(RuntimeError, match='browser has not connected'):
+        sessions.claim_waiting_workspace(code, 'chatgpt-too-early')
