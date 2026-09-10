@@ -138,6 +138,8 @@ class ModelInfo:
     capabilities: List[str] = field(default_factory=list)
     roles: List[str] = field(default_factory=list)
     api_method: str = "generateContent"  # generateContent, predict, predictLongRunning
+    availability: str = "unknown"        # ok | quota_exceeded | rate_limited | unauthorised | not_found | error
+    capability_source: str = "heuristic"  # declared | probed | heuristic
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -146,6 +148,8 @@ class ModelInfo:
             "capabilities": self.capabilities,
             "roles": self.roles,
             "api_method": self.api_method,
+            "availability": self.availability,
+            "capability_source": self.capability_source,
         }
 
     @property
@@ -359,9 +363,39 @@ class ModelRegistry:
                 else:
                     deduped[normalized.id] = normalized
 
+            self._apply_capability_store(deduped)
+
             self._cache = sorted(deduped.values(), key=self._sort_key)
             self._cache_expiry = now + self._ttl_seconds
             return list(self._cache)
+
+    @staticmethod
+    def _apply_capability_store(deduped: Dict[str, ModelInfo]) -> None:
+        """Overlay verified capability data onto freshly discovered models.
+
+        Reads only the in-memory store, never the network, so listing models
+        stays fast. Probing happens out of band via refresh_capabilities().
+        Name-based guesses are only replaced by facts we actually verified.
+        """
+        try:
+            from .model_capabilities import get_store
+            store = get_store()
+        except Exception as exc:  # pragma: no cover - store is optional
+            logger.debug("Capability store unavailable: %s", exc)
+            return
+
+        for model_id, entry in deduped.items():
+            record = store.get(model_id)
+            if not record:
+                continue
+            entry.availability = record.availability
+            entry.capability_source = record.source
+            if record.capabilities and record.source in ("declared", "probed"):
+                entry.capabilities = list(record.capabilities)
+                entry.roles = [
+                    role for cap in record.capabilities
+                    if (role := CAPABILITY_TO_ROLE.get(cap))
+                ]
 
     @staticmethod
     def _sort_key(entry: ModelInfo) -> tuple[int, int, str]:
