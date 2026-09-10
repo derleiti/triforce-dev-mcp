@@ -161,6 +161,7 @@ tests/*
 !tests/test_aicoder_runner.py
 !tests/test_aicoder_agent_events.py
 !tests/test_agent_controller_aicoder_runtime.py
+!tests/test_mcp_session_timezones.py
 # DKIM-Keys — private keys, never commit
 docker/mailserver/config/opendkim/
 # Temp/debug files

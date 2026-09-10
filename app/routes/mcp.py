@@ -3987,7 +3987,8 @@ def _session_timestamp_utc(value: TypingAny) -> dt_datetime:
     if not isinstance(value, dt_datetime):
         return dt_datetime.now(timezone.utc)
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
+        # Legacy values came from datetime.now(), i.e. server-local wall time.
+        return value.astimezone().astimezone(timezone.utc)
     return value.astimezone(timezone.utc)
 
 
