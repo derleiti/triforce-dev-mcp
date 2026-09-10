@@ -43,6 +43,11 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'webkitdirectory' in html
     assert 'fallbackLabel' in html
     assert 'isFirefox' in html
+    assert 'acceptFallbackSelection' in html
+    assert "addEventListener('input'" not in html
+    assert "addEventListener('change'" in html
+    assert 'dropZone' in html
+    assert 'webkitGetAsEntry' in html
     assert 'file-hidden' in html
     assert 'new WebSocket' in html
     assert 'data-cfasync="false"' in html
