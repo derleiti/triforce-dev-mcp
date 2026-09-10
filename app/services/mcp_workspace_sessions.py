@@ -231,6 +231,24 @@ def pair_code_kind(code: str) -> tuple[str, Optional[str]]:
     return "invalid", None
 
 
+def get_workspace_by_token(token: str | None) -> Optional[dict[str, Any]]:
+    """Resolve a web pairing ID as a transport-independent workspace lease token.
+
+    The browser pairing ID already acts as the reconnect secret and is extended to
+    ``RECONNECT_TTL_SECONDS`` after a successful claim.  Reusing that same secret
+    avoids unsafe IP/User-Agent affinity when MCP clients omit ``Mcp-Session-Id``.
+    """
+    if not token:
+        return None
+    web = resolve_web_pair_code(str(token))
+    if not web:
+        return None
+    session_id = str(web.get("paired_session_id") or "")
+    if not session_id:
+        return None
+    return get_workspace(session_id)
+
+
 def bind_workspace(
     session_id: str, connection: Any, *, mode: str, task: str = "",
     capabilities: list[str] | None = None, reconnect_pair_key: str | None = None,

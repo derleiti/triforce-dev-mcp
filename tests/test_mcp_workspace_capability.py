@@ -195,3 +195,51 @@ async def test_authenticated_session_can_pair_and_use_browser_workspace():
     read = await call_public_local_tool(req, 'file_read', {'path': 'README.md'})
     assert read['isError'] is False
     assert conn.calls[-1][1]['tool'] == 'file_read'
+
+
+@pytest.mark.asyncio
+async def test_sessionless_pair_uses_pair_code_as_transport_independent_token():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('stateless-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read', 'file_edit'])
+    req = DummyRequest('')
+
+    paired = await call_public_local_tool(req, 'workspace_pair', {'code': code})
+    assert paired['structuredContent']['ok'] is True
+    assert paired['structuredContent']['workspace_token'] == code
+
+    read = await call_public_local_tool(req, 'file_read', {'path': 'README.md', 'workspace_token': code})
+    assert read['isError'] is False
+    assert conn.calls[-1][1]['tool'] == 'file_read'
+    assert 'workspace_token' not in conn.calls[-1][1]['arguments']
+
+
+@pytest.mark.asyncio
+async def test_sessionless_workspace_token_cannot_resolve_unpaired_or_wrong_code():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('stateless-browser')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    req = DummyRequest('')
+
+    before_pair = await call_public_local_tool(req, 'file_read', {'path': 'README.md', 'workspace_token': code})
+    assert before_pair['structuredContent']['code'] == 'MCP_SESSION_REQUIRED'
+
+    await call_public_local_tool(req, 'workspace_pair', {'code': code})
+    wrong = await call_public_local_tool(req, 'file_read', {'path': 'README.md', 'workspace_token': 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'})
+    assert wrong['structuredContent']['code'] == 'MCP_SESSION_REQUIRED'
+
+
+@pytest.mark.asyncio
+async def test_real_mcp_session_can_reclaim_stateless_lease_with_same_pair_code():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('stateless-browser')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    sessionless = DummyRequest('')
+    paired = await call_public_local_tool(sessionless, 'workspace_pair', {'code': code})
+    lease_id = paired['structuredContent']['lease_id']
+
+    sessioned = DummyRequest('real-session')
+    rebound = await call_public_local_tool(sessioned, 'workspace_pair', {'code': code})
+    assert rebound['structuredContent']['ok'] is True
+    assert rebound['structuredContent']['lease_id'] == lease_id
+    assert sessions.get_workspace('real-session')['client_id'] == 'stateless-browser'

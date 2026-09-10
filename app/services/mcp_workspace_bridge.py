@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from fastapi import Request
 
-from .mcp_workspace_sessions import get_workspace, workspace_status
+from .mcp_workspace_sessions import get_workspace, get_workspace_by_token, mark_transport_detached
 
 CONTROL_TOOLS = {"workspace_status", "workspace_pair"}
 BROWSER_READ_TOOLS = {
@@ -38,7 +38,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "workspace_status",
         "description": "Check whether this MCP session is paired with a browser-selected local workspace.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
         "annotations": {"readOnlyHint": True},
     },
     {
@@ -57,14 +57,14 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "workspace_info",
         "description": "Analyze the paired browser workspace: file counts, size, extensions and sample paths.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
         "annotations": {"readOnlyHint": True},
     },
     {
         "name": "file_read",
         "description": "Read a UTF-8 text file inside the paired browser workspace.",
         "inputSchema": {"type": "object", "properties": {
-            "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
+            "workspace_token": {"type": "string"}, "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
             "end_line": {"type": "integer", "minimum": 1}}, "required": ["path"]},
         "annotations": {"readOnlyHint": True},
     },
@@ -72,7 +72,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "file_tree",
         "description": "List a bounded directory tree inside the paired browser workspace.",
         "inputSchema": {"type": "object", "properties": {
-            "path": {"type": "string", "default": "."},
+            "workspace_token": {"type": "string"}, "path": {"type": "string", "default": "."},
             "max_depth": {"type": "integer", "minimum": 1, "maximum": 8},
             "max_entries": {"type": "integer", "minimum": 1, "maximum": 1000}}},
         "annotations": {"readOnlyHint": True},
@@ -81,7 +81,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "code_read",
         "description": "Read source code inside the paired browser workspace.",
         "inputSchema": {"type": "object", "properties": {
-            "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
+            "workspace_token": {"type": "string"}, "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
             "end_line": {"type": "integer", "minimum": 1}}, "required": ["path"]},
         "annotations": {"readOnlyHint": True},
     },
@@ -89,7 +89,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "code_tree",
         "description": "Inspect the source tree inside the paired browser workspace.",
         "inputSchema": {"type": "object", "properties": {
-            "path": {"type": "string", "default": "."},
+            "workspace_token": {"type": "string"}, "path": {"type": "string", "default": "."},
             "depth": {"type": "integer", "minimum": 1, "maximum": 8},
             "max_entries": {"type": "integer", "minimum": 1, "maximum": 1000}}},
         "annotations": {"readOnlyHint": True},
@@ -98,7 +98,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "code_search",
         "description": "Search text/source files inside the paired browser workspace.",
         "inputSchema": {"type": "object", "properties": {
-            "query": {"type": "string"}, "path": {"type": "string", "default": "."},
+            "workspace_token": {"type": "string"}, "query": {"type": "string"}, "path": {"type": "string", "default": "."},
             "file_pattern": {"type": "string", "default": "*"},
             "case_sensitive": {"type": "boolean"}, "regex": {"type": "boolean"},
             "max_results": {"type": "integer", "minimum": 1, "maximum": 500}},
@@ -109,7 +109,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "code_grep",
         "description": "Regex-search text files inside the paired browser workspace.",
         "inputSchema": {"type": "object", "properties": {
-            "pattern": {"type": "string"}, "path": {"type": "string", "default": "."},
+            "workspace_token": {"type": "string"}, "pattern": {"type": "string"}, "path": {"type": "string", "default": "."},
             "glob": {"type": "string", "default": "*"},
             "max_results": {"type": "integer", "minimum": 1, "maximum": 500}},
             "required": ["pattern"]},
@@ -122,7 +122,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "Available only when the user granted browser Write access."
         ),
         "inputSchema": {"type": "object", "properties": {
-            "path": {"type": "string"},
+            "workspace_token": {"type": "string"}, "path": {"type": "string"},
             "operation": {"type": "string", "enum": ["create", "write", "append", "replace"]},
             "content": {"type": "string"}, "old_text": {"type": "string"},
             "new_text": {"type": "string"}}, "required": ["path", "operation"]},
@@ -131,7 +131,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "directory_create",
         "description": "Create a directory inside the paired browser workspace when Write access is enabled.",
-        "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+        "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "workspace_token": {"type": "string"}}, "required": ["path"]},
         "annotations": {"readOnlyHint": False},
     },
 ]
@@ -227,16 +227,23 @@ def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
 
 async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     sid = session_id(request)
+    arguments = dict(arguments or {})
+    workspace_token = str(arguments.pop("workspace_token", "") or "").strip().upper()
 
     if name == "workspace_pair":
-        if not sid:
-            return _workspace_required(request)
-        code = str((arguments or {}).get("code") or "").strip().upper()
+        code = str(arguments.get("code") or "").strip().upper()
         if not code:
             return _tool_error("PAIR_CODE_REQUIRED", "workspace_pair requires the one-time ID shown by the TriForce MCP browser page.")
+        # Some Streamable HTTP consumers (notably current ChatGPT connectors)
+        # initialize a session but omit Mcp-Session-Id on later tools/call POSTs.
+        # Bind those calls to a logical lease session keyed only by the secret pair
+        # code; never infer identity from IP, User-Agent or another shared signal.
+        effective_sid = sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
         try:
             from app.services.mcp_workspace_sessions import claim_waiting_workspace
-            binding = claim_waiting_workspace(code, sid)
+            binding = claim_waiting_workspace(code, effective_sid)
+            if not sid:
+                mark_transport_detached(effective_sid)
         except Exception as exc:
             return _tool_error("WORKSPACE_PAIR_FAILED", f"Could not pair browser workspace: {exc}", detail=str(exc))
         connection = binding.get("connection")
@@ -253,29 +260,37 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             except Exception:
                 pass
         return {
-            "content": [{"type": "text", "text": f"Browser workspace paired successfully in {binding['mode']} mode."}],
+            "content": [{"type": "text", "text": (
+                f"Browser workspace paired successfully in {binding['mode']} mode. "
+                "For MCP calls that do not preserve Mcp-Session-Id, pass workspace_token from this result."
+            )}],
             "structuredContent": {
                 "ok": True, "connected": True, "mode": binding["mode"],
                 "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
-                "lease_id": binding.get("lease_id", ""),
+                "lease_id": binding.get("lease_id", ""), "workspace_token": code,
                 "capabilities": list(binding.get("capabilities") or []),
             },
             "isError": False,
         }
 
-    if name == "workspace_status":
-        if not sid:
-            return _workspace_required(request)
-        status = workspace_status(sid)
-        if not status.get("connected"):
-            return _workspace_required(request)
-        return {
-            "content": [{"type": "text", "text": f"Browser workspace connected in {status['mode']} mode."}],
-            "structuredContent": {"ok": True, **status},
-            "isError": False,
-        }
+    binding = get_workspace(sid) if sid else None
+    if binding is None and workspace_token:
+        binding = get_workspace_by_token(workspace_token)
 
-    binding = get_workspace(sid)
+    if name == "workspace_status":
+        if binding:
+            return {
+                "content": [{"type": "text", "text": f"Browser workspace connected in {binding['mode']} mode."}],
+                "structuredContent": {
+                    "ok": True, "connected": True, "mode": binding["mode"],
+                    "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
+                    "lease_id": binding.get("lease_id", ""),
+                    "capabilities": list(binding.get("capabilities") or []),
+                },
+                "isError": False,
+            }
+        return _workspace_required(request)
+
     if not binding:
         return _workspace_required(request)
 
@@ -300,7 +315,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
 
     result = await connection.send_tool_call(
         "client_workspace_tool",
-        {"tool": name, "arguments": dict(arguments or {}), "mode": mode},
+        {"tool": name, "arguments": arguments, "mode": mode},
         timeout=180.0,
     )
     if not isinstance(result, dict):
