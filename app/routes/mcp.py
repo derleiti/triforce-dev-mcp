@@ -3924,6 +3924,26 @@ def _restore_session_request_state(session: Dict[str, TypingAny], request: Reque
     request.state.mcp_auth_client_id = session.get("auth_client_id")
 
 
+def _logical_transport_session_id(request: Request, explicit_session_id: str | None = None) -> str:
+    """Return a stable logical MCP session id when a trusted connector supplies one.
+
+    OpenAI's current MCP transport may omit Mcp-Session-Id on later POSTs while
+    preserving x-openai-session/x-openai-subject. Hash those high-entropy values
+    so raw connector identifiers are never persisted in TriForce state or logs.
+    Other clients continue to use the MCP session header normally.
+    """
+    if explicit_session_id:
+        return str(explicit_session_id)
+    openai_session = str(request.headers.get("x-openai-session") or "").strip()
+    openai_subject = str(request.headers.get("x-openai-subject") or "").strip()
+    user_agent = str(request.headers.get("user-agent") or "").lower()
+    if openai_session and openai_subject and "openai-mcp" in user_agent:
+        import hashlib
+        digest = hashlib.sha256((openai_subject + "\0" + openai_session).encode("utf-8")).hexdigest()
+        return "openai-" + digest[:40]
+    return ""
+
+
 def _clear_mcp_session(session_id: str, *, clear_workspace: bool = False) -> None:
     """Clear MCP transport state without implicitly revoking a browser workspace.
 
@@ -4478,12 +4498,12 @@ async def mcp_unified_endpoint(request: Request):
 
     # Get headers
     accept_header = request.headers.get("Accept", "application/json")
-    session_id = request.headers.get("Mcp-Session-Id") or request.headers.get("mcp-session-id")
+    explicit_session_id = request.headers.get("Mcp-Session-Id") or request.headers.get("mcp-session-id")
+    session_id = _logical_transport_session_id(request, explicit_session_id)
 
     wants_streaming = "text/event-stream" in accept_header
 
     _log.info(f"MCP_UNIFIED | IP: {client_ip} | Session: {session_id or 'none'} | Accept: {accept_header}")
-
     try:
         body = await request.json()
     except Exception as e:
@@ -4502,6 +4522,7 @@ async def mcp_unified_endpoint(request: Request):
     response_headers: Dict[str, str] = {}
     if is_initialize and not session_id:
         session_id = str(uuid.uuid4()).replace("-", "")
+    if is_initialize:
         session = _get_session(session_id)
         _store_session_request_state(session, request)
         response_headers["Mcp-Session-Id"] = session_id

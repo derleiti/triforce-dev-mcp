@@ -68,6 +68,7 @@ def create_web_pair_code() -> str:
         "mode": "read_only",
         "task": "",
         "paired_session_id": None,
+        "paired_session_ids": [],
     }
     return code
 
@@ -117,7 +118,12 @@ def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: s
 
 
 def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
-    """Bind a browser ticket once; keep the same ID for reconnects to that session."""
+    """Authorize one MCP session alias for the browser workspace lease.
+
+    Possession of the high-entropy pairing code is the authorization. Multiple
+    MCP transports (for example ChatGPT and Mistral) may therefore share the
+    same browser lease concurrently instead of stealing a single session slot.
+    """
     key = _pair_key(code)
     item = _WEB_PAIR.get(key)
     if _expired(item):
@@ -125,28 +131,22 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
         raise ValueError("Invalid or expired workspace pairing code")
     if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         raise ValueError("Invalid workspace pairing code")
-    paired = str(item.get("paired_session_id") or "")
-    if paired == session_id:
-        current = get_workspace(session_id)
-        if current:
-            return current
-        raise RuntimeError("Workspace is paired but the browser is currently disconnected")
-
-    # A browser workspace is an application lease, not an MCP transport session.
-    # MCP clients routinely DELETE/recreate transport sessions. The same secret
-    # pairing ID may therefore move its lease only after the previous transport
-    # was explicitly detached; a still-live transport cannot be hijacked.
-    previous = _SESSION_WORKSPACE.get(paired) if paired else None
-    if paired and previous and bool(previous.get("transport_active", True)):
-        raise ValueError("Workspace pairing code is already bound to another active MCP session")
-
     connection = item.get("connection")
     if connection is None or bool(getattr(connection, "closed", True)) or id(connection) != item.get("connection_id"):
         raise RuntimeError("Local workspace browser has not connected for this code yet")
-    lease_id = str((previous or {}).get("lease_id") or item.get("lease_id") or uuid.uuid4().hex)
-    if paired and paired != session_id:
-        _SESSION_WORKSPACE.pop(paired, None)
+
+    current = get_workspace(session_id)
+    if current and current.get("reconnect_pair_key") == key:
+        return current
+
+    aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
+    legacy = str(item.get("paired_session_id") or "")
+    if legacy:
+        aliases.add(legacy)
+    aliases.add(session_id)
+    lease_id = str(item.get("lease_id") or uuid.uuid4().hex)
     item["paired_session_id"] = session_id
+    item["paired_session_ids"] = sorted(aliases)
     item["lease_id"] = lease_id
     item["expires_at"] = time.time() + RECONNECT_TTL_SECONDS
     return bind_workspace(
@@ -160,7 +160,7 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
 
 
 def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None) -> dict[str, Any]:
-    """Reconnect the same browser pairing ID to its already-bound MCP session."""
+    """Reconnect a browser helper and refresh every authorized MCP alias."""
     key = _pair_key(code)
     item = _WEB_PAIR.get(key)
     if _expired(item):
@@ -168,8 +168,11 @@ def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str 
         raise ValueError("Invalid or expired workspace pairing code")
     if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         raise ValueError("Invalid workspace pairing code")
-    session_id = str(item.get("paired_session_id") or "")
-    if not session_id:
+    aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
+    legacy = str(item.get("paired_session_id") or "")
+    if legacy:
+        aliases.add(legacy)
+    if not aliases:
         raise ValueError("Workspace pairing code has not been paired to an MCP session yet")
     normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
     item.update({
@@ -181,10 +184,21 @@ def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str 
         "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
         "expires_at": time.time() + RECONNECT_TTL_SECONDS,
         "helper_connected_at": time.time(),
+        "paired_session_ids": sorted(aliases),
     })
-    return bind_workspace(
-        session_id, connection, mode=normalized_mode, task=task, capabilities=capabilities,
-        reconnect_pair_key=key, lease_id=str(item.get("lease_id") or uuid.uuid4().hex),
+    lease_id = str(item.get("lease_id") or uuid.uuid4().hex)
+    primary = str(item.get("paired_session_id") or next(iter(aliases)))
+    result = None
+    for alias in sorted(aliases):
+        bound = bind_workspace(
+            alias, connection, mode=normalized_mode, task=task, capabilities=capabilities,
+            reconnect_pair_key=key, lease_id=lease_id,
+        )
+        if alias == primary:
+            result = bound
+    return result or bind_workspace(
+        primary, connection, mode=normalized_mode, task=task, capabilities=capabilities,
+        reconnect_pair_key=key, lease_id=lease_id,
     )
 
 
@@ -232,21 +246,21 @@ def pair_code_kind(code: str) -> tuple[str, Optional[str]]:
 
 
 def get_workspace_by_token(token: str | None) -> Optional[dict[str, Any]]:
-    """Resolve a web pairing ID as a transport-independent workspace lease token.
-
-    The browser pairing ID already acts as the reconnect secret and is extended to
-    ``RECONNECT_TTL_SECONDS`` after a successful claim.  Reusing that same secret
-    avoids unsafe IP/User-Agent affinity when MCP clients omit ``Mcp-Session-Id``.
-    """
+    """Resolve a web pairing ID as a transport-independent workspace lease token."""
     if not token:
         return None
     web = resolve_web_pair_code(str(token))
     if not web:
         return None
-    session_id = str(web.get("paired_session_id") or "")
-    if not session_id:
-        return None
-    return get_workspace(session_id)
+    aliases = [str(x) for x in (web.get("paired_session_ids") or []) if str(x)]
+    legacy = str(web.get("paired_session_id") or "")
+    if legacy and legacy not in aliases:
+        aliases.append(legacy)
+    for alias in reversed(aliases):
+        binding = get_workspace(alias)
+        if binding:
+            return binding
+    return None
 
 
 def bind_workspace(
@@ -275,6 +289,9 @@ def bind_workspace(
         if pair_item is not None:
             pair_item["lease_id"] = binding["lease_id"]
             pair_item["paired_session_id"] = session_id
+            aliases = {str(x) for x in (pair_item.get("paired_session_ids") or []) if str(x)}
+            aliases.add(session_id)
+            pair_item["paired_session_ids"] = sorted(aliases)
     pair = _SESSION_PAIR.pop(session_id, None)
     if pair:
         _PAIR_INDEX.pop(_pair_key(str(pair.get("code") or "")), None)
@@ -356,13 +373,17 @@ def clear_session(session_id: str) -> None:
     if pair:
         _PAIR_INDEX.pop(_pair_key(str(pair.get("code") or "")), None)
     binding = _SESSION_WORKSPACE.pop(session_id, None)
-    if binding:
-        pair_key = str(binding.get("reconnect_pair_key") or "")
-        if pair_key:
-            _WEB_PAIR.pop(pair_key, None)
-    for key, item in list(_WEB_PAIR.items()):
-        if str(item.get("paired_session_id") or "") == session_id:
-            _WEB_PAIR.pop(key, None)
+    pair_key = str((binding or {}).get("reconnect_pair_key") or "")
+    if pair_key:
+        item = _WEB_PAIR.get(pair_key)
+        if item:
+            aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
+            aliases.discard(session_id)
+            item["paired_session_ids"] = sorted(aliases)
+            if str(item.get("paired_session_id") or "") == session_id:
+                item["paired_session_id"] = next(iter(sorted(aliases)), None)
+            if not aliases:
+                _WEB_PAIR.pop(pair_key, None)
 
 
 def _cleanup_web_pairs() -> None:

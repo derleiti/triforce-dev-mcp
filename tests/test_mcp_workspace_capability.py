@@ -50,20 +50,21 @@ def test_pairing_code_is_session_scoped_and_consumed_on_bind():
     assert sessions.get_workspace('session-B') is None
 
 
-def test_web_pair_codes_are_unique_and_claim_waiting_helper_once():
+def test_web_pair_codes_are_unique_and_authorize_multiple_aliases():
     first = sessions.create_web_pair_code()
     second = sessions.create_web_pair_code()
     assert first != second
     conn = DummyConnection()
     waiting = sessions.register_waiting_workspace(first, conn, mode='write', task='web flow', capabilities=['file_read', 'file_edit'])
     assert waiting['waiting_for_session'] is True
-    bound = sessions.claim_waiting_workspace(first, 'session-A')
-    assert bound['mode'] == 'write'
-    assert bound['task'] == 'web flow'
-    assert bound['capabilities'] == ['file_edit', 'file_read']
+    bound_a = sessions.claim_waiting_workspace(first, 'session-A')
+    bound_b = sessions.claim_waiting_workspace(first, 'session-B')
+    assert bound_a['mode'] == 'write'
+    assert bound_a['task'] == 'web flow'
+    assert bound_a['capabilities'] == ['file_edit', 'file_read']
+    assert bound_a['lease_id'] == bound_b['lease_id']
     assert sessions.get_workspace('session-A')['client_id'] == conn.client_id
-    with pytest.raises(ValueError):
-        sessions.claim_waiting_workspace(first, 'session-B')
+    assert sessions.get_workspace('session-B')['client_id'] == conn.client_id
 
 
 @pytest.mark.asyncio
@@ -129,13 +130,15 @@ def test_same_pairing_id_reconnects_same_session_after_suspend():
     assert bound['client_id'] == 'mobile-2'
 
 
-def test_same_pairing_id_cannot_be_claimed_by_another_session():
+def test_same_pairing_id_can_be_shared_by_authorized_sessions():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('mobile-1')
     sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
-    sessions.claim_waiting_workspace(code, 'session-A')
-    with pytest.raises(ValueError):
-        sessions.claim_waiting_workspace(code, 'session-B')
+    first = sessions.claim_waiting_workspace(code, 'session-A')
+    second = sessions.claim_waiting_workspace(code, 'session-B')
+    assert first['lease_id'] == second['lease_id']
+    assert sessions.get_workspace('session-A') is not None
+    assert sessions.get_workspace('session-B') is not None
 
 
 def test_transport_session_cleanup_does_not_revoke_workspace():
@@ -170,18 +173,33 @@ def test_detached_transport_can_rebind_same_lease_to_new_mcp_session():
 
     rebound = sessions.claim_waiting_workspace(code, 'transport-B')
     assert rebound['lease_id'] == lease_id
-    assert sessions.get_workspace('transport-A') is None
+    assert sessions.get_workspace('transport-A') is not None
     assert sessions.get_workspace('transport-B')['client_id'] == 'lease-browser'
     assert sessions.workspace_status('transport-B')['transport_active'] is True
 
 
-def test_live_transport_lease_cannot_be_hijacked_by_new_session():
+def test_same_pair_code_authorizes_multiple_concurrent_mcp_aliases():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('lease-browser')
     sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
-    sessions.claim_waiting_workspace(code, 'transport-A')
-    with pytest.raises(ValueError, match='active MCP session'):
-        sessions.claim_waiting_workspace(code, 'transport-B')
+    first = sessions.claim_waiting_workspace(code, 'transport-A')
+    second = sessions.claim_waiting_workspace(code, 'transport-B')
+    assert first['lease_id'] == second['lease_id']
+    assert sessions.get_workspace('transport-A')['client_id'] == 'lease-browser'
+    assert sessions.get_workspace('transport-B')['client_id'] == 'lease-browser'
+
+
+def test_browser_reconnect_refreshes_all_mcp_aliases():
+    code = sessions.create_web_pair_code()
+    first = DummyConnection('browser-1')
+    sessions.register_waiting_workspace(code, first, mode='write', capabilities=['file_read'])
+    sessions.claim_waiting_workspace(code, 'chatgpt')
+    sessions.claim_waiting_workspace(code, 'mistral')
+    sessions.suspend_connection(first)
+    second = DummyConnection('browser-2')
+    sessions.reconnect_web_workspace(code, second, mode='write', capabilities=['file_read'])
+    assert sessions.get_workspace('chatgpt')['client_id'] == 'browser-2'
+    assert sessions.get_workspace('mistral')['client_id'] == 'browser-2'
 
 
 @pytest.mark.asyncio
@@ -243,3 +261,28 @@ async def test_real_mcp_session_can_reclaim_stateless_lease_with_same_pair_code(
     assert rebound['structuredContent']['ok'] is True
     assert rebound['structuredContent']['lease_id'] == lease_id
     assert sessions.get_workspace('real-session')['client_id'] == 'stateless-browser'
+
+
+def test_openai_connector_headers_form_stable_logical_session_without_exposing_raw_values():
+    from app.routes.mcp import _logical_transport_session_id
+    req = SimpleNamespace(headers={
+        'user-agent': 'openai-mcp/1.0.0',
+        'x-openai-session': 'session-secret-value',
+        'x-openai-subject': 'subject-secret-value',
+    })
+    first = _logical_transport_session_id(req)
+    second = _logical_transport_session_id(req)
+    assert first == second
+    assert first.startswith('openai-')
+    assert 'session-secret-value' not in first
+    assert 'subject-secret-value' not in first
+
+
+def test_explicit_mcp_session_header_wins_over_connector_fallback():
+    from app.routes.mcp import _logical_transport_session_id
+    req = SimpleNamespace(headers={
+        'user-agent': 'openai-mcp/1.0.0',
+        'x-openai-session': 's',
+        'x-openai-subject': 'u',
+    })
+    assert _logical_transport_session_id(req, 'protocol-session') == 'protocol-session'
