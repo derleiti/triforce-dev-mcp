@@ -7,3 +7,4 @@ Icon=triforce-control-center
 Terminal=false
 Categories=Development;Utility;
 MimeType=x-scheme-handler/triforce-workspace;
+StartupNotify=true
