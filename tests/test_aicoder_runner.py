@@ -99,3 +99,23 @@ def test_apply_profile_state_updates_only_profile_owned_keys(tmp_path: Path):
     assert state["workspace_root"] == "/tmp/project"
     assert state["request_timeout"] == 90
     assert state["team_runtime_mode"] == "off"
+
+
+def test_public_result_is_compact_but_events_remain_available():
+    from app.services.aicoder_runner import AICoderRunResult
+    result = AICoderRunResult(
+        profile_id="pilot", status="success", response="OK", run_id="r1",
+        events=[
+            {"type": "tool_call", "name": "file_read"},
+            {"type": "tool_result", "name": "file_read", "is_error": False},
+            {"type": "performance_summary", "wall_ms": 123, "model_requests": 2},
+            {"type": "run_terminal", "elapsed_ms": 123},
+        ],
+    )
+    public = result.to_dict()
+    assert "events" not in public
+    assert public["event_summary"] == {
+        "event_count": 4, "tool_calls": ["file_read"], "tool_call_count": 1,
+        "tool_error_count": 0, "elapsed_ms": 123, "model_requests": 2,
+    }
+    assert result.to_dict(include_events=True)["events"] == result.events

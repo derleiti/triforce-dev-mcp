@@ -37,8 +37,21 @@ class AICoderRunResult:
     events: list[dict[str, Any]] = field(default_factory=list)
     raw_lines: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
+    def event_summary(self) -> dict[str, Any]:
+        tools = [str(e.get("name") or "") for e in self.events if e.get("type") == "tool_call"]
+        terminal = next((e for e in reversed(self.events) if e.get("type") == "run_terminal"), {})
+        perf = next((e for e in reversed(self.events) if e.get("type") == "performance_summary"), {})
         return {
+            "event_count": len(self.events),
+            "tool_calls": tools,
+            "tool_call_count": len(tools),
+            "tool_error_count": sum(1 for e in self.events if e.get("type") == "tool_result" and e.get("is_error")),
+            "elapsed_ms": int(terminal.get("elapsed_ms") or perf.get("wall_ms") or 0),
+            "model_requests": int(perf.get("model_requests") or 0),
+        }
+
+    def to_dict(self, *, include_events: bool = False) -> dict[str, Any]:
+        payload = {
             "agent_id": self.profile_id,
             "status": self.status,
             "response": self.response,
@@ -47,8 +60,11 @@ class AICoderRunResult:
             "run_id": self.run_id,
             "plan_id": self.plan_id,
             "model": self.model,
-            "events": self.events,
+            "event_summary": self.event_summary(),
         }
+        if include_events:
+            payload["events"] = self.events
+        return payload
 
 
 def _safe_profile_id(profile_id: str) -> str:

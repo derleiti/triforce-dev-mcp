@@ -105,7 +105,7 @@ Cooldown pro Profil und Ereignistyp, damit nichts flutet.
 ### Phase 4 — Migration der vier IDs (einzeln)
 Reihenfolge nach Risiko: opencode-mcp → codex-mcp → claude-mcp → gemini-mcp (Lead)
 - [~] `opencode-mcp`: Profil aktiv, `runtime: aicoder`, echter MCP Read- und Write-Smoke erfolgreich, on-demand `ready` ohne Legacy-PID; Canary-Beobachtung läuft.
-- [ ] `codex-mcp`: nach Canary-Fenster
+- [~] `codex-mcp`: auf `runtime: aicoder` migriert; isolierter ChatGPT-Account-Smoke sowie echter MCP Read/Write-Smoke erfolgreich (`account:chatgpt/gpt-5.6-terra`).
 - [ ] `claude-mcp`: danach
 - [ ] `gemini-mcp`: zuletzt (Lead)
 
