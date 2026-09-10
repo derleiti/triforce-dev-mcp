@@ -106,8 +106,8 @@ Cooldown pro Profil und Ereignistyp, damit nichts flutet.
 Reihenfolge nach Risiko: opencode-mcp → codex-mcp → claude-mcp → gemini-mcp (Lead)
 - [~] `opencode-mcp`: Profil aktiv, `runtime: aicoder`, echter MCP Read- und Write-Smoke erfolgreich, on-demand `ready` ohne Legacy-PID; Canary-Beobachtung läuft.
 - [~] `codex-mcp`: auf `runtime: aicoder` migriert; isolierter ChatGPT-Account-Smoke sowie echter MCP Read/Write-Smoke erfolgreich (`account:chatgpt/gpt-5.6-terra`).
-- [ ] `claude-mcp`: danach
-- [ ] `gemini-mcp`: zuletzt (Lead)
+- [~] `claude-mcp`: auf `runtime: aicoder` migriert; produktive Read/Write-Smokes erfolgreich über `openrouter/anthropic/claude-sonnet-5`. Native `account:claude/sonnet`-Route ist vorbereitet, derzeit aber durch providerseitiges Session-Limit blockiert.
+- [~] `gemini-mcp`: AICoder-Profil vorbereitet und Read-Smoke erfolgreich über `openrouter/google/gemini-3.1-pro-preview`; produktive Umschaltung wieder auf `legacy` zurückgerollt, weil zwei Write-Smokes mit OpenRouter 402 scheiterten. Native Antigravity-Route verlangt neuen Login; Google AI Studio meldet 429 Prepayment-Credits depleted.
 
 ### Phase 5 — Aufräumen
 - [ ] Wrapper-Skripte, `_inject_*_env`, Legacy-Zweige in call_agent entfernen

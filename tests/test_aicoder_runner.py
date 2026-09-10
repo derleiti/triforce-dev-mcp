@@ -119,3 +119,21 @@ def test_public_result_is_compact_but_events_remain_available():
         "tool_error_count": 0, "elapsed_ms": 123, "model_requests": 2,
     }
     assert result.to_dict(include_events=True)["events"] == result.events
+
+
+def test_claude_account_run_strips_api_billing_env(tmp_path, monkeypatch):
+    fake = tmp_path / "aicoder"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os\n"
+        "bad = any(os.environ.get(k) for k in ('ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL'))\n"
+        "print(json.dumps({'type':'result','status':'completed' if not bad else 'failed','response':'OK' if not bad else '', 'model':'account:claude/sonnet','error':'' if not bad else 'leaked'}))\n"
+    )
+    fake.chmod(0o755)
+    ws = tmp_path / "ws"; home = tmp_path / "home"; ws.mkdir(); home.mkdir()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "must-not-leak")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "must-not-leak")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.invalid")
+    result = asyncio.run(AICoderRunner(str(fake)).run(profile_id="pilot", prompt="x", workspace=ws, home=home, timeout=5, model="account:claude/sonnet"))
+    assert result.status == "success"
+    assert result.response == "OK"

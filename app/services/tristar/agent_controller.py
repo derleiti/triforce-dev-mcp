@@ -335,6 +335,7 @@ class AgentController:
         self.data_dir = Path(data_dir)
         self.agents: Dict[str, AgentInstance] = {}
         self._lock = asyncio.Lock()
+        self._aicoder_run_locks: Dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
         self._initialized = False
         self._shutting_down = False  # Prevent auto-restart during shutdown
         self._monitor_task: Optional[asyncio.Task] = None
@@ -367,6 +368,15 @@ class AgentController:
     async def _ensure_initialized(self):
         if not self._initialized:
             await self.initialize()
+
+    def _aicoder_run_lock(self, agent_id: str) -> asyncio.Lock:
+        """Return a per-agent lock bound to the currently running event loop."""
+        loop = asyncio.get_running_loop()
+        current = self._aicoder_run_locks.get(agent_id)
+        if current is None or current[0] is not loop:
+            current = (loop, asyncio.Lock())
+            self._aicoder_run_locks[agent_id] = current
+        return current[1]
 
     async def _register_default_agents(self):
         """Registriert die Standard-Agenten"""
@@ -819,7 +829,8 @@ class AgentController:
         if instance.config.runtime == "aicoder" or instance.config.agent_type == AgentType.AICODER:
             try:
                 instance.status = AgentStatus.RUNNING
-                result = await run_profile(agent_id, message, timeout_override=timeout)
+                async with self._aicoder_run_lock(agent_id):
+                    result = await run_profile(agent_id, message, timeout_override=timeout)
                 try:
                     notification = await record_aicoder_run(result)
                 except Exception as notify_exc:

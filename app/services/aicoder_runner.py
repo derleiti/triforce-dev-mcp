@@ -213,6 +213,9 @@ class AICoderRunner:
         env.update(extra_env or {})
         env["HOME"] = str(home)
         env["XDG_CONFIG_HOME"] = str(home / ".config")
+        if str(model or "").startswith("account:claude/"):
+            for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
+                env.pop(name, None)
 
         process = await asyncio.create_subprocess_exec(
             *command,
