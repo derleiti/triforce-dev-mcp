@@ -8,6 +8,7 @@ advertised the exact capability during pairing.
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
 import re
 from typing import Any, Dict, List
 
@@ -34,6 +35,8 @@ LOCAL_TOOL_NAMES = WRITE_TOOLS
 # product domains intentionally stay invisible because they operate privileged
 # shared services rather than the user's paired workspace.
 LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
+WORKSPACE_EXECUTOR_WAIT_SECONDS = 25.0
+WORKSPACE_EXECUTOR_POLL_SECONDS = 0.25
 
 _TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
@@ -287,6 +290,40 @@ def workspace_tool_requires_write(name: str, arguments: Dict[str, Any] | None = 
     return False
 
 
+async def wait_for_workspace_executor(
+    request: Request,
+    binding: Dict[str, Any],
+    *,
+    timeout: float = WORKSPACE_EXECUTOR_WAIT_SECONDS,
+) -> Dict[str, Any]:
+    """Wait briefly for the same persistent lease to regain a local executor.
+
+    Android browsers may suspend the physical WebSocket while the user switches
+    to ChatGPT/Telegram. The lease remains valid; a local tool call should wait
+    for the resume transport instead of failing immediately.
+    """
+    lease_id = str(binding.get("lease_id") or "")
+    affinity_sid = workspace_affinity_id(request) or session_id(request)
+    deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout))
+    current = binding
+    while asyncio.get_running_loop().time() < deadline:
+        connection = current.get("connection")
+        if (
+            connection is not None
+            and not bool(getattr(connection, "closed", True))
+            and current.get("transport_state") != "offline"
+        ):
+            return current
+        await asyncio.sleep(WORKSPACE_EXECUTOR_POLL_SECONDS)
+        refreshed = get_workspace_lease(affinity_sid) if affinity_sid else None
+        if refreshed is None:
+            break
+        if lease_id and str(refreshed.get("lease_id") or "") != lease_id:
+            break
+        current = refreshed
+    return current
+
+
 def should_route_tool_locally(request: Request | None, name: str) -> bool:
     """Route workspace-sensitive tools locally without hijacking admin MCP calls."""
     if name not in LOCAL_TOOL_NAMES:
@@ -484,19 +521,22 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if not binding:
         return _workspace_required(request)
     if binding.get("connection") is None or binding.get("transport_state") == "offline":
-        return {
-            "content": [{"type": "text", "text": "Workspace session is ready, but the local browser executor transport is offline. Reopen the workspace page to resume local execution."}],
-            "structuredContent": {
-                "ok": False, "code": "WORKSPACE_TRANSPORT_OFFLINE",
-                "state": "ready", "lease_state": "ready", "connected": True,
-                "transport_state": "offline", "executor_online": False,
-                "suspended": False, "reconnectable": True,
-                "access_mode": binding.get("mode", "read_only"), "mode": binding.get("mode", "read_only"),
-                "lease_id": binding.get("lease_id", ""),
-                "capabilities": list(binding.get("capabilities") or []),
-            },
-            "isError": False,
-        }
+        binding = await wait_for_workspace_executor(request, binding)
+        if binding.get("connection") is None or binding.get("transport_state") == "offline":
+            return {
+                "content": [{"type": "text", "text": "Workspace lease is ready, but no local executor resumed within the handoff window. The lease and write permission remain active; reopen the workspace page and retry the tool call."}],
+                "structuredContent": {
+                    "ok": False, "code": "WORKSPACE_EXECUTOR_UNAVAILABLE",
+                    "state": "ready", "lease_state": "ready", "connected": True,
+                    "transport_state": "offline", "executor_online": False,
+                    "suspended": False, "reconnectable": True,
+                    "retryable": True, "waited_seconds": WORKSPACE_EXECUTOR_WAIT_SECONDS,
+                    "access_mode": binding.get("mode", "read_only"), "mode": binding.get("mode", "read_only"),
+                    "lease_id": binding.get("lease_id", ""),
+                    "capabilities": list(binding.get("capabilities") or []),
+                },
+                "isError": False,
+            }
 
     mode = str(binding.get("mode") or "read_only")
     if mode != "write" and workspace_tool_requires_write(name, arguments):
@@ -517,11 +557,20 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if "client_workspace_tool" not in set(getattr(connection, "supported_tools", []) or []):
         raise RuntimeError("Connected browser workspace does not provide client_workspace_tool")
 
-    result = await connection.send_tool_call(
-        "client_workspace_tool",
-        {"tool": name, "arguments": arguments, "mode": mode},
-        timeout=180.0,
-    )
+    try:
+        result = await connection.send_tool_call(
+            "client_workspace_tool",
+            {"tool": name, "arguments": arguments, "mode": mode},
+            timeout=180.0,
+        )
+    except (ConnectionError, RuntimeError) as exc:
+        if bool(getattr(connection, "closed", False)):
+            return _tool_error(
+                "WORKSPACE_EXECUTION_UNCERTAIN",
+                "The local executor disconnected during the tool call. The operation is not retried automatically because a write may already have completed. Check workspace state before retrying.",
+                tool=name, retryable=False, detail=str(exc),
+            )
+        raise
     if not isinstance(result, dict):
         raise RuntimeError("Browser workspace returned an invalid MCP tool result")
     return result

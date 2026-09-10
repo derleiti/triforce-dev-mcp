@@ -408,7 +408,7 @@ async def test_bridge_reports_workspace_suspended_instead_of_required():
 
     req = DummyRequest('session-A')
     result = await call_public_local_tool(req, 'code_tree', {'path': '.', 'depth': 1})
-    assert result['structuredContent']['code'] == 'WORKSPACE_TRANSPORT_OFFLINE'
+    assert result['structuredContent']['code'] == 'WORKSPACE_EXECUTOR_UNAVAILABLE'
     assert result['structuredContent']['state'] == 'ready'
     assert result['structuredContent']['transport_state'] == 'offline'
     assert result['structuredContent']['reconnectable'] is True
@@ -689,3 +689,54 @@ def test_active_mcp_session_is_not_expired_by_creation_age():
     assert 'keepalive-session' in mcp_route._mcp_sessions
     assert 'idle-session' not in mcp_route._mcp_sessions
     mcp_route._mcp_sessions.pop('keepalive-session', None)
+
+
+@pytest.mark.asyncio
+async def test_offline_executor_waits_for_same_lease_reconnect(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+    req = DummyRequest('session-A')
+    conn2 = DummyConnection('online-two')
+    suspended = {
+        'lease_id': 'lease-reconnect',
+        'mode': 'write',
+        'capabilities': ['file_read'],
+        'connection': None,
+        'transport_state': 'offline',
+    }
+    resumed = {
+        **suspended,
+        'connection': conn2,
+        'client_id': conn2.client_id,
+        'transport_state': 'online',
+        'executor_online': True,
+    }
+
+    monkeypatch.setattr(bridge, 'get_workspace_lease', lambda sid: suspended)
+
+    async def fake_wait(request, binding, *, timeout=0):
+        assert binding['lease_id'] == 'lease-reconnect'
+        return resumed
+
+    monkeypatch.setattr(bridge, 'wait_for_workspace_executor', fake_wait)
+    result = await bridge.call_public_local_tool(req, 'file_read', {'path': 'README.md'})
+    assert result['isError'] is False
+    assert conn2.calls[-1][1]['tool'] == 'file_read'
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_local_call_is_not_retried(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+
+    class DropConnection(DummyConnection):
+        async def send_tool_call(self, name, args, timeout=0):
+            self.calls.append((name, args, timeout))
+            self.closed = True
+            raise ConnectionError('dropped')
+
+    conn = DropConnection('dropper')
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['file_edit'])
+    req = DummyRequest('session-A')
+    result = await bridge.call_public_local_tool(req, 'file_edit', {'path':'x.txt','operation':'write','content':'x'})
+    assert result['structuredContent']['code'] == 'WORKSPACE_EXECUTION_UNCERTAIN'
+    assert result['structuredContent']['retryable'] is False
+    assert len(conn.calls) == 1
