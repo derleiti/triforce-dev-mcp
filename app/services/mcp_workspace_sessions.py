@@ -19,6 +19,7 @@ import time
 from typing import Any, Optional
 
 PAIR_TTL_SECONDS = 15 * 60
+MAX_WEB_PAIR_TICKETS = 2048
 
 # Legacy/session-first pairing.
 _SESSION_PAIR: dict[str, dict[str, Any]] = {}
@@ -47,7 +48,11 @@ def _expired(item: dict[str, Any] | None) -> bool:
 
 
 def create_web_pair_code() -> str:
-    """Create a fresh browser-first pairing code on every page invocation."""
+    """Create a fresh browser-first pairing code after local folder selection."""
+    _cleanup_web_pairs()
+    if len(_WEB_PAIR) >= MAX_WEB_PAIR_TICKETS:
+        oldest = min(_WEB_PAIR, key=lambda key: float(_WEB_PAIR[key].get("created_at") or 0))
+        _WEB_PAIR.pop(oldest, None)
     now = time.time()
     code = _new_code()
     _WEB_PAIR[_pair_key(code)] = {
@@ -60,7 +65,6 @@ def create_web_pair_code() -> str:
         "mode": "read_only",
         "task": "",
     }
-    _cleanup_web_pairs()
     return code
 
 
@@ -75,7 +79,7 @@ def resolve_web_pair_code(code: str) -> Optional[dict[str, Any]]:
     return dict(item)
 
 
-def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: str = "") -> dict[str, Any]:
+def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None) -> dict[str, Any]:
     """Attach a local helper to a web-created code without binding an MCP session yet."""
     key = _pair_key(code)
     item = _WEB_PAIR.get(key)
@@ -94,6 +98,7 @@ def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: s
         "client_id": str(getattr(connection, "client_id", "")),
         "mode": normalized_mode,
         "task": str(task or "")[:4000],
+        "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
         "helper_connected_at": time.time(),
     })
     return {
@@ -102,6 +107,7 @@ def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: s
         "client_id": item["client_id"],
         "mode": normalized_mode,
         "task": item["task"],
+        "capabilities": list(item.get("capabilities") or []),
         "expires_at": item["expires_at"],
     }
 
@@ -123,6 +129,7 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
         connection,
         mode=str(item.get("mode") or "read_only"),
         task=str(item.get("task") or ""),
+        capabilities=list(item.get("capabilities") or []),
     )
     _WEB_PAIR.pop(key, None)
     return binding
@@ -169,7 +176,7 @@ def pair_code_kind(code: str) -> tuple[str, Optional[str]]:
     return "invalid", None
 
 
-def bind_workspace(session_id: str, connection: Any, *, mode: str, task: str = "") -> dict[str, Any]:
+def bind_workspace(session_id: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None) -> dict[str, Any]:
     normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
     binding = {
         "session_id": session_id,
@@ -178,6 +185,7 @@ def bind_workspace(session_id: str, connection: Any, *, mode: str, task: str = "
         "client_id": str(getattr(connection, "client_id", "")),
         "mode": normalized_mode,
         "task": str(task or "")[:4000],
+        "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
         "bound_at": time.time(),
     }
     _SESSION_WORKSPACE[session_id] = binding
@@ -233,6 +241,7 @@ def workspace_status(session_id: str) -> dict[str, Any]:
             "mode": binding["mode"],
             "task": binding.get("task", ""),
             "client_id": binding.get("client_id", ""),
+            "capabilities": list(binding.get("capabilities") or []),
         }
     return {
         "connected": False,

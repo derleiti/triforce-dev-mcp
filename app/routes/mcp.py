@@ -101,22 +101,62 @@ def _mcp_instructions_for_request(request: Request) -> str:
     return build_mcp_instructions()
 
 
-def _workspace_setup_html(pair_code: str) -> str:
-    return f"""<!doctype html>
+def _workspace_setup_html() -> str:
+    template = r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TriForce MCP · Local Workspace</title>
+<title>TriForce MCP · Browser Workspace</title>
 <style>
-:root{{color-scheme:dark}}body{{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0}}main{{max-width:820px;margin:7vh auto;padding:28px}}section{{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:24px;margin:18px 0}}h1{{font-size:2rem;margin:.2rem 0}}p{{line-height:1.55;color:#b8c1cc}}.ok{{color:#63d471}}.muted{{color:#8b949e}}code,input{{font-family:ui-monospace,monospace}}input{{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:12px;border-radius:8px;font-size:1rem}}button{{background:#238636;color:white;border:0;border-radius:8px;padding:11px 16px;font-weight:600;cursor:pointer}}.row{{display:flex;gap:10px;align-items:center}}.row input{{flex:1}}.pill{{display:inline-block;background:#1f6feb22;border:1px solid #1f6feb;padding:5px 10px;border-radius:999px;color:#79c0ff}}
+:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0}main{max-width:860px;margin:5vh auto;padding:24px}section{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:22px;margin:16px 0}h1{font-size:2rem;margin:.25rem 0}h2{margin-top:0}p{line-height:1.5;color:#b8c1cc}.muted{color:#8b949e}.ok{color:#63d471}.warn{color:#e3b341}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{background:#238636;color:white;border:0;border-radius:8px;padding:11px 16px;font-weight:650;cursor:pointer}button.secondary{background:#30363d}button:disabled{opacity:.45;cursor:not-allowed}input[type=text],textarea{width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:11px;border-radius:8px}textarea{min-height:76px;resize:vertical}code,.mono{font-family:ui-monospace,SFMono-Regular,monospace}.pair{font-size:1.05rem;letter-spacing:.04em}.pill{display:inline-block;border:1px solid #1f6feb;background:#1f6feb22;color:#79c0ff;padding:5px 10px;border-radius:999px}.hidden{display:none}.status{font-weight:650}.choice{padding:9px 12px;border:1px solid #30363d;border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head><body><main>
-<span class="pill">AILinux · TriForce MCP</span><h1>Connect a local workspace</h1>
-<p>ChatGPT, Codex, Mistral and other MCP clients always use <code>https://api.ailinux.me/v1/mcp</code>. This page creates a new one-time local workspace ID every time it is opened.</p>
-<section><h2>1 · Your new pairing ID</h2><p>This ID is valid for 15 minutes and can be used only once.</p><div class="row"><input id="pair" readonly value="{pair_code}"><button onclick="copyPair()">Copy</button></div></section>
-<section><h2>2 · Choose the local folder</h2><p>Open the TriForce Local Workspace helper with this ID. Choose the folder, select <strong>Read only</strong> or <strong>Write</strong>, then press <strong>Start</strong>.</p><button onclick="launch()">Open TriForce Local Workspace</button><p id="hint" class="muted"></p></section>
-<section><h2>3 · Post the ID in your AI chat</h2><p>Paste <code>{pair_code}</code> into the ChatGPT/Codex/Mistral conversation that is connected to TriForce. TriForce will call <code>workspace_pair</code> and bind this waiting local workspace to that MCP session.</p></section>
-<section><h2 class="ok">One public TriForce MCP</h2><p>Cloud tools keep running on TriForce. Local file, code, Git, shell, lint and test tools run on the paired computer. Existing authenticated/admin access is unchanged.</p></section>
-<script>function copyPair(){{navigator.clipboard.writeText(document.getElementById('pair').value)}}function launch(){{const c=document.getElementById('pair').value;location.href='triforce-workspace://pair?code='+encodeURIComponent(c);document.getElementById('hint').textContent='If the helper did not open, start TriForce Local Workspace manually and paste: '+c;}}
-</script></main></body></html>"""
-
+<span class="pill">AILinux · TriForce MCP</span><h1>Local Workspace in your browser</h1>
+<p>No app, helper, account or API key. Choose a local folder here; this browser tab becomes the local TriForce workspace node. Keep the tab open while your AI is working.</p>
+<section><h2>1 · Choose workspace</h2>
+<div class="row"><button id="chooseBtn">Choose local folder</button><span id="folderName" class="muted">No folder selected</span></div>
+<input id="fallbackPicker" type="file" webkitdirectory directory multiple class="hidden">
+<div class="grid" style="margin-top:14px"><label class="choice"><input type="radio" name="mode" value="read_only" checked> Read only</label><label class="choice"><input id="writeMode" type="radio" name="mode" value="write"> Write</label></div>
+<p id="browserNote" class="muted"></p>
+<label for="task" class="muted">Optional task/context for the AI</label><textarea id="task" placeholder="e.g. Review this project and fix the login flow"></textarea>
+<div class="row" style="margin-top:12px"><button id="connectBtn" disabled>Connect workspace</button><button id="disconnectBtn" class="secondary" disabled>Disconnect</button></div>
+<p id="status" class="status">Choose a folder first.</p><pre id="analysis" class="muted"></pre></section>
+<section id="pairPanel" class="hidden"><h2 class="ok">2 · Workspace ready</h2><p>Paste this one-time ID into the ChatGPT, Codex or Mistral conversation that uses TriForce. The AI will call <code>workspace_pair</code> and bind this browser workspace to that MCP session.</p><div class="row"><input id="pair" class="pair mono" type="text" readonly value=""><button id="copyBtn">Copy ID</button></div><p class="muted">This ID expires after 15 minutes and is single-use.</p></section>
+<section><h2>Public MCP URL</h2><div class="row"><input id="mcpUrl" type="text" readonly value="https://api.ailinux.me/v1/mcp"><button id="copyMcp" class="secondary">Copy MCP URL</button></div><p class="muted">Safe cloud tools run on TriForce. Local file/code tools run only in this browser tab and only inside the selected folder.</p></section>
+<script>
+'use strict';
+let pairCode='';
+const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tree','code_search','code_grep'];
+const WRITE_TOOLS=['file_edit','directory_create'];
+const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
+const MAX_TEXT=2*1024*1024;
+let rootHandle=null, fallbackFiles=new Map(), fallbackRoot='', ws=null, workspaceMode='read_only', capabilities=[];
+const $=id=>document.getElementById(id);
+const modern=typeof window.showDirectoryPicker==='function';
+if(!modern){$('writeMode').disabled=true;$('browserNote').textContent='Browser fallback: folder reading/search is supported, but direct Write access requires a browser with the File System Access API.'}else{$('browserNote').textContent='This browser supports direct folder access. Write mode asks for explicit read/write permission.'}
+function status(text,cls=''){ $('status').textContent=text; $('status').className='status '+cls; }
+function cleanPath(value){let p=String(value||'.').replaceAll('\\','/').replace(/^\.\//,'');if(p==='.'||p==='')return '';if(p.startsWith('/')||p.includes('\0'))throw new Error('absolute or invalid path rejected');const parts=p.split('/').filter(Boolean);if(parts.some(x=>x==='..'))throw new Error('path traversal rejected');return parts.join('/');}
+function ignored(path){return path.split('/').some(x=>IGNORE.has(x));}
+function globRe(glob){const esc=String(glob||'*').replace(/[.+^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*').replace(/\?/g,'.');return new RegExp('^'+esc+'$');}
+async function getHandle(path,wantFile=false,create=false){if(!rootHandle)throw new Error('writable directory handle unavailable');const parts=cleanPath(path).split('/').filter(Boolean);let cur=rootHandle;if(!parts.length)return cur;for(let i=0;i<parts.length;i++){const last=i===parts.length-1;if(last&&wantFile)return await cur.getFileHandle(parts[i],{create});cur=await cur.getDirectoryHandle(parts[i],{create:create});}return cur;}
+async function modernFiles(dir=rootHandle,prefix='',out=[]){for await(const [name,h] of dir.entries()){const path=prefix?prefix+'/'+name:name;if(ignored(path))continue;if(h.kind==='file')out.push({path,handle:h});else await modernFiles(h,path,out);}return out;}
+function fallbackEntries(){return [...fallbackFiles.entries()].filter(([p])=>!ignored(p)).map(([path,file])=>({path,file}));}
+async function allFiles(){return rootHandle?await modernFiles():fallbackEntries();}
+async function fileObj(path){const p=cleanPath(path);if(rootHandle){const h=await getHandle(p,true,false);return await h.getFile();}const f=fallbackFiles.get(p);if(!f)throw new Error('file not found: '+p);return f;}
+async function readText(path){const f=await fileObj(path);if(f.size>MAX_TEXT)throw new Error('file exceeds 2 MiB text limit');return await f.text();}
+function lineSlice(text,args){const lines=text.split(/\r?\n/);let start=Math.max(1,Number(args.start_line||1));let end=args.end_line?Math.min(lines.length,Number(args.end_line)):lines.length;return {text:lines.slice(start-1,end).join('\n'),total_lines:lines.length,start_line:start,end_line:end};}
+async function workspaceInfo(){const files=await allFiles();let bytes=0;const ext={};for(const e of files){const f=e.file||await e.handle.getFile();bytes+=f.size;const n=e.path.split('/').pop();const i=n.lastIndexOf('.');const x=i>0?n.slice(i):'[none]';ext[x]=(ext[x]||0)+1;}return {workspace:rootHandle?.name||fallbackRoot||'local',mode:workspaceMode,files:files.length,bytes,top_extensions:Object.entries(ext).sort((a,b)=>b[1]-a[1]).slice(0,12),sample_files:files.slice(0,30).map(e=>e.path),capabilities};}
+async function tree(args){const base=cleanPath(args.path||'');const maxDepth=Math.min(8,Math.max(1,Number(args.max_depth||args.depth||4)));const maxEntries=Math.min(1000,Math.max(1,Number(args.max_entries||300)));const files=await allFiles();const dirs=new Set();const rows=[];for(const e of files){if(base&&!(e.path===base||e.path.startsWith(base+'/')))continue;const rel=base?e.path.slice(base.length).replace(/^\//,''):e.path;if(!rel)continue;const parts=rel.split('/');if(parts.length>maxDepth)continue;for(let i=1;i<parts.length;i++){const d=(base?base+'/':'')+parts.slice(0,i).join('/');if(!dirs.has(d)){dirs.add(d);rows.push(d+'/');}}rows.push(e.path);if(rows.length>=maxEntries)break;}return {path:base||'.',entries:rows.slice(0,maxEntries),truncated:rows.length>=maxEntries};}
+async function search(args,forceRegex=false){const base=cleanPath(args.path||'');const max=Math.min(500,Math.max(1,Number(args.max_results||100)));const pattern=forceRegex?String(args.pattern||''):String(args.query||'');if(!pattern)throw new Error('search pattern required');const regexMode=forceRegex||Boolean(args.regex);const flags=args.case_sensitive?'g':'gi';let re=regexMode?new RegExp(pattern,flags):null;const glob=globRe(args.file_pattern||args.glob||'*');const needle=args.case_sensitive?pattern:pattern.toLowerCase();const hits=[];for(const e of await allFiles()){if(base&&!(e.path===base||e.path.startsWith(base+'/')))continue;if(!glob.test(e.path.split('/').pop()))continue;let text;try{text=await readText(e.path)}catch{continue}const lines=text.split(/\r?\n/);for(let i=0;i<lines.length;i++){const line=lines[i];let ok;if(re){re.lastIndex=0;ok=re.test(line)}else ok=(args.case_sensitive?line:line.toLowerCase()).includes(needle);if(ok){hits.push({path:e.path,line:i+1,text:line.slice(0,500)});if(hits.length>=max)return {results:hits,truncated:true};}}}return {results:hits,truncated:false};}
+async function editFile(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('browser workspace is read-only');const path=cleanPath(args.path);const op=String(args.operation||'write');let old='';try{old=await readText(path)}catch(e){if(!['create','write'].includes(op))throw e;}let next;if(op==='create'){try{await fileObj(path);throw new Error('file already exists')}catch(e){if(String(e.message).includes('already exists'))throw e;next=String(args.content||'')}}else if(op==='write')next=String(args.content||'');else if(op==='append')next=old+String(args.content||'');else if(op==='replace'){const needle=String(args.old_text||'');if(!needle)throw new Error('old_text required');const count=old.split(needle).length-1;if(count!==1)throw new Error('old_text must occur exactly once');next=old.replace(needle,String(args.new_text||''));}else throw new Error('unknown edit operation');const h=await getHandle(path,true,true);const w=await h.createWritable();await w.write(next);await w.close();return {path,operation:op,bytes:new Blob([next]).size};}
+async function createDir(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('browser workspace is read-only');const p=cleanPath(args.path);await getHandle(p,false,true);return {path:p,created:true};}
+function result(data,isError=false){const structured=(data&&typeof data==='object'&&!Array.isArray(data))?data:{result:data};return {content:[{type:'text',text:typeof data==='string'?data:JSON.stringify(data)}],structuredContent:structured,isError};}
+async function execute(tool,args){if(!capabilities.includes(tool))throw new Error('tool not available in this browser workspace: '+tool);if(tool==='workspace_info')return result(await workspaceInfo());if(tool==='file_read'||tool==='code_read'){const sliced=lineSlice(await readText(args.path),args);return result({path:cleanPath(args.path),...sliced});}if(tool==='file_tree'||tool==='code_tree')return result(await tree(args));if(tool==='code_search')return result(await search(args,false));if(tool==='code_grep')return result(await search(args,true));if(tool==='file_edit')return result(await editFile(args));if(tool==='directory_create')return result(await createDir(args));throw new Error('unsupported browser tool');}
+async function handleServer(msg){if(msg.method==='connected'){ws.send(JSON.stringify({jsonrpc:'2.0',method:'client/info',params:{client:'triforce-browser-workspace',platform:navigator.platform||'browser',hostname:'browser',server_version:'2.85-browser',mode:'workspace',workspace:rootHandle?.name||fallbackRoot||'local',remote_profile:workspaceMode}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'tools/list',params:{tools:['client_workspace_tool']}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/share',params:{task:$('task').value.trim(),mode:workspaceMode,capabilities}}));return;}if(msg.method==='workspace/shared'){if(msg.params?.ok){$('pair').value=pairCode;$('pairPanel').classList.remove('hidden');status('Workspace ready. Paste the ID into your AI chat.','ok');$('connectBtn').disabled=true;$('disconnectBtn').disabled=false}else status('TriForce rejected workspace: '+(msg.params?.error||'unknown error'),'warn');return;}if(msg.method==='tools/call'){const id=msg.id,p=msg.params||{},outer=p.arguments||{};let r;try{if(p.name!=='client_workspace_tool')throw new Error('unexpected tool');r=await execute(String(outer.tool||''),outer.arguments||{});}catch(e){r=result({ok:false,error:String(e.message||e)},true);}ws.send(JSON.stringify({jsonrpc:'2.0',id,result:r}));return;}if(msg.method==='ping')ws.send(JSON.stringify({jsonrpc:'2.0',method:'pong'}));}
+async function chooseFolder(){disconnect();$('pairPanel').classList.add('hidden');if(modern){try{rootHandle=await window.showDirectoryPicker({mode:'read'});fallbackFiles.clear();fallbackRoot='';$('folderName').textContent=rootHandle.name;$('connectBtn').disabled=false;status('Folder selected. Choose access and connect.');$('analysis').textContent=JSON.stringify(await workspaceInfo(),null,2);}catch(e){if(e.name!=='AbortError')status('Folder selection failed: '+e.message,'warn')}}else $('fallbackPicker').click();}
+$('fallbackPicker').addEventListener('change',async e=>{fallbackFiles.clear();rootHandle=null;const files=[...e.target.files];if(!files.length)return;fallbackRoot=(files[0].webkitRelativePath||'local').split('/')[0];for(const f of files){let p=f.webkitRelativePath||f.name;if(fallbackRoot&&p.startsWith(fallbackRoot+'/'))p=p.slice(fallbackRoot.length+1);fallbackFiles.set(cleanPath(p),f)}$('folderName').textContent=fallbackRoot;document.querySelector('input[name=mode][value=read_only]').checked=true;$('connectBtn').disabled=false;status('Folder selected in read-only browser fallback.');$('analysis').textContent=JSON.stringify(await workspaceInfo(),null,2);});
+async function connect(){if(!rootHandle&&!fallbackFiles.size)return;workspaceMode=document.querySelector('input[name=mode]:checked').value;if(workspaceMode==='write'){if(!modern||!rootHandle){status('Write mode is not supported by this browser picker.','warn');return}let perm=await rootHandle.queryPermission({mode:'readwrite'});if(perm!=='granted')perm=await rootHandle.requestPermission({mode:'readwrite'});if(perm!=='granted'){status('Write permission was not granted.','warn');return}}capabilities=[...READ_TOOLS,...(workspaceMode==='write'&&rootHandle?WRITE_TOOLS:[])];status('Creating one-time workspace ID…');$('connectBtn').disabled=true;let ticket;try{const r=await fetch('/v1/mcp/workspace/pair-ticket',{method:'POST',headers:{'Accept':'application/json'}});if(!r.ok)throw new Error('ticket request failed: '+r.status);ticket=await r.json();pairCode=String(ticket.pair_code||'');if(!pairCode)throw new Error('server returned no pairing ID')}catch(e){status('Could not create pairing ID: '+e.message,'warn');$('connectBtn').disabled=false;return}status('Connecting browser workspace to TriForce…');const proto=location.protocol==='https:'?'wss:':'ws:';const url=proto+'//'+location.host+'/v1/mcp/node/connect?mode=workspace&pair_code='+encodeURIComponent(pairCode)+'&machine_id=browser&client_version=2.85-browser';ws=new WebSocket(url);ws.onmessage=async e=>{try{await handleServer(JSON.parse(e.data))}catch(err){status('Workspace error: '+err.message,'warn')}};ws.onerror=()=>status('WebSocket connection failed.','warn');ws.onclose=()=>{if(ws){status('Workspace disconnected. Choose Connect again for a new pairing ID.','warn');$('disconnectBtn').disabled=true}ws=null;};}
+function disconnect(){if(ws){try{ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/revoke',params:{}}));ws.close()}catch{}ws=null}$('disconnectBtn').disabled=true;if(rootHandle||fallbackFiles.size)$('connectBtn').disabled=false;$('pairPanel').classList.add('hidden');}
+$('chooseBtn').onclick=chooseFolder;$('connectBtn').onclick=connect;$('disconnectBtn').onclick=disconnect;$('copyBtn').onclick=()=>navigator.clipboard.writeText(pairCode);$('copyMcp').onclick=()=>navigator.clipboard.writeText($('mcpUrl').value);window.addEventListener('beforeunload',()=>{if(ws)ws.close()});
+</script></main></body></html>'''
+    return template
 
 def _build_tool_result(result: Any, *, is_error: bool = False) -> Dict[str, Any]:
     """Build an MCP tool result compatible with legacy and structured clients.
@@ -251,6 +291,17 @@ async def oauth_authorization_server_metadata(request: Request) -> JSONResponse:
 
 
 public_oauth_authorization_server_metadata = oauth_authorization_server_metadata
+
+
+@public_router.post("/mcp/workspace/pair-ticket", tags=["MCP"], summary="Create one-time browser workspace pairing ticket")
+async def create_browser_workspace_pair_ticket(request: Request) -> JSONResponse:
+    """Mint a bounded, short-lived ID after the browser selected a local folder."""
+    from app.services.mcp_workspace_sessions import PAIR_TTL_SECONDS, create_web_pair_code
+    code = create_web_pair_code()
+    return JSONResponse(
+        {"pair_code": code, "expires_seconds": PAIR_TTL_SECONDS},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @public_router.get("/.well-known/mcp")
@@ -3879,9 +3930,7 @@ async def mcp_health_or_sse(request: Request):
 
     accept_header = request.headers.get("Accept", "")
     if "text/html" in accept_header and "text/event-stream" not in accept_header:
-        from app.services.mcp_workspace_sessions import create_web_pair_code
-        pair_code = create_web_pair_code()
-        return HTMLResponse(_workspace_setup_html(pair_code), headers={"Cache-Control": "no-store"})
+        return HTMLResponse(_workspace_setup_html(), headers={"Cache-Control": "no-store"})
     client_ip = request.client.host if request.client else "unknown"
 
     if "text/event-stream" in accept_header:

@@ -48,6 +48,7 @@ PUBLIC_PATHS = [
     "/static/",
     "/v1/distributed",
     "/v1/mcp/node/support",  # Support-Calls (KI-Support für alle)
+    "/v1/mcp/workspace/pair-ticket",  # Browser-only one-time workspace ticket
     "/v1/client/",  # Client-API (Free-Tier ohne Auth)
 ]
 

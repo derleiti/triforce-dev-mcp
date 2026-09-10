@@ -483,6 +483,7 @@ async def websocket_connect(
                         str(paired_mcp_session), connection,
                         mode=str(share.get("mode") or "read_only"),
                         task=str(share.get("task") or ""),
+                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace paired | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": binding["mode"], "waiting_for_session": False}})
@@ -492,6 +493,7 @@ async def websocket_connect(
                         pair_code, connection,
                         mode=str(share.get("mode") or "read_only"),
                         task=str(share.get("task") or ""),
+                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": waiting["mode"], "waiting_for_session": True}})

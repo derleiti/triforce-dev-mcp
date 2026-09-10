@@ -42,7 +42,7 @@ def test_pairing_code_is_session_scoped_and_consumed_on_bind():
     code = sessions.get_or_create_pair_code('session-A')
     assert sessions.resolve_pair_code(code) == 'session-A'
     conn = DummyConnection()
-    sessions.bind_workspace('session-A', conn, mode='write', task='fix tests')
+    sessions.bind_workspace('session-A', conn, mode='write', task='fix tests', capabilities=['file_read', 'file_edit'])
     assert sessions.resolve_pair_code(code) is None
     bound = sessions.get_workspace('session-A')
     assert bound['client_id'] == 'local-1'
@@ -55,11 +55,12 @@ def test_web_pair_codes_are_unique_and_claim_waiting_helper_once():
     second = sessions.create_web_pair_code()
     assert first != second
     conn = DummyConnection()
-    waiting = sessions.register_waiting_workspace(first, conn, mode='write', task='web flow')
+    waiting = sessions.register_waiting_workspace(first, conn, mode='write', task='web flow', capabilities=['file_read', 'file_edit'])
     assert waiting['waiting_for_session'] is True
     bound = sessions.claim_waiting_workspace(first, 'session-A')
     assert bound['mode'] == 'write'
     assert bound['task'] == 'web flow'
+    assert bound['capabilities'] == ['file_edit', 'file_read']
     assert sessions.get_workspace('session-A')['client_id'] == conn.client_id
     with pytest.raises(ValueError):
         sessions.claim_waiting_workspace(first, 'session-B')
@@ -78,22 +79,33 @@ async def test_workspace_status_tells_user_to_use_web_setup_page():
 async def test_workspace_pair_claims_waiting_web_helper_for_current_session():
     code = sessions.create_web_pair_code()
     conn = DummyConnection()
-    sessions.register_waiting_workspace(code, conn, mode='read_only', task='inspect web')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', task='inspect web', capabilities=['workspace_info', 'file_read'])
     req = DummyRequest('session-A')
     result = await call_public_local_tool(req, 'workspace_pair', {'code': code})
     assert result['structuredContent']['ok'] is True
     assert result['structuredContent']['mode'] == 'read_only'
+    assert result['structuredContent']['capabilities'] == ['file_read', 'workspace_info']
     assert sessions.get_workspace('session-A')['client_id'] == conn.client_id
 
 
 @pytest.mark.asyncio
-async def test_read_only_binding_blocks_local_write_but_allows_read():
+async def test_read_only_binding_blocks_write_and_allows_advertised_read():
     conn = DummyConnection()
-    sessions.bind_workspace('session-A', conn, mode='read_only', task='inspect')
+    sessions.bind_workspace('session-A', conn, mode='read_only', task='inspect', capabilities=['file_read'])
     req = DummyRequest('session-A')
-    blocked = await call_public_local_tool(req, 'shell', {'command': 'echo no'})
+    blocked = await call_public_local_tool(req, 'file_edit', {'path': 'x.txt', 'operation': 'write', 'content': 'x'})
     assert blocked['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
     read = await call_public_local_tool(req, 'file_read', {'path': 'README.md'})
     assert read['isError'] is False
     assert conn.calls[0][0] == 'client_workspace_tool'
     assert conn.calls[0][1]['tool'] == 'file_read'
+
+
+@pytest.mark.asyncio
+async def test_browser_capability_gate_rejects_unadvertised_tool():
+    conn = DummyConnection()
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['file_read'])
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'file_edit', {'path': 'x.txt', 'operation': 'write', 'content': 'x'})
+    assert result['structuredContent']['code'] == 'WORKSPACE_TOOL_UNAVAILABLE'
+    assert conn.calls == []
