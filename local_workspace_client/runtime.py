@@ -14,7 +14,7 @@ from typing import Any
 
 IGNORE_NAMES = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
 READ_TOOLS = {"workspace_info", "file_read", "file_tree", "code_read", "code_tree", "code_search", "code_grep", "git"}
-WRITE_TOOLS = READ_TOOLS | {"file_edit", "directory_create", "shell", "binary_exec", "task_runner", "lint", "test"}
+WRITE_TOOLS = READ_TOOLS | {"file_edit", "directory_create", "workspace_clear", "shell", "binary_exec", "task_runner", "lint", "test"}
 
 
 def _result(text: str, error: bool = False, **structured: Any) -> dict[str, Any]:
@@ -212,6 +212,17 @@ class WorkspaceRuntime:
                 text, err = self._git(args); return _result(text, err)
             if tool == "directory_create":
                 path = self.resolve(args.get("path"), must_exist=False); path.mkdir(parents=True, exist_ok=False); return _result(f"created {self.display(path)}")
+            if tool == "workspace_clear":
+                if str(args.get("confirm") or "") != "DELETE_ALL":
+                    raise ValueError("workspace_clear requires confirm=DELETE_ALL")
+                removed = 0
+                for child in list(self.root.iterdir()):
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                    removed += 1
+                return _result(f"cleared workspace root; removed {removed} top-level entries", False, removed=removed, root_preserved=True)
             if tool == "file_edit":
                 path = self.resolve(args.get("path"), must_exist=False)
                 operation = str(args.get("operation") or "")

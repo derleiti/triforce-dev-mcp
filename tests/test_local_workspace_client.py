@@ -48,3 +48,34 @@ def test_tool_sets_and_fixed_public_mcp_url():
     assert 'pair_code=ABCD-1234-EF56' in url
     assert 'token=' not in url
     assert mcp_url('https://api.ailinux.me') == 'https://api.ailinux.me/v1/mcp'
+
+
+def test_workspace_clear_preserves_root():
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / '.hidden').write_text('x', encoding='utf-8')
+        (root / 'sub').mkdir()
+        (root / 'sub' / 'file.txt').write_text('y', encoding='utf-8')
+        runtime = WorkspaceRuntime(root, writable=True)
+        denied = runtime.execute('workspace_clear', {'confirm': 'NO'})
+        assert denied['isError'] is True
+        assert (root / '.hidden').exists()
+        cleared = runtime.execute('workspace_clear', {'confirm': 'DELETE_ALL'})
+        assert cleared['isError'] is False
+        assert root.exists() and root.is_dir()
+        assert list(root.iterdir()) == []
+        assert cleared['structuredContent']['root_preserved'] is True
+
+
+def test_workspace_session_state_roundtrip(monkeypatch):
+    from local_workspace_client import client
+    with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as home:
+        root = Path(temp)
+        monkeypatch.setattr(client.Path, 'home', staticmethod(lambda: Path(home)))
+        client._save_state(root, {'resume_token': 'secret', 'server': 'https://api.ailinux.me'})
+        state_path = client._state_file(root)
+        assert state_path.exists()
+        assert oct(state_path.stat().st_mode & 0o777) == '0o600'
+        assert client._load_state(root)['resume_token'] == 'secret'
+        client._clear_state(root)
+        assert not state_path.exists()

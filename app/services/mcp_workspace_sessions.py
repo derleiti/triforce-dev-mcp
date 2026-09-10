@@ -406,6 +406,33 @@ def promote_session_pair_to_web_lease(
     return binding
 
 
+def _notify_workspace_paired(connection: Any, binding: dict[str, Any]) -> None:
+    if connection is None or bool(getattr(connection, "closed", True)):
+        return
+    websocket = getattr(connection, "websocket", None)
+    if websocket is None:
+        return
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "workspace/paired",
+        "params": {
+            "ok": True,
+            "state": "ready",
+            "lease_id": str(binding.get("lease_id") or ""),
+            "access_mode": str(binding.get("mode") or "read_only"),
+            "mode": str(binding.get("mode") or "read_only"),
+            "capabilities": list(binding.get("capabilities") or []),
+            "resume_token": str(binding.get("resume_token") or ""),
+        },
+    }
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(websocket.send_json(payload))
+    except Exception:
+        pass
+
+
 def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     """Authorize one MCP session alias for the browser workspace lease.
 
@@ -458,6 +485,7 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
         _persist_lease(item)
         if resume_token:
             binding["resume_token"] = resume_token
+        _notify_workspace_paired(connection, binding)
         return binding
 
     current = get_workspace(session_id)
@@ -481,6 +509,7 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     _persist_lease(item)
     if resume_token:
         binding["resume_token"] = resume_token
+    _notify_workspace_paired(connection, binding)
     return binding
 
 
