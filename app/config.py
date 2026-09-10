@@ -171,6 +171,15 @@ class Settings(BaseSettings):
     mcp_ws_port: int = Field(default=44433, validation_alias="MCP_WS_PORT")
     mcp_ws_enable_ipv6: bool = Field(default=False, validation_alias="MCP_WS_ENABLE_IPV6")
 
+    # Community federation / distributed compute. Community workers are always
+    # treated as untrusted and require an authenticated AILinux account.
+    federation_community_enabled: bool = Field(default=False, validation_alias="FEDERATION_COMMUNITY_ENABLED")
+    federation_community_allowed_tiers: str = Field(default="registered,pro,enterprise", validation_alias="FEDERATION_COMMUNITY_ALLOWED_TIERS")
+    federation_community_max_message_bytes: int = Field(default=262144, ge=4096, le=4194304, validation_alias="FEDERATION_COMMUNITY_MAX_MESSAGE_BYTES")
+    federation_community_max_task_bytes: int = Field(default=524288, ge=4096, le=8388608, validation_alias="FEDERATION_COMMUNITY_MAX_TASK_BYTES")
+    federation_community_max_models: int = Field(default=32, ge=1, le=256, validation_alias="FEDERATION_COMMUNITY_MAX_MODELS")
+    federation_community_mistral_audit_enabled: bool = Field(default=False, validation_alias="FEDERATION_COMMUNITY_MISTRAL_AUDIT_ENABLED")
+
     # GPT-OSS
     gpt_oss_api_key: str | None = Field(default=None, validation_alias="GPT_OSS_API_KEY")
     gpt_oss_base_url: AnyHttpUrl | None = Field(default=None, validation_alias="GPT_OSS_BASE_URL")

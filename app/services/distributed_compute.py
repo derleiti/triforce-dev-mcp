@@ -75,6 +75,10 @@ class ComputeTask:
 
     # Callback
     callback_id: Optional[str] = None
+    allow_community: bool = False
+    owner_id: Optional[str] = None
+    result_verified: bool = False
+    result_source_trust: str = "unknown"
 
     def is_expired(self) -> bool:
         """Prüft ob Task Timeout überschritten hat"""
@@ -118,10 +122,17 @@ class ConnectedClient:
 
     # Supported Models
     supported_models: List[str] = field(default_factory=list)
+    user_id: str = ""
+    tier: str = "guest"
+    trust_level: str = "community"
+    credits_pending: float = 0.0
+    metadata_audit: Dict[str, Any] = field(default_factory=dict)
 
     def can_handle(self, task: ComputeTask) -> bool:
         """Prüft ob Client diesen Task handlen kann"""
         if not self.is_available:
+            return False
+        if self.trust_level == "community" and not task.allow_community:
             return False
         if task.model_id not in self.supported_models:
             return False
@@ -215,6 +226,10 @@ class DistributedComputeManager:
         gpu_name: str = "",
         estimated_tflops: float = 0.0,
         supported_models: List[str] = None,
+        user_id: str = "",
+        tier: str = "guest",
+        trust_level: str = "community",
+        metadata_audit: Optional[Dict[str, Any]] = None,
     ) -> ConnectedClient:
         """Registriert einen neuen Compute-Client"""
         client = ConnectedClient(
@@ -224,6 +239,10 @@ class DistributedComputeManager:
             gpu_name=gpu_name,
             estimated_tflops=estimated_tflops,
             supported_models=supported_models or [],
+            user_id=user_id,
+            tier=tier,
+            trust_level=trust_level,
+            metadata_audit=metadata_audit or {},
         )
         self._clients[session_id] = client
 
@@ -268,6 +287,8 @@ class DistributedComputeManager:
         priority: TaskPriority = TaskPriority.NORMAL,
         timeout_seconds: float = 60.0,
         callback: Optional[Callable] = None,
+        allow_community: bool = False,
+        owner_id: Optional[str] = None,
     ) -> str:
         """Reicht einen neuen Task zur Verteilung ein"""
         task_id = secrets.token_urlsafe(16)
@@ -285,6 +306,8 @@ class DistributedComputeManager:
             priority=priority,
             timeout_seconds=timeout_seconds,
             callback_id=callback_id,
+            allow_community=allow_community,
+            owner_id=owner_id,
         )
 
         self._task_queue[task_id] = task
@@ -304,6 +327,8 @@ class DistributedComputeManager:
         model_id: str,
         batch_size: int = 10,
         priority: TaskPriority = TaskPriority.NORMAL,
+        allow_community: bool = False,
+        owner_id: Optional[str] = None,
     ) -> List[str]:
         """Reicht mehrere Items als Batch-Tasks ein"""
         task_ids = []
@@ -316,6 +341,8 @@ class DistributedComputeManager:
                 input_data=batch,
                 model_id=model_id,
                 priority=priority,
+                allow_community=allow_community,
+                owner_id=owner_id,
             )
             task_ids.append(task_id)
 
@@ -335,6 +362,9 @@ class DistributedComputeManager:
             "error": task.error,
             "created_at": task.created_at,
             "completed_at": task.completed_at,
+            "allow_community": task.allow_community,
+            "result_verified": task.result_verified,
+            "result_source_trust": task.result_source_trust,
         }
 
     async def get_task_result(self, task_id: str, wait: bool = True, timeout: float = 30.0) -> Optional[Any]:
@@ -509,12 +539,19 @@ class DistributedComputeManager:
         if success:
             task.status = TaskStatus.COMPLETED
             task.result = result
+            task.result_source_trust = client.trust_level
+            task.result_verified = client.trust_level != "community"
             self._stats["total_tasks_completed"] += 1
 
-            # Credits vergeben
+            # Community results are untrusted until a separate verification step.
+            # Keep credits pending so a malicious worker cannot earn final credit
+            # merely by returning arbitrary output.
             credits = self.TASK_CREDITS.get(task.task_type, 1.0)
-            client.credits_earned += credits
-            self._stats["total_credits_distributed"] += credits
+            if client.trust_level == "community":
+                client.credits_pending += credits
+            else:
+                client.credits_earned += credits
+                self._stats["total_credits_distributed"] += credits
 
             client.tasks_completed += 1
         else:
@@ -598,6 +635,7 @@ class DistributedComputeManager:
                 "session_id": c.session_id[:8] + "...",
                 "capability": c.capability,
                 "credits": round(c.credits_earned, 2),
+                "credits_pending": round(c.credits_pending, 2),
                 "tasks_completed": c.tasks_completed,
             }
             for c in clients
@@ -611,6 +649,7 @@ class DistributedComputeManager:
 
         return {
             "credits_earned": round(client.credits_earned, 2),
+            "credits_pending": round(client.credits_pending, 2),
             "tasks_completed": client.tasks_completed,
             "tasks_failed": client.tasks_failed,
             "total_compute_time": round(client.total_compute_time, 2),
