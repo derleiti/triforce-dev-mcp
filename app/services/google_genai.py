@@ -14,8 +14,11 @@ from ..config import get_settings
 
 logger = logging.getLogger("ailinux.google_genai")
 
-CANONICAL_KEY_ENV = "GEMINI_API_KEY"
-LEGACY_KEY_ENVS = ("GOOGLE_GEMINI_KEY",)
+CANONICAL_KEY_ENV = "GOOGLE_AI_STUDIO_KEY"
+# GEMINI_API_KEY / GOOGLE_GEMINI_KEY held a credential that Google rejects
+# with HTTP 401 on ListModels. GOOGLE_AI_STUDIO_KEY is the working AI Studio
+# credential and is now canonical; the old names stay as fallbacks only.
+LEGACY_KEY_ENVS = ("GEMINI_API_KEY", "GOOGLE_GEMINI_KEY")
 
 
 def resolve_api_key() -> str | None:
@@ -29,9 +32,10 @@ def resolve_api_key() -> str | None:
         return canonical
 
     settings = get_settings()
-    configured = getattr(settings, "gemini_api_key", None)
-    if configured:
-        return str(configured)
+    for attr in ("google_ai_studio_key", "gemini_api_key"):
+        configured = getattr(settings, attr, None)
+        if configured:
+            return str(configured)
 
     return next((value for name in LEGACY_KEY_ENVS if (value := os.getenv(name))), None)
 

@@ -179,6 +179,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
+            "GOOGLE_AI_STUDIO_KEY",
             "GEMINI_API_KEY",
             "GOOGLE_GEMINI_KEY",
         ),

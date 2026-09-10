@@ -393,7 +393,7 @@ async def _vision_proxy(model: str, prompt: str, image_url: Optional[str], image
 async def _image_fallback(req: ImageRequest, exclude_prefixes: tuple[str, ...] = ()) -> Optional[Dict[str, Any]]:
     """Try configured image providers when a selected provider is unavailable."""
     candidates: list[str] = []
-    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_GEMINI_KEY"):
+    if os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_GEMINI_KEY"):
         candidates.append("gemini/gemini-2.5-flash-image")
     if _openai_key():
         candidates.append("openai/gpt-image-1-mini")

@@ -452,6 +452,7 @@ class SettingsController:
         env_mapping = {
             "OLLAMA_BASE": "ollama_base_url",
             "OLLAMA_BEARER_TOKEN": "ollama_bearer_token",
+            "GOOGLE_AI_STUDIO_KEY": "gemini_api_key",
             "GEMINI_API_KEY": "gemini_api_key",
             "ANTHROPIC_API_KEY": "anthropic_api_key",
             "MISTRAL_API_KEY": "mistral_api_key",
