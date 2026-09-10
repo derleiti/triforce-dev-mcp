@@ -117,6 +117,47 @@ def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: s
     }
 
 
+def promote_session_pair_to_web_lease(
+    code: str, session_id: str, connection: Any, *, mode: str, task: str = "",
+    capabilities: list[str] | None = None,
+) -> dict[str, Any]:
+    """Promote a session-first browser pairing into a reusable shared lease.
+
+    This lets clients that cannot expose ``workspace_pair`` (notably ChatGPT)
+    bind through ``workspace_status`` + browser setup, while the same code can
+    subsequently authorize Telegram/Mistral or another MCP transport.
+    """
+    resolved = resolve_pair_code(code)
+    if resolved != session_id:
+        raise ValueError("Invalid or expired session pairing code")
+    key = _pair_key(code)
+    normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
+    now = time.time()
+    lease_id = uuid.uuid4().hex
+    _WEB_PAIR[key] = {
+        "code": str(code).strip().upper(),
+        "created_at": now,
+        "expires_at": now + RECONNECT_TTL_SECONDS,
+        "connection": connection,
+        "connection_id": id(connection),
+        "client_id": str(getattr(connection, "client_id", "")),
+        "mode": normalized_mode,
+        "task": str(task or "")[:4000],
+        "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
+        "paired_session_id": session_id,
+        "paired_session_ids": [session_id],
+        "lease_id": lease_id,
+        "helper_connected_at": now,
+    }
+    pair = _SESSION_PAIR.pop(session_id, None)
+    if pair:
+        _PAIR_INDEX.pop(key, None)
+    return bind_workspace(
+        session_id, connection, mode=normalized_mode, task=task, capabilities=capabilities,
+        reconnect_pair_key=key, lease_id=lease_id,
+    )
+
+
 def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     """Authorize one MCP session alias for the browser workspace lease.
 

@@ -289,6 +289,22 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
                 },
                 "isError": False,
             }
+        if sid:
+            from app.services.mcp_workspace_sessions import get_or_create_pair_code
+            code = get_or_create_pair_code(sid)
+            return {
+                "content": [{"type": "text", "text": (
+                    "No local workspace is paired. Open the TriForce MCP setup page, choose the folder and mode, "
+                    f"then connect it with this pairing ID: {code}"
+                )}],
+                "structuredContent": {
+                    "ok": False, "code": "WORKSPACE_REQUIRED", "connected": False,
+                    "pair_code": code,
+                    "setup_url": f"https://api.ailinux.me/v1/mcp?pair_code={code}",
+                    "procedure": "Open setup_url -> choose folder/mode -> connect. The page binds directly to this MCP session.",
+                },
+                "isError": False,
+            }
         return _workspace_required(request)
 
     if not binding:

@@ -72,8 +72,8 @@ async def test_workspace_status_tells_user_to_use_web_setup_page():
     req = DummyRequest('session-A')
     result = await call_public_local_tool(req, 'workspace_status', {})
     assert result['structuredContent']['code'] == 'WORKSPACE_REQUIRED'
-    assert result['structuredContent']['setup_url'] == 'https://api.ailinux.me/v1/mcp'
-    assert 'pair_code' not in result['structuredContent']
+    assert result['structuredContent']['setup_url'].startswith('https://api.ailinux.me/v1/mcp?pair_code=')
+    assert result['structuredContent']['pair_code']
 
 
 @pytest.mark.asyncio
@@ -286,3 +286,18 @@ def test_explicit_mcp_session_header_wins_over_connector_fallback():
         'x-openai-subject': 'u',
     })
     assert _logical_transport_session_id(req, 'protocol-session') == 'protocol-session'
+
+
+def test_session_pair_promotes_to_shared_web_lease():
+    code = sessions.get_or_create_pair_code('chatgpt-session')
+    conn = DummyConnection('browser-direct')
+    bound = sessions.promote_session_pair_to_web_lease(
+        code, 'chatgpt-session', conn, mode='write', capabilities=['file_read', 'file_edit']
+    )
+    assert bound['session_id'] == 'chatgpt-session'
+    assert sessions.resolve_pair_code(code) is None
+    assert sessions.pair_code_kind(code) == ('reconnect', 'chatgpt-session')
+    second = sessions.claim_waiting_workspace(code, 'mistral-session')
+    assert second['lease_id'] == bound['lease_id']
+    assert sessions.get_workspace('chatgpt-session')['client_id'] == 'browser-direct'
+    assert sessions.get_workspace('mistral-session')['client_id'] == 'browser-direct'

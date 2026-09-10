@@ -127,7 +127,7 @@ const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tre
 const WRITE_TOOLS=['file_edit','directory_create'];
 const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
 const MAX_TEXT=2*1024*1024;
-let pairCode=sessionStorage.getItem('tf_pair_code')||'',rootHandle=null,rootEntry=null,ws=null,workspaceMode=sessionStorage.getItem('tf_workspace_mode')||'read_only',capabilities=[],heartbeatTimer=null,watchdogTimer=null,reconnectTimer=null,reconnectAttempt=0,manualDisconnect=false,lastPongAt=0,workspaceAttached=false;
+const urlPair=(new URLSearchParams(location.search).get('pair_code')||'').trim().toUpperCase();let pairCode=urlPair||sessionStorage.getItem('tf_pair_code')||'',rootHandle=null,rootEntry=null,ws=null,workspaceMode=sessionStorage.getItem('tf_workspace_mode')||'read_only',capabilities=[],heartbeatTimer=null,watchdogTimer=null,reconnectTimer=null,reconnectAttempt=0,manualDisconnect=false,lastPongAt=0,workspaceAttached=false;if(urlPair){sessionStorage.setItem('tf_pair_code',urlPair);try{history.replaceState({},document.title,location.pathname)}catch{}}
 const directPicker=typeof window.showDirectoryPicker==='function';
 const android=/Android/i.test(navigator.userAgent),firefox=/Firefox\//i.test(navigator.userAgent);
 const persistentHandleStore=!android&&'indexedDB' in window;
