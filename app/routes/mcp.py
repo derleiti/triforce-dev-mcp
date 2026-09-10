@@ -120,7 +120,7 @@ def _workspace_setup_html() -> str:
 <p id="status" class="status">Choose a folder first.</p><pre id="analysis" class="muted"></pre></section>
 <section id="pairPanel" class="hidden"><h2 class="ok">2 · Workspace ready</h2><p>Paste this one-time ID into the ChatGPT, Codex or Mistral conversation that uses TriForce. The AI will call <code>workspace_pair</code> and bind this browser workspace to that MCP session.</p><div class="row"><input id="pair" class="pair mono" type="text" readonly value=""><button id="copyBtn">Copy ID</button></div><p class="muted">This ID expires after 15 minutes and is single-use.</p></section>
 <section><h2>Public MCP URL</h2><div class="row"><input id="mcpUrl" type="text" readonly value="https://api.ailinux.me/v1/mcp"><button id="copyMcp" class="secondary">Copy MCP URL</button></div><p class="muted">Safe cloud tools run on TriForce. Local file/code tools run only in this browser tab and only inside the selected folder.</p></section>
-<script>
+<script data-cfasync="false">
 'use strict';
 let pairCode='';
 const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tree','code_search','code_grep'];

@@ -42,6 +42,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'showDirectoryPicker' in html
     assert 'webkitdirectory' in html
     assert 'new WebSocket' in html
+    assert 'data-cfasync="false"' in html
     assert 'client_workspace_tool' in html
     assert 'triforce-workspace://' not in html
     assert 'id="pairPanel" class="hidden"' in html
