@@ -201,6 +201,15 @@ class Settings(BaseSettings):
     mistral_api_key: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
     mistral_organisation_id: str | None = Field(default=None, validation_alias="MISTRAL_ORG_ID")
     codestral_api_key: str | None = Field(default=None, validation_alias="CODESTRAL_API_KEY")
+    # Native Mistral Agents / Conversations API
+    mistral_agent_id: Optional[str] = Field(
+        default="ag:75b2b27f:20251006:untitled-agent:8f02c404",
+        validation_alias=AliasChoices("MISTRAL_AGENT_ID", "NOVA_MISTRAL_AGENT_ID"),
+    )
+    mistral_agent_version: Optional[int] = Field(default=5, validation_alias="MISTRAL_AGENT_VERSION")
+    mistral_agent_base_url: str = Field(default="https://api.mistral.ai", validation_alias="MISTRAL_AGENT_BASE_URL")
+    mistral_agent_timeout_seconds: int = Field(default=180, validation_alias="MISTRAL_AGENT_TIMEOUT_SECONDS")
+    mistral_agent_store: bool = Field(default=True, validation_alias="MISTRAL_AGENT_STORE")
 
     # Anthropic Claude
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")

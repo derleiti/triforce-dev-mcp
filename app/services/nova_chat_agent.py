@@ -81,6 +81,13 @@ class NovaChatAgentService:
             "capabilities": ["reasoning", "code_review", "long_context", "writing"],
             "use_cases": ["reviews", "architecture reasoning", "high-quality drafting"],
         },
+        "mistral": {
+            "id": "nova-agent/mistral",
+            "name": "Nova Mistral Native Agent",
+            "description": "Version-pinned Mistral Agent with persistent Conversations API state for reviews, research, and handoffs.",
+            "capabilities": ["code_review", "research", "persistent_context", "handoffs"],
+            "use_cases": ["independent final review", "stage handoffs", "long-running task review"],
+        },
     }
 
     def _resolve_provider_name(self, provider: str) -> str:
@@ -153,19 +160,19 @@ class NovaChatAgentService:
             )
 
         if provider == "mistral":
-            url = settings.nova_mistral_url
+            url = settings.mistral_agent_base_url or settings.nova_mistral_url
             user = settings.nova_mistral_user
             password = settings.nova_mistral_pass
-            agent_id = settings.nova_mistral_agent_id
-            if agent_id:
+            agent_id = settings.mistral_agent_id or settings.nova_mistral_agent_id
+            if settings.mistral_api_key and agent_id:
                 return NovaAccountProfile(
                     provider="mistral",
-                    route="internal_mcp_agent",
+                    route="mistral_agent_api",
                     agent_id=agent_id,
                     model=None,
                     url=url,
                     user=user,
-                    password_set=bool(password),
+                    password_set=True,
                     configured=True,
                 )
             return NovaAccountProfile(
@@ -176,7 +183,7 @@ class NovaChatAgentService:
                 url=url,
                 user=user,
                 password_set=bool(password or settings.mistral_api_key),
-                configured=bool(url or user or password or settings.mistral_api_key),
+                configured=bool(password or settings.mistral_api_key),
             )
 
         raise ValueError(f"Unsupported provider: {provider}")
@@ -278,6 +285,25 @@ class NovaChatAgentService:
                 "provider": profile.provider,
                 "route": profile.route,
                 "agent_id": profile.agent_id,
+                "response": result.get("response", ""),
+                "account": profile.to_public_dict(),
+            }
+
+        if profile.route == "mistral_agent_api":
+            from app.services.mistral_agent import mistral_agent_service
+            prompt = self._messages_to_agent_prompt(chat_messages)
+            completion_args = {"temperature": temperature, "max_tokens": max_tokens}
+            result = await mistral_agent_service.start(
+                prompt,
+                agent_id=profile.agent_id,
+                completion_args=completion_args,
+            )
+            return {
+                "provider": profile.provider,
+                "route": profile.route,
+                "agent_id": profile.agent_id,
+                "agent_version": get_settings().mistral_agent_version,
+                "conversation_id": result.get("conversation_id"),
                 "response": result.get("response", ""),
                 "account": profile.to_public_dict(),
             }

@@ -98,6 +98,7 @@ from .routes.client_logs import router as client_logs_router
 from .routes.client_ocr import router as client_ocr_router
 from .routes.federation import router as federation_router
 from .routes.nova_chat_agent import router as nova_chat_agent_router
+from .routes.mistral_agents import router as mistral_agents_router
 from .routes.remote_coding_agent import router as remote_coding_agent_router
 from .routes.nova_frontend import public_router as nova_frontend_public_router
 from .routes.nova_frontend import router as nova_frontend_router
@@ -462,6 +463,7 @@ def create_app() -> FastAPI:
     app.include_router(client_ocr_router, prefix="/v1", tags=["Client OCR"])
     app.include_router(federation_router, prefix="/v1", tags=["Federation"])
     app.include_router(nova_chat_agent_router, prefix="/v1", tags=["Nova Chat Agent"])
+    app.include_router(mistral_agents_router, prefix="/v1", tags=["Mistral Agents"])
     app.include_router(remote_coding_agent_router, prefix="/v1", tags=["Remote Coding Preview"])
     app.include_router(nova_frontend_public_router, prefix="/v1", tags=["Nova Frontend Public"])
     app.include_router(nova_frontend_router, prefix="/v1", tags=["Nova Frontend"])
