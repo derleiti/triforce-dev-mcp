@@ -450,13 +450,28 @@ def _jwt_has_full_mcp_access(payload: Dict[str, Any]) -> bool:
     return user in admin_ids
 
 
+PUBLIC_GUEST_MCP_PATHS = {
+    "/v1/mcp", "/v1/mcp/",
+    "/v1/mcp/sse", "/v1/mcp/sse/",
+    "/v1/mcp/messages", "/v1/mcp/messages/",
+    "/v1/mcp/stream", "/v1/mcp/stream/",
+    "/v1/sse", "/v1/sse/", "/v1/messages", "/v1/messages/",
+    "/mcp", "/mcp/", "/mcp/sse", "/mcp/sse/",
+}
+
+
+def _is_public_guest_mcp_path(path: str) -> bool:
+    return str(path or "") in PUBLIC_GUEST_MCP_PATHS
+
+
 async def require_mcp_auth(request: Request) -> str:
     """
     Unified MCP authentication.
 
-    Authentication is required by default for every MCP request. A local-only
-    bypass exists solely as an explicit compatibility switch and only applies
-    to loopback clients without forwarding headers.
+    Existing credentials retain their normal authorization semantics. Exact MCP
+    transport endpoints also permit a credential-less ``public_guest`` profile;
+    this profile never receives ``internal_full`` and remains subject to the
+    external MCP allowlist plus session-scoped local-workspace routing.
     """
     client_ip = request.client.host if request.client else "unknown"
     auth_header = request.headers.get("Authorization", "")
@@ -488,6 +503,19 @@ async def require_mcp_auth(request: Request) -> str:
         "AUTH_CHECK | IP: %s | X-Fwd-Port: %s | X-Fwd-For: %s",
         client_ip, forwarded_port or "none", forwarded_for or "none",
     )
+
+    # No credentials on the canonical MCP transport means public guest. Never
+    # downgrade invalid/partial credentials to guest: if a credential was sent,
+    # the normal authentication branches below must validate it.
+    x_mcp_token = request.headers.get("X-MCP-Token", "").strip()
+    has_credentials = bool(auth_header.strip() or query_token or x_mcp_token)
+    if not has_credentials and _is_public_guest_mcp_path(request.url.path):
+        request.state.mcp_auth_user = "public_guest"
+        request.state.mcp_auth_method = "public_guest"
+        request.state.mcp_auth_full_access = False
+        request.state.mcp_auth_client_id = None
+        logger.debug("AUTH_OK | IP: %s | Method: public_guest", client_ip)
+        return "public_guest"
     
     if not MCP_AUTH_USER or not MCP_AUTH_PASS:
         logger.error("AUTH_ERROR | MCP_OAUTH_USER/PASS not configured")

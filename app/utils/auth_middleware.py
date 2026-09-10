@@ -23,6 +23,7 @@ from .mcp_auth import (
     _extract_basic_auth,
     MCP_AUTH_USER,
     MCP_AUTH_PASS,
+    _is_public_guest_mcp_path,
 )
 
 logger = logging.getLogger("ailinux.auth.middleware")
@@ -113,6 +114,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 or request.query_params.get("token")
                 or ""
             ).strip()
+
+        # Exact MCP transport endpoints are publishable without credentials.
+        # If any credential is supplied, keep the existing validation path so an
+        # invalid admin/user credential can never silently become public_guest.
+        if (
+            _is_public_guest_mcp_path(path)
+            and not auth_header.strip()
+            and not x_mcp_token
+            and not query_token
+        ):
+            logger.debug(f"AUTH_OK | IP: {client_ip} | X-Fwd-Port: {forwarded_port} | Method: public_guest_passthrough")
+            return await call_next(request)
 
         # Check if auth is configured
         if not MCP_AUTH_USER or not MCP_AUTH_PASS:

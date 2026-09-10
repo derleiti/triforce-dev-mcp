@@ -339,9 +339,23 @@ async def websocket_connect(
     """
     await websocket.accept()
     
-    # Mode aus Query-Param
+    # mode=workspace is an anonymous, session-paired local executor. It never
+    # represents an account and can expose only client_workspace_tool.
     mode = websocket.query_params.get("mode", "full")
     is_telemetry_only = mode == "telemetry"
+    is_workspace_node = mode == "workspace"
+    pair_code = str(websocket.query_params.get("pair_code") or "").strip()
+    paired_mcp_session = None
+    if is_workspace_node:
+        try:
+            from app.services.mcp_workspace_sessions import resolve_pair_code
+            paired_mcp_session = resolve_pair_code(pair_code)
+        except Exception:
+            paired_mcp_session = None
+        if not paired_mcp_session:
+            await websocket.send_json({"error": "Invalid or expired workspace pairing code"})
+            await websocket.close(code=4003)
+            return
     
     logger.info(f"WebSocket connecting: mode={mode}, session={session_id}, tier={tier}")
 
@@ -365,8 +379,8 @@ async def websocket_connect(
                 await websocket.send_json({"error": f"Invalid token: {e}"})
                 await websocket.close(code=4001)
                 return
-    elif not is_telemetry_only:
-        # Full-Mode ohne Token: Ablehnen
+    elif not is_telemetry_only and not is_workspace_node:
+        # Existing full mode remains authenticated exactly as before.
         logger.error("WebSocket rejected: Token required for full mode")
         await websocket.send_json({"error": "Token required"})
         await websocket.close(code=4001)
@@ -374,12 +388,12 @@ async def websocket_connect(
 
     # Client-ID aus Token, Session oder generieren
     if not authenticated:
-        # Anonymous telemetry must never reserve a user-controlled alias or owner.
+        # Anonymous modes must never reserve a user-controlled account/session alias.
         session_id = None
     client_id = payload.get("client_id") or session_id or str(uuid.uuid4())
     
     # Ownership and tier come from authenticated server state, never query claims.
-    resolved_user_id = payload.get("sub") or client_id
+    resolved_user_id = (f"workspace:{paired_mcp_session[:12]}" if is_workspace_node and paired_mcp_session else (payload.get("sub") or client_id))
     resolved_tier = tier_service.get_user_tier(resolved_user_id) if authenticated else UserTier.GUEST
 
     aliases = {client_id}
@@ -395,7 +409,7 @@ async def websocket_connect(
 
     # Client-Verbindung registrieren
     connection = ClientConnection(client_id, resolved_user_id, websocket, resolved_tier)
-    connection.mode = "telemetry_only" if is_telemetry_only else "full"
+    connection.mode = "telemetry_only" if is_telemetry_only else ("workspace" if is_workspace_node else "full")
     CONNECTED_CLIENTS[client_id] = connection
     
     # Auch unter Session-ID registrieren für schnellen Lookup
@@ -414,7 +428,7 @@ async def websocket_connect(
                 "session_id": session_id,
                 "user_id": resolved_user_id,
                 "tier": resolved_tier.value,
-                "available_tools": list(CLIENT_SIDE_TOOLS.keys()),
+                "available_tools": (["client_workspace_tool"] if is_workspace_node else list(CLIENT_SIDE_TOOLS.keys())),
                 "server_version": "2.80.0"
             }
         })
@@ -442,8 +456,33 @@ async def websocket_connect(
 
             # Tool-Capabilities vom Client?
             elif data.get("method") == "tools/list":
-                connection.supported_tools = data.get("params", {}).get("tools", [])
+                advertised = data.get("params", {}).get("tools", [])
+                if not isinstance(advertised, list):
+                    advertised = []
+                connection.supported_tools = (
+                    ["client_workspace_tool"] if is_workspace_node and "client_workspace_tool" in advertised
+                    else ([] if is_workspace_node else advertised)
+                )
                 logger.info(f"Client {client_id} supports {len(connection.supported_tools)} tools")
+
+            elif data.get("method") == "workspace/share" and is_workspace_node:
+                if "client_workspace_tool" not in connection.supported_tools:
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": False, "error": "client_workspace_tool must be advertised first"}})
+                    continue
+                share = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
+                from app.services.mcp_workspace_sessions import bind_workspace
+                binding = bind_workspace(
+                    str(paired_mcp_session), connection,
+                    mode=str(share.get("mode") or "read_only"),
+                    task=str(share.get("task") or ""),
+                )
+                logger.info("Local workspace paired | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
+                await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": binding["mode"]}})
+
+            elif data.get("method") == "workspace/revoke" and is_workspace_node:
+                from app.services.mcp_workspace_sessions import unbind_connection
+                unbind_connection(connection)
+                await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/revoked", "params": {"ok": True}})
 
             # Telemetrie: Tool-Nutzung empfangen (für Debugging)
             elif data.get("method") == "telemetry/tool_used":
@@ -483,6 +522,12 @@ async def websocket_connect(
     finally:
         # Alle Referenzen entfernen
         connection.disconnect()
+        if is_workspace_node:
+            try:
+                from app.services.mcp_workspace_sessions import unbind_connection
+                unbind_connection(connection)
+            except Exception:
+                pass
         for alias in aliases:
             if CONNECTED_CLIENTS.get(alias) is connection:
                 CONNECTED_CLIENTS.pop(alias, None)

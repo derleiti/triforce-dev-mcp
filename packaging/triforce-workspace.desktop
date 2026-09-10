@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TriForce Local Workspace
+Comment=Pair a local folder with the public TriForce MCP
+Exec=triforce-workspace-gui --pair-url %u
+Icon=triforce-control-center
+Terminal=false
+Categories=Development;Utility;
+MimeType=x-scheme-handler/triforce-workspace;

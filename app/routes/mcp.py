@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 import json
 
 from fastapi import APIRouter, Depends, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from ..config import VERSION
 
 # Crawler imports are loaded lazily inside handlers to avoid heavy startup imports and optional dependencies (playwright).
@@ -89,6 +89,34 @@ mcp_logger = logging.getLogger("ailinux.mcp")
 
 router = APIRouter(dependencies=[Depends(require_mcp_auth)])
 public_router = APIRouter()
+
+
+def _mcp_instructions_for_request(request: Request) -> str:
+    try:
+        from app.services.mcp_workspace_bridge import is_public_guest, public_instructions
+        if is_public_guest(request):
+            return public_instructions(request)
+    except Exception:
+        pass
+    return build_mcp_instructions()
+
+
+def _workspace_setup_html() -> str:
+    return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TriForce MCP · Local Workspace</title>
+<style>
+:root{color-scheme:dark}body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0}main{max-width:820px;margin:7vh auto;padding:28px}section{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:24px;margin:18px 0}h1{font-size:2rem;margin:.2rem 0}p{line-height:1.55;color:#b8c1cc}.ok{color:#63d471}.muted{color:#8b949e}code,input{font-family:ui-monospace,monospace}input{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:12px;border-radius:8px;font-size:1rem}button{background:#238636;color:white;border:0;border-radius:8px;padding:11px 16px;font-weight:600;cursor:pointer}.row{display:flex;gap:10px;align-items:center}.row input{flex:1}.pill{display:inline-block;background:#1f6feb22;border:1px solid #1f6feb;padding:5px 10px;border-radius:999px;color:#79c0ff}
+</style></head><body><main>
+<span class="pill">AILinux · TriForce MCP</span><h1>Connect a local workspace</h1>
+<p>The public MCP endpoint is <code>https://api.ailinux.me/v1/mcp</code>. ChatGPT, Codex, Mistral and other MCP clients use this fixed URL. No TriForce account is required for the public profile.</p>
+<section><h2>1 · Connect TriForce in your AI client</h2><p>Use exactly:</p><div class="row"><input id="mcp" readonly value="https://api.ailinux.me/v1/mcp"><button onclick="navigator.clipboard.writeText(document.getElementById('mcp').value)">Copy</button></div></section>
+<section><h2>2 · Ask TriForce for a pairing code</h2><p>In ChatGPT/Codex, ask it to use <code>workspace_status</code>. TriForce returns a short code tied to that MCP session.</p></section>
+<section><h2>3 · Pair your local folder</h2><p>Start the TriForce Local Workspace helper, choose the folder, select <strong>Read only</strong> or <strong>Write</strong>, enter the pairing code and press Start. Only that folder is exposed; shell/test execution is sandboxed locally.</p>
+<label for="pair" class="muted">Pairing code</label><div class="row"><input id="pair" placeholder="ABCD-EF12-3456-789A-BCDE-F012"><button onclick="launch()">Open helper</button></div><p id="hint" class="muted"></p></section>
+<section><h2 class="ok">TriForce stays one MCP</h2><p>Cloud tools run on TriForce. File, code, Git, shell, lint and test tools transparently run on the paired computer. Existing authenticated/admin access keeps its current permissions.</p></section>
+<script>function launch(){const c=document.getElementById('pair').value.trim();if(!c){document.getElementById('hint').textContent='Enter the pairing code shown by TriForce first.';return;}location.href='triforce-workspace://pair?code='+encodeURIComponent(c);document.getElementById('hint').textContent='If the helper did not open, start TriForce Local Workspace manually and enter: '+c;}</script>
+</main></body></html>"""
 
 
 def _build_tool_result(result: Any, *, is_error: bool = False) -> Dict[str, Any]:
@@ -184,6 +212,12 @@ def _finish_tools_list(
         annotations.setdefault("readOnlyHint", is_readonly_tool(str(decorated.get("name") or "")))
         decorated["annotations"] = annotations
         filtered_tools.append(decorated)
+    if request is not None:
+        try:
+            from app.services.mcp_workspace_bridge import merge_public_workspace_tools
+            filtered_tools = merge_public_workspace_tools(filtered_tools, request)
+        except Exception as exc:
+            mcp_logger.warning("Public workspace tool merge failed: %s", exc)
     result: Dict[str, Any] = {
         "tools": filtered_tools,
         "version": version,
@@ -1575,7 +1609,7 @@ async def handle_initialize(params: Dict[str, Any], request: Optional[Request] =
             "prompts": {},
             "resources": {},
         },
-        "instructions": build_mcp_instructions(),
+        "instructions": (_mcp_instructions_for_request(request) if request is not None else build_mcp_instructions()),
     }
 
 
@@ -2353,6 +2387,13 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     requested_tool_name = params.get("name")
     tool_name = requested_tool_name
     arguments = params.get("arguments", {})
+
+    if request is not None and tool_name:
+        from app.services.mcp_workspace_bridge import LOCAL_TOOL_NAMES, is_public_guest, call_public_local_tool
+        if is_public_guest(request) and str(tool_name) in LOCAL_TOOL_NAMES:
+            return await call_public_local_tool(
+                request, str(tool_name), arguments if isinstance(arguments, dict) else {}
+            )
 
     # Resolve unified registry aliases before legacy/v4 normalization.
     from ..mcp.tool_registry_unified import resolve_tool_name_for_call
@@ -3792,6 +3833,30 @@ def _get_session(session_id: str) -> Dict[str, TypingAny]:
     return _mcp_sessions[session_id]
 
 
+def _store_session_request_state(session: Dict[str, TypingAny], request: Request) -> None:
+    state = request.state
+    session["auth_user"] = getattr(state, "mcp_auth_user", None)
+    session["auth_method"] = getattr(state, "mcp_auth_method", None)
+    session["auth_full_access"] = bool(getattr(state, "mcp_auth_full_access", False))
+    session["auth_client_id"] = getattr(state, "mcp_auth_client_id", None)
+
+
+def _restore_session_request_state(session: Dict[str, TypingAny], request: Request) -> None:
+    request.state.mcp_auth_user = session.get("auth_user")
+    request.state.mcp_auth_method = session.get("auth_method")
+    request.state.mcp_auth_full_access = bool(session.get("auth_full_access", False))
+    request.state.mcp_auth_client_id = session.get("auth_client_id")
+
+
+def _clear_mcp_session(session_id: str) -> None:
+    _mcp_sessions.pop(session_id, None)
+    try:
+        from app.services.mcp_workspace_sessions import clear_session
+        clear_session(session_id)
+    except Exception:
+        pass
+
+
 def _cleanup_old_sessions():
     """Remove sessions older than 1 hour"""
     now = dt_datetime.now()
@@ -3800,7 +3865,7 @@ def _cleanup_old_sessions():
         if (now - data["created"]).total_seconds() > 3600
     ]
     for sid in expired:
-        del _mcp_sessions[sid]
+        _clear_mcp_session(sid)
 
 
 # ============================================================================
@@ -3810,14 +3875,12 @@ def _cleanup_old_sessions():
 @router.get("/mcp", tags=["MCP"], summary="MCP health check or SSE endpoint")
 @router.get("/mcp/", tags=["MCP"], summary="MCP health check or SSE endpoint")
 async def mcp_health_or_sse(request: Request):
-    """
-    MCP Health Check or redirect to SSE.
-    - If Accept: text/event-stream → redirect to /sse
-    - Otherwise → return JSON health info
-    """
+    """MCP transport for machines, setup page for ordinary browser GET requests."""
     await require_mcp_auth(request)
 
     accept_header = request.headers.get("Accept", "")
+    if "text/html" in accept_header and "text/event-stream" not in accept_header:
+        return HTMLResponse(_workspace_setup_html(), headers={"Cache-Control": "no-store"})
     client_ip = request.client.host if request.client else "unknown"
 
     if "text/event-stream" in accept_header:
@@ -3880,7 +3943,7 @@ async def mcp_health_or_sse(request: Request):
                 "sse": "/v1/mcp/sse",
                 "messages": "/v1/mcp/messages"
             },
-            "instructions": build_mcp_instructions()
+            "instructions": _mcp_instructions_for_request(request)
         }
     })
 
@@ -3928,8 +3991,10 @@ async def mcp_sse_connect(request: Request):
 
     # Create session with response queue
     session = _get_session(session_id)
+    _store_session_request_state(session, request)
     session["authenticated"] = True
     session["last_seen"] = datetime.now(timezone.utc)
+    request.state.mcp_session_id = session_id
 
     mcp_logger.info(f"SSE_CONNECT | IP: {client_ip} | Session: {session_id}")
 
@@ -3980,7 +4045,7 @@ async def mcp_sse_connect(request: Request):
         finally:
             # Cleanup session on disconnect
             if session_id in _mcp_sessions:
-                del _mcp_sessions[session_id]
+                _clear_mcp_session(session_id)
 
     return StreamingResponse(
         event_generator(),
@@ -4033,9 +4098,11 @@ async def mcp_messages_handler(request: Request, session_id: Optional[str] = Non
     # The initial GET /v1/mcp/sse is authenticated and creates the session.
     # Some MCP clients do not resend Authorization on POST /messages.
     if session and session.get("authenticated"):
+        _restore_session_request_state(session, request)
         session["last_seen"] = datetime.now(timezone.utc)
     else:
         await require_mcp_auth(request)
+    request.state.mcp_session_id = session_id or ""
 
     mcp_logger.info(f"MCP_MESSAGE | IP: {client_ip} | Session: {session_id or 'none'}")
 
@@ -4079,7 +4146,7 @@ async def mcp_messages_handler(request: Request, session_id: Optional[str] = Non
                     "prompts": {"listChanged": True},
                     "resources": {"listChanged": True}
                 },
-                "instructions": build_mcp_instructions()
+                "instructions": _mcp_instructions_for_request(request)
             }
             response = {"jsonrpc": "2.0", "result": result, "id": req_id}
 
@@ -4238,7 +4305,7 @@ async def _process_mcp_request(
                 "prompts": {"listChanged": True},
                 "resources": {"listChanged": True}
             },
-            "instructions": build_mcp_instructions()
+            "instructions": _mcp_instructions_for_request(request)
         }
         latency_ms = (_time.time() - start_time) * 1000
         await multi_logger.log_mcp(method, params, result, latency_ms)
@@ -4326,6 +4393,29 @@ async def mcp_unified_endpoint(request: Request):
             status_code=400
         )
 
+    # Establish the Streamable HTTP session before initialize is processed so
+    # public workspace pairing belongs to this exact ChatGPT/Codex MCP session.
+    is_initialize = (
+        isinstance(body, dict) and body.get("method") == "initialize"
+    ) or (
+        isinstance(body, list) and any(isinstance(item, dict) and item.get("method") == "initialize" for item in body)
+    )
+    response_headers: Dict[str, str] = {}
+    if is_initialize and not session_id:
+        session_id = str(uuid.uuid4()).replace("-", "")
+        session = _get_session(session_id)
+        _store_session_request_state(session, request)
+        response_headers["Mcp-Session-Id"] = session_id
+        _log.info(f"MCP_SESSION_CREATED | Session: {session_id}")
+    elif session_id and session_id in _mcp_sessions:
+        session = _mcp_sessions[session_id]
+        # Public guest requests are credential-less; preserve the original
+        # session profile. Authenticated requests keep their freshly validated state.
+        if getattr(request.state, "mcp_auth_method", None) == "public_guest" and session.get("auth_method"):
+            _restore_session_request_state(session, request)
+        session["last_seen"] = datetime.now(timezone.utc)
+    request.state.mcp_session_id = session_id or ""
+
     # Handle batch requests (JSON array)
     if isinstance(body, list):
         responses = []
@@ -4348,23 +4438,13 @@ async def mcp_unified_endpoint(request: Request):
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
             )
 
-        return JSONResponse(content=responses)
+        return JSONResponse(content=responses, headers=response_headers)
 
     # Single request
     response = await _process_mcp_request(body, request, session_id)
 
     if response is None:
         return Response(status_code=202)  # Notification acknowledged
-
-    # Generate session ID for initialize if not provided
-    method = body.get("method")
-    response_headers = {}
-
-    if method == "initialize" and not session_id:
-        new_session_id = str(uuid.uuid4()).replace("-", "")
-        _get_session(new_session_id)  # Create session
-        response_headers["Mcp-Session-Id"] = new_session_id
-        _log.info(f"MCP_SESSION_CREATED | Session: {new_session_id}")
 
     # Return streaming response if requested
     if wants_streaming:
@@ -4467,7 +4547,7 @@ async def mcp_delete_session(request: Request):
         )
 
     if session_id in _mcp_sessions:
-        del _mcp_sessions[session_id]
+        _clear_mcp_session(session_id)
         mcp_logger.info(f"MCP_SESSION_DELETED | Session: {session_id}")
         return JSONResponse(content={"status":"deleted"}, status_code=200)
 
