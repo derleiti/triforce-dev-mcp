@@ -1,0 +1,23 @@
+[Unit]
+Description=Nova Flarum Bot - forum polling daemon
+Documentation=https://ailinux.me/docs/triforce
+After=network-online.target triforce.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zombie
+Group=zombie
+WorkingDirectory=/home/zombie/triforce
+EnvironmentFile=/etc/nova/flarum-bot.env
+ExecStart=/home/zombie/triforce/.venv/bin/python /home/zombie/triforce/scripts/tools/nova_flarum_bot.py
+StateDirectory=nova-flarum-bot
+StateDirectoryMode=0750
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nova-flarum-bot
+
+[Install]
+WantedBy=multi-user.target

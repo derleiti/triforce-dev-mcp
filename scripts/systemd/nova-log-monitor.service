@@ -1,0 +1,23 @@
+[Unit]
+Description=Nova Log Monitor - global system log watcher
+Documentation=https://ailinux.me/docs/triforce
+After=network-online.target triforce.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zombie
+Group=zombie
+WorkingDirectory=/home/zombie/triforce
+EnvironmentFile=/etc/nova/log-monitor.env
+ExecStart=/home/zombie/triforce/.venv/bin/python /home/zombie/triforce/scripts/tools/nova_log_monitor.py
+StateDirectory=nova-log-monitor
+StateDirectoryMode=0750
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nova-log-monitor
+
+[Install]
+WantedBy=multi-user.target
