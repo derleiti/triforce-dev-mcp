@@ -23,7 +23,7 @@ BROWSER_READ_TOOLS = {
     "workspace_info", "file_read", "file_tree", "code_read", "code_tree",
     "code_search", "code_grep",
 }
-BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {"file_edit", "directory_create"}
+BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {"file_edit", "directory_create", "workspace_clear"}
 READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS
 WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS
 LOCAL_TOOL_NAMES = WRITE_TOOLS
@@ -144,6 +144,12 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "description": "Create a directory inside the paired browser workspace when Write access is enabled.",
         "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "workspace_token": {"type": "string"}}, "required": ["path"]},
         "annotations": {"readOnlyHint": False},
+    },
+    {
+        "name": "workspace_clear",
+        "description": "Delete every file and subdirectory inside the paired browser workspace while preserving the workspace root itself. Requires Write access and confirm=DELETE_ALL.",
+        "inputSchema": {"type": "object", "properties": {"confirm": {"type": "string", "enum": ["DELETE_ALL"]}, "workspace_token": {"type": "string"}}, "required": ["confirm"]},
+        "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
     },
 ]
 
