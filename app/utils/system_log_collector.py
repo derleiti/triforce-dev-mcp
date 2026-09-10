@@ -229,6 +229,19 @@ class SystemLogCollector:
             error_logger.addHandler(self._error_handler)
 
         for line in log_content.split("\n"):
+            # A line that carries an explicit level field decides by that level.
+            # Keyword matching alone misfires on the logger NAME: "uvicorn.error"
+            # contains the word "error", so every startup line was stored as ERROR.
+            level_match = re.search(
+                r"\|\s*(DEBUG|INFO|NOTICE|WARNING|WARN|ERROR|CRITICAL|FATAL)\s*\|",
+                line,
+            )
+            if level_match:
+                if level_match.group(1).upper() in ("ERROR", "CRITICAL", "FATAL"):
+                    error_logger.error(f"[{source}] {line.strip()}")
+                continue
+
+            # No structured level present -> fall back to keyword heuristics.
             for pattern in error_patterns:
                 if re.search(pattern, line):
                     # Log to error.log via the error handler

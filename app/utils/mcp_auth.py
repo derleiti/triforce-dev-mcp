@@ -98,14 +98,32 @@ _AUTH_CODE_TTL = 300  # 5 minutes
 _DEFAULT_TOKEN_EXPIRY_DAYS = 365
 
 
-def _load_persistent_tokens():
-    """Load tokens from disk."""
-    global _PERSISTENT_TOKENS
+# Fingerprint (mtime_ns, size) of the token file as of the last successful load.
+# Used to skip re-reading an unchanged file on every auth check.
+_TOKEN_FILE_STAMP: Optional[tuple] = None
+
+
+def _load_persistent_tokens(force: bool = False):
+    """Load tokens from disk.
+
+    Called on every auth check, so an unchanged file is not re-read and
+    re-parsed each time. Any write to the file changes (mtime_ns, size)
+    and is picked up on the very next call, so a revoked token still takes
+    effect immediately. Pass force=True to bypass the check.
+    """
+    global _PERSISTENT_TOKENS, _TOKEN_FILE_STAMP
     try:
-        if _TOKEN_FILE.exists():
-            _PERSISTENT_TOKENS = json.loads(_TOKEN_FILE.read_text())
-            logger.debug(f"Loaded {len(_PERSISTENT_TOKENS)} persistent tokens")
+        if not _TOKEN_FILE.exists():
+            return
+        st = _TOKEN_FILE.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+        if not force and stamp == _TOKEN_FILE_STAMP:
+            return
+        _PERSISTENT_TOKENS = json.loads(_TOKEN_FILE.read_text())
+        _TOKEN_FILE_STAMP = stamp
+        logger.debug(f"Loaded {len(_PERSISTENT_TOKENS)} persistent tokens")
     except Exception as e:
+        _TOKEN_FILE_STAMP = None
         logger.warning(f"Could not load tokens: {e}")
 
 
