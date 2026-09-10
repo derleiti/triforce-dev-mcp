@@ -213,12 +213,12 @@ def public_instructions(request: Request) -> str:
     status = get_workspace_lease(sid)
     if status:
         capabilities = ", ".join(status.get("capabilities") or []) or "none"
-        state = status.get("state", "connected")
+        state = status.get("state", "ready")
         return (
             "This is the public TriForce MCP. Safe TriForce cloud tools execute on the server. "
             "The user paired a browser-selected local workspace; only its advertised browser capabilities execute locally. "
-            f"Workspace state: {state}. Access mode: {status['mode']}. Local capabilities: {capabilities}. "
-            + ("The browser transport is temporarily suspended but the lease is still valid and reconnectable. " if state == "suspended" else "")
+            f"Workspace lease state: {state}. Executor transport: {status.get('transport_state', 'offline')}. Access mode: {status['mode']}. Local capabilities: {capabilities}. "
+            + ("The logical workspace session remains ready; only the local browser executor is offline. " if status.get("transport_state") == "offline" else "")
             + f"User task: {status.get('task') or 'follow the current user request'}."
         )
     return (
@@ -237,10 +237,10 @@ def _workspace_required(request: Request) -> Dict[str, Any]:
             "isError": True,
         }
     status = lease_status(effective_sid)
-    if status.get("state") == "suspended":
+    if status.get("state") == "ready" and status.get("transport_state") == "offline":
         return {
-            "content": [{"type": "text", "text": "The local workspace lease is still paired, but the browser transport is temporarily suspended. Reopen the workspace page; it can reconnect with the same pairing ID."}],
-            "structuredContent": {"ok": False, "code": "WORKSPACE_SUSPENDED", **status},
+            "content": [{"type": "text", "text": "The workspace session is ready, but the local browser executor is offline. Reopen the workspace page to resume the executor transport."}],
+            "structuredContent": {"ok": False, "code": "WORKSPACE_TRANSPORT_OFFLINE", **status},
             "isError": False,
         }
     text = (
@@ -269,12 +269,14 @@ def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
 def _workspace_binding_response(binding: Dict[str, Any], *, token: str = "") -> Dict[str, Any]:
     connection = binding.get("connection")
     live = connection is not None and not bool(getattr(connection, "closed", True))
-    state = "connected" if live else "suspended"
     data = {
         "ok": True,
-        "state": state,
-        "connected": live,
-        "suspended": not live,
+        "state": "ready",
+        "lease_state": "ready",
+        "connected": True,
+        "transport_state": "online" if live else "offline",
+        "executor_online": live,
+        "suspended": False,
         "reconnectable": True,
         "access_mode": binding.get("mode", "read_only"),
         "mode": binding.get("mode", "read_only"),  # compatibility
@@ -288,9 +290,9 @@ def _workspace_binding_response(binding: Dict[str, Any], *, token: str = "") -> 
     elif binding.get("resume_token"):
         data["workspace_token"] = binding["resume_token"]
     text = (
-        f"Browser workspace connected with {data['access_mode']} access."
+        f"Workspace session ready with {data['access_mode']} access; local executor transport is online."
         if live else
-        f"Workspace lease is paired with {data['access_mode']} access; browser transport is suspended and may reconnect with the same ID."
+        f"Workspace session ready with {data['access_mode']} access; local executor transport is offline and may resume."
     )
     return {"content": [{"type": "text", "text": text}], "structuredContent": data, "isError": False}
 
@@ -438,12 +440,14 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
 
     if not binding:
         return _workspace_required(request)
-    if binding.get("state") == "suspended" or binding.get("connection") is None:
+    if binding.get("connection") is None or binding.get("transport_state") == "offline":
         return {
-            "content": [{"type": "text", "text": "Workspace lease is paired but the browser transport is suspended. Reopen the workspace page; the same lease will reconnect."}],
+            "content": [{"type": "text", "text": "Workspace session is ready, but the local browser executor transport is offline. Reopen the workspace page to resume local execution."}],
             "structuredContent": {
-                "ok": False, "code": "WORKSPACE_SUSPENDED", "state": "suspended",
-                "connected": False, "suspended": True, "reconnectable": True,
+                "ok": False, "code": "WORKSPACE_TRANSPORT_OFFLINE",
+                "state": "ready", "lease_state": "ready", "connected": True,
+                "transport_state": "offline", "executor_online": False,
+                "suspended": False, "reconnectable": True,
                 "access_mode": binding.get("mode", "read_only"), "mode": binding.get("mode", "read_only"),
                 "lease_id": binding.get("lease_id", ""),
                 "capabilities": list(binding.get("capabilities") or []),

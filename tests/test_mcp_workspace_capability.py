@@ -124,8 +124,8 @@ def test_same_pairing_id_reconnects_same_session_after_suspend():
     sessions.claim_waiting_workspace(code, 'session-A')
     sessions.suspend_connection(first)
     status = sessions.workspace_status('session-A')
-    assert status['connected'] is False
-    assert status['suspended'] is True
+    assert status['connected'] is True
+    assert status['suspended'] is False
     assert sessions.pair_code_kind(code) == ('reconnect', 'session-A')
     second = DummyConnection('mobile-2')
     resumed = sessions.reconnect_web_workspace(code, second, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
@@ -368,9 +368,9 @@ def test_workspace_status_distinguishes_suspended_from_unpaired():
     sessions.suspend_connection(conn)
 
     status = sessions.workspace_status('session-A')
-    assert status['state'] == 'suspended'
-    assert status['connected'] is False
-    assert status['suspended'] is True
+    assert status['state'] == 'ready'
+    assert status['connected'] is True
+    assert status['suspended'] is False
     assert status['reconnectable'] is True
     assert status['access_mode'] == 'write'
     assert status['mode'] == 'write'
@@ -385,12 +385,15 @@ def test_suspended_workspace_can_authorize_new_transport_alias_with_same_code():
 
     second = sessions.claim_waiting_workspace(code, 'mistral-B')
     assert second['lease_id'] == first['lease_id']
-    assert sessions.workspace_status('mistral-B')['state'] == 'suspended'
+    assert sessions.workspace_status('mistral-B')['state'] == 'ready'
+    assert sessions.workspace_status('mistral-B')['transport_state'] == 'offline'
 
     replacement = DummyConnection('mobile-alias-reconnected')
     sessions.reconnect_web_workspace(code, replacement, mode='write', capabilities=['code_tree'])
-    assert sessions.workspace_status('chatgpt-A')['state'] == 'connected'
-    assert sessions.workspace_status('mistral-B')['state'] == 'connected'
+    assert sessions.workspace_status('chatgpt-A')['state'] == 'ready'
+    assert sessions.workspace_status('chatgpt-A')['transport_state'] == 'online'
+    assert sessions.workspace_status('mistral-B')['state'] == 'ready'
+    assert sessions.workspace_status('mistral-B')['transport_state'] == 'online'
     assert sessions.get_workspace('chatgpt-A')['client_id'] == 'mobile-alias-reconnected'
     assert sessions.get_workspace('mistral-B')['client_id'] == 'mobile-alias-reconnected'
 
@@ -405,8 +408,9 @@ async def test_bridge_reports_workspace_suspended_instead_of_required():
 
     req = DummyRequest('session-A')
     result = await call_public_local_tool(req, 'code_tree', {'path': '.', 'depth': 1})
-    assert result['structuredContent']['code'] == 'WORKSPACE_SUSPENDED'
-    assert result['structuredContent']['state'] == 'suspended'
+    assert result['structuredContent']['code'] == 'WORKSPACE_TRANSPORT_OFFLINE'
+    assert result['structuredContent']['state'] == 'ready'
+    assert result['structuredContent']['transport_state'] == 'offline'
     assert result['structuredContent']['reconnectable'] is True
     assert result['structuredContent']['access_mode'] == 'write'
 
@@ -421,8 +425,8 @@ def test_first_claim_succeeds_after_waiting_browser_suspends():
     status = sessions.workspace_status('chatgpt-after-switch')
 
     assert bound['connection'] is None
-    assert status['state'] == 'suspended'
-    assert status['connected'] is False
+    assert status['state'] == 'ready'
+    assert status['connected'] is True
     assert status['reconnectable'] is True
     assert status['access_mode'] == 'write'
     assert status['lease_id']
@@ -432,7 +436,8 @@ def test_first_claim_succeeds_after_waiting_browser_suspends():
         code, replacement, mode='write', capabilities=['code_tree', 'file_read']
     )
     assert rebound['lease_id'] == status['lease_id']
-    assert sessions.workspace_status('chatgpt-after-switch')['state'] == 'connected'
+    assert sessions.workspace_status('chatgpt-after-switch')['state'] == 'ready'
+    assert sessions.workspace_status('chatgpt-after-switch')['transport_state'] == 'online'
 
 
 def test_unseen_browser_ticket_cannot_be_claimed_while_offline():
@@ -508,13 +513,15 @@ def test_resume_token_restores_lease_after_process_state_loss(monkeypatch):
 
     rebound = sessions.claim_workspace_with_resume_token(token, 'chatgpt-new')
     assert rebound['lease_id'] == lease_id
-    assert sessions.workspace_status('chatgpt-new')['state'] == 'suspended'
+    assert sessions.workspace_status('chatgpt-new')['state'] == 'ready'
+    assert sessions.workspace_status('chatgpt-new')['transport_state'] == 'offline'
     replacement = DummyConnection('persist-browser-2')
     resumed = sessions.reconnect_workspace_with_resume_token(
         token, replacement, mode='write', capabilities=['file_read']
     )
     assert resumed['lease_id'] == lease_id
-    assert sessions.workspace_status('chatgpt-new')['state'] == 'connected'
+    assert sessions.workspace_status('chatgpt-new')['state'] == 'ready'
+    assert sessions.workspace_status('chatgpt-new')['transport_state'] == 'online'
 
 
 def test_pair_code_stays_short_lived_after_durable_lease_created(monkeypatch):

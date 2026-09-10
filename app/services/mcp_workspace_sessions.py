@@ -659,12 +659,15 @@ def get_workspace(session_id: str | None) -> Optional[dict[str, Any]]:
 
 
 def get_workspace_lease(session_id: str | None) -> Optional[dict[str, Any]]:
-    """Return either a live binding or a reconnectable suspended lease."""
+    """Return the logical workspace lease independently from executor transport state."""
     if not session_id:
         return None
     live = get_workspace(session_id)
     if live:
-        live.update({"state": "connected", "connected": True, "suspended": False})
+        live.update({
+            "state": "ready", "lease_state": "ready", "connected": True,
+            "transport_state": "online", "executor_online": True, "suspended": False,
+        })
         return live
     item = _SESSION_WORKSPACE.get(session_id)
     if not item:
@@ -672,15 +675,18 @@ def get_workspace_lease(session_id: str | None) -> Optional[dict[str, Any]]:
     if float(item.get("reconnect_until") or 0) <= time.time():
         _SESSION_WORKSPACE.pop(session_id, None)
         return None
-    suspended = dict(item)
-    suspended.update({
-        "state": "suspended",
-        "connected": False,
-        "suspended": True,
+    lease = dict(item)
+    lease.update({
+        "state": "ready",
+        "lease_state": "ready",
+        "connected": True,
+        "transport_state": "offline",
+        "executor_online": False,
+        "suspended": False,
         "connection": None,
         "connection_id": None,
     })
-    return suspended
+    return lease
 
 
 def mark_transport_detached(session_id: str) -> Optional[dict[str, Any]]:
@@ -775,9 +781,12 @@ def workspace_status(session_id: str) -> dict[str, Any]:
     binding = get_workspace_lease(session_id)
     if binding:
         return {
-            "state": binding.get("state", "connected"),
-            "connected": bool(binding.get("connected", False)),
-            "suspended": bool(binding.get("suspended", False)),
+            "state": binding.get("state", "ready"),
+            "lease_state": binding.get("lease_state", "ready"),
+            "connected": bool(binding.get("connected", True)),
+            "transport_state": binding.get("transport_state", "offline"),
+            "executor_online": bool(binding.get("executor_online", False)),
+            "suspended": False,
             "reconnectable": True,
             "access_mode": binding["mode"],
             "mode": binding["mode"],  # compatibility
