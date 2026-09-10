@@ -57,6 +57,11 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "for(const ev of ['dragenter','dragover'])" in html
     assert 'webkitGetAsEntry' in html
     assert 'new WebSocket' in html
+    assert 'visibilitychange' in html
+    assert 'pageshow' in html
+    assert 'tf_resume_token' in html
+    assert 'indexedDB' in html
+    assert 'resume_token' in html
     assert 'data-cfasync="false"' in html
     assert 'client_workspace_tool' in html
     assert 'triforce-workspace://' not in html

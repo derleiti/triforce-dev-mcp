@@ -345,9 +345,18 @@ async def websocket_connect(
     is_telemetry_only = mode == "telemetry"
     is_workspace_node = mode == "workspace"
     pair_code = str(websocket.query_params.get("pair_code") or "").strip().upper()
+    resume_token = str(websocket.query_params.get("resume_token") or "").strip()
     paired_mcp_session = None
     workspace_pair_kind = "invalid"
-    if is_workspace_node:
+    if is_workspace_node and resume_token:
+        try:
+            from app.services.mcp_workspace_sessions import resolve_resume_token
+            resumed = resolve_resume_token(resume_token)
+            workspace_pair_kind = "resume" if resumed else "invalid"
+            paired_mcp_session = resumed.get("session_id") if resumed else None
+        except Exception:
+            workspace_pair_kind, paired_mcp_session = "invalid", None
+    elif is_workspace_node:
         try:
             from app.services.mcp_workspace_sessions import pair_code_kind
             workspace_pair_kind, paired_mcp_session = pair_code_kind(pair_code)
@@ -477,7 +486,17 @@ async def websocket_connect(
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": False, "error": "client_workspace_tool must be advertised first"}})
                     continue
                 share = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
-                if workspace_pair_kind == "session" and paired_mcp_session:
+                if workspace_pair_kind == "resume":
+                    from app.services.mcp_workspace_sessions import resume_workspace_connection
+                    waiting = resume_workspace_connection(
+                        resume_token, connection,
+                        mode=str(share.get("mode") or "read_only"),
+                        task=str(share.get("task") or ""),
+                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                    )
+                    logger.info("Local workspace resumed | session=%s client=%s mode=%s", paired_mcp_session, client_id, waiting["mode"])
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": waiting["mode"], "waiting_for_session": bool(waiting.get("waiting_for_session")), "resumed": True}})
+                elif workspace_pair_kind == "session" and paired_mcp_session:
                     from app.services.mcp_workspace_sessions import bind_workspace
                     binding = bind_workspace(
                         str(paired_mcp_session), connection,
@@ -496,7 +515,7 @@ async def websocket_connect(
                         capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": waiting["mode"], "waiting_for_session": True}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": waiting["mode"], "waiting_for_session": True, "resume_token": waiting.get("resume_token")}})
 
             elif data.get("method") == "workspace/revoke" and is_workspace_node:
                 from app.services.mcp_workspace_sessions import unbind_connection
@@ -543,8 +562,8 @@ async def websocket_connect(
         connection.disconnect()
         if is_workspace_node:
             try:
-                from app.services.mcp_workspace_sessions import unbind_connection
-                unbind_connection(connection)
+                from app.services.mcp_workspace_sessions import suspend_connection
+                suspend_connection(connection)
             except Exception:
                 pass
         for alias in aliases:

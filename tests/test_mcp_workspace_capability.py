@@ -31,6 +31,8 @@ def clear_state():
     sessions._PAIR_INDEX.clear()
     sessions._SESSION_WORKSPACE.clear()
     sessions._WEB_PAIR.clear()
+    sessions._RESUME_INDEX.clear()
+    sessions._RESUME_INDEX.clear()
     yield
     sessions._SESSION_PAIR.clear()
     sessions._PAIR_INDEX.clear()
@@ -109,3 +111,32 @@ async def test_browser_capability_gate_rejects_unadvertised_tool():
     result = await call_public_local_tool(req, 'file_edit', {'path': 'x.txt', 'operation': 'write', 'content': 'x'})
     assert result['structuredContent']['code'] == 'WORKSPACE_TOOL_UNAVAILABLE'
     assert conn.calls == []
+
+
+def test_workspace_resume_token_rebinds_same_session_after_suspend():
+    code = sessions.create_web_pair_code()
+    first = DummyConnection('mobile-1')
+    waiting = sessions.register_waiting_workspace(code, first, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
+    token = waiting['resume_token']
+    sessions.claim_waiting_workspace(code, 'session-A')
+    sessions.suspend_connection(first)
+    status = sessions.workspace_status('session-A')
+    assert status['connected'] is False
+    assert status['suspended'] is True
+    second = DummyConnection('mobile-2')
+    resumed = sessions.resume_workspace_connection(token, second, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
+    assert resumed['waiting_for_session'] is False
+    bound = sessions.get_workspace('session-A')
+    assert bound is not None
+    assert bound['client_id'] == 'mobile-2'
+    assert bound['mode'] == 'write'
+
+
+def test_explicit_unbind_invalidates_resume_token_before_pair_claim():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('mobile-1')
+    waiting = sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    token = waiting['resume_token']
+    assert sessions.resolve_resume_token(token) is not None
+    sessions.unbind_connection(conn)
+    assert sessions.resolve_resume_token(token) is None
