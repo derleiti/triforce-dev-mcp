@@ -575,14 +575,16 @@ V5_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "agent_call",
-        "description": "Send a message/task to a specific CLI agent and get response. Agent must be running (use agent_start first).",
+        "description": "Send a message/task to a configured agent profile and get its response. Legacy CLI agents may need a running process; AICoder profiles are launched per call.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "agent_id": {
                     "type": "string",
-                    "enum": ["claude-mcp", "codex-mcp", "gemini-mcp", "opencode-mcp", "mistral-mcp"],
-                    "description": "Target agent ID",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.-]+$",
+                    "description": "Configured agent/profile ID, for example claude-mcp or aicoder-review",
                 },
                 "message": {"type": "string", "description": "Message/task to send"},
                 "timeout": {"type": "integer", "description": "Response timeout in seconds (default: 60)"},

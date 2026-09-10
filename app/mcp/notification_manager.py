@@ -994,7 +994,7 @@ async def _dispatch_event(event: Dict) -> None:
 
     # Skip dispatch for internal/noise events
     SKIP_TAGS = {"agent-spawn", "scheduler", "auto", "log-monitor", "init",
-                 "triforce", "warning", "worker-result", "error"}
+                 "triforce", "warning", "worker-result", "error", "agent-runtime"}
     if tags and any(t in SKIP_TAGS for t in tags):
         return
 
@@ -1466,7 +1466,13 @@ async def _start_pollers_with_lock():
 
 def _launch_pollers():
     global _poller_tasks
-    for name, coro in [("mail",_poll_mail),("forum",_poll_forum),("wordpress",_poll_wordpress)]:
+    pollers = [("mail", _poll_mail), ("forum", _poll_forum), ("wordpress", _poll_wordpress)]
+    try:
+        from app.services.aicoder_agent_events import aicoder_failure_digest_loop
+        pollers.append(("aicoder-failure-digest", aicoder_failure_digest_loop))
+    except Exception as exc:
+        logger.warning("AICoder failure digest unavailable: %s", exc)
+    for name, coro in pollers:
         task = asyncio.create_task(coro())
         task.set_name(f"poller:{name}")
         _poller_tasks.append(task)

@@ -158,6 +158,9 @@ tests/*
 !tests/test_lemonsqueezy_shop_contract.py
 !tests/test_aicoder_mcp_contract.py
 !tests/test_remote_coding_agent.py
+!tests/test_aicoder_runner.py
+!tests/test_aicoder_agent_events.py
+!tests/test_agent_controller_aicoder_runtime.py
 # DKIM-Keys — private keys, never commit
 docker/mailserver/config/opendkim/
 # Temp/debug files

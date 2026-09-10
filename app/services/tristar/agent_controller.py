@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 
 from ...mcp.agent_instructions import build_agent_system_prompt
+from ..aicoder_runner import apply_profile_state, load_profile, prepare_instance_home, run_profile
+from ..aicoder_agent_events import record_aicoder_run
 
 logger = logging.getLogger("ailinux.tristar.agent_controller")
 
@@ -59,6 +61,7 @@ ALLOWED_COMMAND_EXECUTABLES = frozenset([
     "/home/zombie/.npm-global/bin/codex",
     "/home/zombie/.npm-global/bin/gemini",
     "/home/zombie/.npm-global/bin/opencode",
+    "/usr/bin/aicoder",
     # Bash for piped commands (used internally by call_agent)
     "bash",
     "/bin/bash",
@@ -100,6 +103,7 @@ class AgentStatus(str, Enum):
     STOPPED = "stopped"
     STARTING = "starting"
     RUNNING = "running"
+    READY = "ready"
     ERROR = "error"
     RESTARTING = "restarting"
 
@@ -110,6 +114,7 @@ class AgentType(str, Enum):
     CODEX = "codex"
     GEMINI = "gemini"
     OPENCODE = "opencode"
+    AICODER = "aicoder"
 
 
 @dataclass
@@ -132,6 +137,7 @@ class AgentConfig:
 
     # Process Settings
     auto_restart: bool = True
+    runtime: str = "legacy"
     restart_delay: int = 15
     max_restarts: int = 5
 
@@ -150,6 +156,7 @@ class AgentConfig:
             "mcp_enabled": self.mcp_enabled,
             "mcp_port": self.mcp_port,
             "auto_restart": self.auto_restart,
+            "runtime": self.runtime,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -432,6 +439,7 @@ class AgentController:
                         mcp_enabled=agent_data.get("mcp_enabled", True),
                         mcp_port=agent_data.get("mcp_port"),
                         auto_restart=agent_data.get("auto_restart", True),
+                        runtime=agent_data.get("runtime", "legacy"),
                     )
                     self.agents[agent_id] = AgentInstance(config=config)
                     loaded_count += 1
@@ -456,6 +464,7 @@ class AgentController:
                 "mcp_enabled": instance.config.mcp_enabled,
                 "mcp_port": instance.config.mcp_port,
                 "auto_restart": instance.config.auto_restart,
+                "runtime": instance.config.runtime,
             }
         with open(config_file, "w") as f:
             json.dump(data, f, indent=2)
@@ -528,6 +537,22 @@ class AgentController:
 
             if instance.status == AgentStatus.RUNNING:
                 return {"status": "already_running", "agent": instance.to_dict()}
+
+            if instance.config.runtime == "aicoder" or instance.config.agent_type == AgentType.AICODER:
+                try:
+                    profile = load_profile(agent_id)
+                    home = prepare_instance_home(agent_id)
+                    apply_profile_state(home, profile)
+                    instance.status = AgentStatus.READY
+                    instance.pid = None
+                    instance.process = None
+                    instance.last_error = None
+                    return {"status": "ready", "runtime": "aicoder", "agent": instance.to_dict()}
+                except Exception as exc:
+                    instance.status = AgentStatus.ERROR
+                    instance.last_error = str(exc)
+                    logger.error("Failed to prepare AICoder profile %s: %s", agent_id, exc)
+                    return {"status": "error", "error": str(exc), "agent": instance.to_dict()}
 
             # SECURITY: Re-validate command before execution
             # This catches any runtime modifications to the config
@@ -618,6 +643,12 @@ class AgentController:
                 raise ValueError(f"Agent not found: {agent_id}")
 
             instance = self.agents[agent_id]
+
+            if instance.config.runtime == "aicoder" or instance.config.agent_type == AgentType.AICODER:
+                instance.status = AgentStatus.STOPPED
+                instance.pid = None
+                instance.process = None
+                return {"status": "stopped", "runtime": "aicoder", "agent": instance.to_dict()}
 
             if instance.status != AgentStatus.RUNNING or not instance.process:
                 return {"status": "not_running", "agent": instance.to_dict()}
@@ -784,6 +815,29 @@ class AgentController:
         instance = self.agents.get(agent_id)
         if not instance:
             raise ValueError(f"Agent not found: {agent_id}")
+
+        if instance.config.runtime == "aicoder" or instance.config.agent_type == AgentType.AICODER:
+            try:
+                instance.status = AgentStatus.RUNNING
+                result = await run_profile(agent_id, message, timeout_override=timeout)
+                try:
+                    notification = await record_aicoder_run(result)
+                except Exception as notify_exc:
+                    logger.warning("AICoder notification mapping failed for %s: %s", agent_id, notify_exc)
+                    notification = {"kind": "", "emitted": False, "mailed": False, "error": str(notify_exc)}
+                payload = result.to_dict()
+                payload["notification"] = notification
+                instance.last_error = result.error or None
+                instance.output_buffer.append(f">>> {message[:50]}...")
+                instance.output_buffer.append((result.response or result.error)[:500])
+                instance.output_buffer = instance.output_buffer[-100:]
+                return payload
+            except Exception as exc:
+                instance.last_error = str(exc)
+                logger.error("AICoder profile %s failed: %s", agent_id, exc)
+                return {"agent_id": agent_id, "status": "error", "error": str(exc)}
+            finally:
+                instance.status = AgentStatus.READY
 
         if instance.status != AgentStatus.RUNNING and instance.config.agent_type != AgentType.CODEX:
             # Starte Agent wenn nicht laufend

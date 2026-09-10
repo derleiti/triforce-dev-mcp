@@ -5,10 +5,11 @@ from app.services import google_genai
 
 def test_canonical_gemini_key_wins(monkeypatch):
     monkeypatch.delenv("GOOGLE_GEMINI_KEY", raising=False)
-    monkeypatch.setenv("GEMINI_API_KEY", "canonical")
-    monkeypatch.setenv("GOOGLE_API_KEY", "legacy")
+    monkeypatch.setenv("GOOGLE_AI_STUDIO_KEY", "canonical")
+    monkeypatch.setenv("GEMINI_API_KEY", "legacy")
+    monkeypatch.setenv("GOOGLE_API_KEY", "unrelated")
     assert google_genai.resolve_api_key() == "canonical"
-    assert google_genai.configured_key_names() == ("GEMINI_API_KEY",)
+    assert google_genai.configured_key_names() == ("GOOGLE_AI_STUDIO_KEY", "GEMINI_API_KEY")
 
 
 def test_text_contents_uses_native_system_instruction():
@@ -41,10 +42,10 @@ def test_requirements_use_supported_google_genai_sdk():
     assert "google-generativeai" not in lock
 
 
-def test_ai_studio_key_is_separate(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "gemini")
+def test_ai_studio_key_is_canonical_for_gemini_and_explicit_resolver(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "legacy")
     monkeypatch.setenv("GOOGLE_AI_STUDIO_KEY", "studio")
-    assert google_genai.resolve_api_key() == "gemini"
+    assert google_genai.resolve_api_key() == "studio"
     assert google_genai.resolve_ai_studio_key() == "studio"
 
 

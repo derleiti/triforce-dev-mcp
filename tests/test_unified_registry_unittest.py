@@ -7,7 +7,8 @@ class TestUnifiedRegistry(unittest.TestCase):
 
     def test_routes_mcp_uses_unified_registry(self):
         text = Path("app/routes/mcp.py").read_text(encoding="utf-8")
-        self.assertIn("get_unified_tools", text)
+        self.assertIn("get_canonical_all_tools", text)
+        self.assertIn("filter_tools_for_profile", text)
         self.assertIn('inventory = str(params.get("inventory", "core"))', text)
         self.assertIn("resolve_tool_name_for_call", text)
 
