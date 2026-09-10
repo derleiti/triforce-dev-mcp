@@ -49,6 +49,7 @@ class ClientConnection:
         self.connected_at = datetime.now()
         self.last_seen = datetime.now()
         self.pending_requests: Dict[str, asyncio.Future] = {}
+        self.pending_request_stages: Dict[str, str] = {}
         self.supported_tools: List[str] = []
         self.client_info: Dict[str, Any] = {}  # Platform, hostname, version etc.
         
@@ -86,6 +87,7 @@ class ClientConnection:
         # Future für Antwort erstellen
         future = asyncio.get_event_loop().create_future()
         self.pending_requests[request_id] = future
+        self.pending_request_stages[request_id] = "sent"
 
         try:
             async with asyncio.timeout(timeout):
@@ -98,6 +100,7 @@ class ClientConnection:
 
         finally:
             self.pending_requests.pop(request_id, None)
+            self.pending_request_stages.pop(request_id, None)
             if not future.done():
                 future.cancel()
             elif not future.cancelled():
@@ -106,9 +109,10 @@ class ClientConnection:
     def disconnect(self) -> None:
         """Fail waiting callers immediately when this physical socket disappears."""
         self.closed = True
-        for future in self.pending_requests.values():
+        for request_id, future in self.pending_requests.items():
             if not future.done():
-                future.set_exception(ConnectionError("MCP client disconnected"))
+                stage = self.pending_request_stages.get(request_id, "sent")
+                future.set_exception(ConnectionError(f"MCP client disconnected (stage={stage})"))
 
     def handle_response(self, response: Dict[str, Any]):
         """Verarbeitet Response vom Client"""
@@ -526,6 +530,18 @@ async def websocket_connect(
                     )
                     logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting", "access_mode": waiting["mode"], "mode": waiting["mode"], "waiting_for_session": True}})
+
+            elif data.get("method") == "workspace/tool_stage" and is_workspace_node:
+                params = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
+                request_id = str(params.get("request_id") or "")
+                stage = str(params.get("stage") or "")
+                tool_name = str(params.get("tool") or "")
+                if request_id in connection.pending_requests and stage in {"started", "finished"}:
+                    connection.pending_request_stages[request_id] = stage
+                    logger.info(
+                        "Local workspace tool stage | client=%s request=%s tool=%s stage=%s",
+                        client_id, request_id[:12], tool_name, stage,
+                    )
 
             elif data.get("method") == "workspace/revoke" and is_workspace_node:
                 from app.services.mcp_workspace_sessions import unbind_connection
