@@ -15,6 +15,7 @@ Aktionen:
 """
 
 import asyncio
+import os
 import hashlib
 import json
 import logging
@@ -34,6 +35,9 @@ logging.basicConfig(
 log = logging.getLogger("nova.log_monitor")
 
 MCP_BASE = "http://127.0.0.1:9000/v1/mcp"
+# Bearer token for MCP calls. Supplied via systemd EnvironmentFile,
+# never hardcoded.
+MCP_TOKEN = os.environ.get("MCP_TOKEN", "")
 STATE_FILE = Path("/var/lib/nova-log-monitor/state.json")
 ESCALATE_AFTER_SEC = 300  # 5 Minuten
 NOTIFY_COOLDOWN_SEC = 900  # Gleiches Ereignis maximal einmal je 15 Minuten melden
@@ -147,9 +151,14 @@ IGNORE_PATTERNS = [
 # ── MCP Client ────────────────────────────────────────────────────────────────
 
 async def mcp_call(tool: str, args: dict) -> dict:
+    # /v1/mcp requires a bearer token. Without it every call returns 401 and
+    # the monitor runs but never delivers a single notification.
+    headers = {}
+    if MCP_TOKEN:
+        headers["Authorization"] = f"Bearer {MCP_TOKEN}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(MCP_BASE, json={
+            r = await client.post(MCP_BASE, headers=headers, json={
                 "jsonrpc": "2.0", "id": 1,
                 "method": "tools/call",
                 "params": {"name": tool, "arguments": args}
