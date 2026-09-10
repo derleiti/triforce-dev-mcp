@@ -40,6 +40,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
     assert 'showDirectoryPicker' in html
+    assert 'heartbeatTimer=null' in html
+    assert 'function startHeartbeat()' in html
     assert 'openChromeBtn' in html
     assert 'com.android.chrome' in html
     assert 'readwrite' in html
