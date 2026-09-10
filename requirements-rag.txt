@@ -2,5 +2,5 @@ llama-index>=0.14.24
 chromadb>=1.5.9
 sentence-transformers>=5.7.0
 beautifulsoup4>=4.15.0
-pypdf>=6.16.1
+pypdf>=6.16.2
 markdownify>=0.13
