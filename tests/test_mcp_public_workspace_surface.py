@@ -23,7 +23,7 @@ class FakeRequest:
 async def test_public_guest_gets_cloud_surface_plus_local_workspace_tools():
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
     names = {tool['name'] for tool in result['tools']}
-    assert {'search', 'models', 'workspace_status', 'file_read', 'code_search', 'file_edit', 'shell', 'test'} <= names
+    assert {'search', 'models', 'workspace_status', 'workspace_pair', 'file_read', 'code_search', 'file_edit', 'shell', 'test'} <= names
     assert 'service_control' not in names
     assert 'restart_backend' not in names
     assert {'mail_inbox', 'mail_read', 'memory_search', 'notify_list', 'group_chat_read', 'system_info', 'logs'}.isdisjoint(names)

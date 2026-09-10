@@ -30,10 +30,12 @@ def clear_state():
     sessions._SESSION_PAIR.clear()
     sessions._PAIR_INDEX.clear()
     sessions._SESSION_WORKSPACE.clear()
+    sessions._WEB_PAIR.clear()
     yield
     sessions._SESSION_PAIR.clear()
     sessions._PAIR_INDEX.clear()
     sessions._SESSION_WORKSPACE.clear()
+    sessions._WEB_PAIR.clear()
 
 
 def test_pairing_code_is_session_scoped_and_consumed_on_bind():
@@ -48,12 +50,40 @@ def test_pairing_code_is_session_scoped_and_consumed_on_bind():
     assert sessions.get_workspace('session-B') is None
 
 
+def test_web_pair_codes_are_unique_and_claim_waiting_helper_once():
+    first = sessions.create_web_pair_code()
+    second = sessions.create_web_pair_code()
+    assert first != second
+    conn = DummyConnection()
+    waiting = sessions.register_waiting_workspace(first, conn, mode='write', task='web flow')
+    assert waiting['waiting_for_session'] is True
+    bound = sessions.claim_waiting_workspace(first, 'session-A')
+    assert bound['mode'] == 'write'
+    assert bound['task'] == 'web flow'
+    assert sessions.get_workspace('session-A')['client_id'] == conn.client_id
+    with pytest.raises(ValueError):
+        sessions.claim_waiting_workspace(first, 'session-B')
+
+
 @pytest.mark.asyncio
-async def test_workspace_status_returns_pair_code_before_local_node_connects():
+async def test_workspace_status_tells_user_to_use_web_setup_page():
     req = DummyRequest('session-A')
     result = await call_public_local_tool(req, 'workspace_status', {})
     assert result['structuredContent']['code'] == 'WORKSPACE_REQUIRED'
-    assert result['structuredContent']['pair_code']
+    assert result['structuredContent']['setup_url'] == 'https://api.ailinux.me/v1/mcp'
+    assert 'pair_code' not in result['structuredContent']
+
+
+@pytest.mark.asyncio
+async def test_workspace_pair_claims_waiting_web_helper_for_current_session():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection()
+    sessions.register_waiting_workspace(code, conn, mode='read_only', task='inspect web')
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'workspace_pair', {'code': code})
+    assert result['structuredContent']['ok'] is True
+    assert result['structuredContent']['mode'] == 'read_only'
+    assert sessions.get_workspace('session-A')['client_id'] == conn.client_id
 
 
 @pytest.mark.asyncio

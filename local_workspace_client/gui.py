@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from PyQt6.QtCore import QProcess, Qt
+from PyQt6.QtCore import QProcess, QTimer, Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QButtonGroup, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
@@ -101,6 +101,9 @@ class WorkspaceWindow(QMainWindow):
         self.details.setPlaceholderText("Folder analysis and connection status")
         layout.addWidget(self.details, 1)
 
+        if pair_code.strip():
+            QTimer.singleShot(200, self.choose_folder)
+
     def choose_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(self, "Choose workspace folder", self.folder.text() or str(Path.home()))
         if chosen:
@@ -178,10 +181,16 @@ class WorkspaceWindow(QMainWindow):
                 continue
             if event.get("event") == "connected":
                 mode = "Write" if event.get("mode") == "write" else "Read only"
-                self.status.setText(f"Paired · {mode} · keep this window open")
+                self.status.setText(f"Connected · registering {mode} workspace…")
                 analysis = event.get("analysis")
                 if isinstance(analysis, dict):
                     self.details.setPlainText(json.dumps(analysis, ensure_ascii=False, indent=2))
+            elif event.get("event") == "workspace_shared":
+                mode = "Write" if event.get("mode") == "write" else "Read only"
+                if event.get("waiting_for_session"):
+                    self.status.setText(f"Workspace ready · {mode} · paste the pairing ID into your AI chat")
+                else:
+                    self.status.setText(f"Paired · {mode} · keep this window open")
 
     def read_stderr(self) -> None:
         if not self.proc:

@@ -15,7 +15,7 @@ from fastapi import Request
 from .mcp_workspace_sessions import get_workspace, workspace_status
 
 READ_ONLY_TOOLS = {
-    "workspace_status", "workspace_info",
+    "workspace_status", "workspace_pair", "workspace_info",
     "file_read", "file_tree", "code_read", "code_tree", "code_search", "code_grep", "git",
 }
 WRITE_TOOLS = READ_ONLY_TOOLS | {
@@ -45,6 +45,16 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "If not paired, returns a short pairing code for the user to enter in the TriForce Local Workspace helper."
         ),
         "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "workspace_pair",
+        "description": "Bind this MCP session to a waiting TriForce Local Workspace helper using the one-time pairing ID from the setup page.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"code": {"type": "string"}},
+            "required": ["code"],
+        },
         "annotations": {"readOnlyHint": True},
     },
     {
@@ -204,8 +214,9 @@ def public_instructions(request: Request) -> str:
         )
     return (
         "This is the public TriForce MCP. Normal TriForce public tools are available without login. "
-        "Local file/code/shell/test tools require a user-selected local workspace. Call workspace_status to obtain a pairing code, "
-        "then ask the user to open https://api.ailinux.me/v1/mcp in a browser and pair the TriForce Local Workspace helper."
+        "For local file/code/shell/test access, ask the user to open https://api.ailinux.me/v1/mcp in a browser. "
+        "Each page load creates a fresh one-time pairing ID. The user opens the local helper from that page, chooses a folder and mode, "
+        "starts it, then pastes the pairing ID into this chat. When an ID is provided, call workspace_pair with it."
     )
 
 
@@ -217,22 +228,54 @@ def _workspace_required(request: Request) -> Dict[str, Any]:
             "structuredContent": {"ok": False, "code": "MCP_SESSION_REQUIRED"},
             "isError": True,
         }
-    status = workspace_status(sid)
-    code = status.get("pair_code")
     text = (
-        "No local workspace is paired with this MCP session. "
-        f"Pairing code: {code}. Open https://api.ailinux.me/v1/mcp in a browser, start the TriForce Local Workspace helper, "
-        "choose a folder and Read only or Write, then enter this code."
+        "No local workspace is paired with this MCP session. Open https://api.ailinux.me/v1/mcp in a browser. "
+        "Each page load creates a fresh one-time pairing ID. Open the local helper, choose a folder and Read only or Write, press Start, "
+        "then paste the pairing ID into this chat so it can be bound with workspace_pair."
     )
     return {
         "content": [{"type": "text", "text": text}],
-        "structuredContent": {"ok": False, "code": "WORKSPACE_REQUIRED", **status, "setup_url": "https://api.ailinux.me/v1/mcp"},
+        "structuredContent": {
+            "ok": False,
+            "code": "WORKSPACE_REQUIRED",
+            "connected": False,
+            "setup_url": "https://api.ailinux.me/v1/mcp",
+            "procedure": "Open setup URL -> choose folder/mode -> Start helper -> paste pairing ID -> call workspace_pair.",
+        },
         "isError": False,
     }
 
 
 async def call_public_local_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     sid = session_id(request)
+    if name == "workspace_pair":
+        if not sid:
+            return _workspace_required(request)
+        code = str((arguments or {}).get("code") or "").strip().upper()
+        if not code:
+            return {
+                "content": [{"type": "text", "text": "workspace_pair requires the pairing ID from the TriForce MCP setup page."}],
+                "structuredContent": {"ok": False, "code": "PAIR_CODE_REQUIRED"},
+                "isError": True,
+            }
+        try:
+            from app.services.mcp_workspace_sessions import claim_waiting_workspace
+            binding = claim_waiting_workspace(code, sid)
+        except Exception as exc:
+            return {
+                "content": [{"type": "text", "text": f"Could not pair local workspace: {exc}"}],
+                "structuredContent": {"ok": False, "code": "WORKSPACE_PAIR_FAILED", "detail": str(exc)},
+                "isError": True,
+            }
+        return {
+            "content": [{"type": "text", "text": f"Local workspace paired successfully in {binding['mode']} mode."}],
+            "structuredContent": {
+                "ok": True, "connected": True, "mode": binding["mode"],
+                "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
+            },
+            "isError": False,
+        }
+
     if name == "workspace_status":
         if not sid:
             return _workspace_required(request)

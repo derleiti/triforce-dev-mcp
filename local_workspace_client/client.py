@@ -88,8 +88,16 @@ class WorkspaceNode:
             await self._announce(websocket)
             return
         if method in {"workspace/shared", "workspace/revoked", "pong"}:
-            if method == "workspace/shared" and not bool((message.get("params") or {}).get("ok", False)):
-                raise RuntimeError(str((message.get("params") or {}).get("error") or "workspace pairing failed"))
+            if method == "workspace/shared":
+                params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                if not bool(params.get("ok", False)):
+                    raise RuntimeError(str(params.get("error") or "workspace pairing failed"))
+                print(json.dumps({
+                    "event": "workspace_shared",
+                    "waiting_for_session": bool(params.get("waiting_for_session", False)),
+                    "mode": str(params.get("mode") or self.runtime.mode),
+                    "pair_code": self.pair_code,
+                }), flush=True)
             return
         if method != "tools/call":
             return

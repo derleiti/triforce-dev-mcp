@@ -101,22 +101,21 @@ def _mcp_instructions_for_request(request: Request) -> str:
     return build_mcp_instructions()
 
 
-def _workspace_setup_html() -> str:
-    return """<!doctype html>
+def _workspace_setup_html(pair_code: str) -> str:
+    return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TriForce MCP · Local Workspace</title>
 <style>
-:root{color-scheme:dark}body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0}main{max-width:820px;margin:7vh auto;padding:28px}section{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:24px;margin:18px 0}h1{font-size:2rem;margin:.2rem 0}p{line-height:1.55;color:#b8c1cc}.ok{color:#63d471}.muted{color:#8b949e}code,input{font-family:ui-monospace,monospace}input{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:12px;border-radius:8px;font-size:1rem}button{background:#238636;color:white;border:0;border-radius:8px;padding:11px 16px;font-weight:600;cursor:pointer}.row{display:flex;gap:10px;align-items:center}.row input{flex:1}.pill{display:inline-block;background:#1f6feb22;border:1px solid #1f6feb;padding:5px 10px;border-radius:999px;color:#79c0ff}
+:root{{color-scheme:dark}}body{{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0}}main{{max-width:820px;margin:7vh auto;padding:28px}}section{{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:24px;margin:18px 0}}h1{{font-size:2rem;margin:.2rem 0}}p{{line-height:1.55;color:#b8c1cc}}.ok{{color:#63d471}}.muted{{color:#8b949e}}code,input{{font-family:ui-monospace,monospace}}input{{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:12px;border-radius:8px;font-size:1rem}}button{{background:#238636;color:white;border:0;border-radius:8px;padding:11px 16px;font-weight:600;cursor:pointer}}.row{{display:flex;gap:10px;align-items:center}}.row input{{flex:1}}.pill{{display:inline-block;background:#1f6feb22;border:1px solid #1f6feb;padding:5px 10px;border-radius:999px;color:#79c0ff}}
 </style></head><body><main>
 <span class="pill">AILinux · TriForce MCP</span><h1>Connect a local workspace</h1>
-<p>The public MCP endpoint is <code>https://api.ailinux.me/v1/mcp</code>. ChatGPT, Codex, Mistral and other MCP clients use this fixed URL. No TriForce account is required for the public profile.</p>
-<section><h2>1 · Connect TriForce in your AI client</h2><p>Use exactly:</p><div class="row"><input id="mcp" readonly value="https://api.ailinux.me/v1/mcp"><button onclick="navigator.clipboard.writeText(document.getElementById('mcp').value)">Copy</button></div></section>
-<section><h2>2 · Ask TriForce for a pairing code</h2><p>In ChatGPT/Codex, ask it to use <code>workspace_status</code>. TriForce returns a short code tied to that MCP session.</p></section>
-<section><h2>3 · Pair your local folder</h2><p>Start the TriForce Local Workspace helper, choose the folder, select <strong>Read only</strong> or <strong>Write</strong>, enter the pairing code and press Start. Only that folder is exposed; shell/test execution is sandboxed locally.</p>
-<label for="pair" class="muted">Pairing code</label><div class="row"><input id="pair" placeholder="ABCD-EF12-3456-789A-BCDE-F012"><button onclick="launch()">Open helper</button></div><p id="hint" class="muted"></p></section>
-<section><h2 class="ok">TriForce stays one MCP</h2><p>Cloud tools run on TriForce. File, code, Git, shell, lint and test tools transparently run on the paired computer. Existing authenticated/admin access keeps its current permissions.</p></section>
-<script>function launch(){const c=document.getElementById('pair').value.trim();if(!c){document.getElementById('hint').textContent='Enter the pairing code shown by TriForce first.';return;}location.href='triforce-workspace://pair?code='+encodeURIComponent(c);document.getElementById('hint').textContent='If the helper did not open, start TriForce Local Workspace manually and enter: '+c;}</script>
-</main></body></html>"""
+<p>ChatGPT, Codex, Mistral and other MCP clients always use <code>https://api.ailinux.me/v1/mcp</code>. This page creates a new one-time local workspace ID every time it is opened.</p>
+<section><h2>1 · Your new pairing ID</h2><p>This ID is valid for 15 minutes and can be used only once.</p><div class="row"><input id="pair" readonly value="{pair_code}"><button onclick="copyPair()">Copy</button></div></section>
+<section><h2>2 · Choose the local folder</h2><p>Open the TriForce Local Workspace helper with this ID. Choose the folder, select <strong>Read only</strong> or <strong>Write</strong>, then press <strong>Start</strong>.</p><button onclick="launch()">Open TriForce Local Workspace</button><p id="hint" class="muted"></p></section>
+<section><h2>3 · Post the ID in your AI chat</h2><p>Paste <code>{pair_code}</code> into the ChatGPT/Codex/Mistral conversation that is connected to TriForce. TriForce will call <code>workspace_pair</code> and bind this waiting local workspace to that MCP session.</p></section>
+<section><h2 class="ok">One public TriForce MCP</h2><p>Cloud tools keep running on TriForce. Local file, code, Git, shell, lint and test tools run on the paired computer. Existing authenticated/admin access is unchanged.</p></section>
+<script>function copyPair(){{navigator.clipboard.writeText(document.getElementById('pair').value)}}function launch(){{const c=document.getElementById('pair').value;location.href='triforce-workspace://pair?code='+encodeURIComponent(c);document.getElementById('hint').textContent='If the helper did not open, start TriForce Local Workspace manually and paste: '+c;}}
+</script></main></body></html>"""
 
 
 def _build_tool_result(result: Any, *, is_error: bool = False) -> Dict[str, Any]:
@@ -3880,7 +3879,9 @@ async def mcp_health_or_sse(request: Request):
 
     accept_header = request.headers.get("Accept", "")
     if "text/html" in accept_header and "text/event-stream" not in accept_header:
-        return HTMLResponse(_workspace_setup_html(), headers={"Cache-Control": "no-store"})
+        from app.services.mcp_workspace_sessions import create_web_pair_code
+        pair_code = create_web_pair_code()
+        return HTMLResponse(_workspace_setup_html(pair_code), headers={"Cache-Control": "no-store"})
     client_ip = request.client.host if request.client else "unknown"
 
     if "text/event-stream" in accept_header:

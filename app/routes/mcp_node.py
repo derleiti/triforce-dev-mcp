@@ -344,15 +344,16 @@ async def websocket_connect(
     mode = websocket.query_params.get("mode", "full")
     is_telemetry_only = mode == "telemetry"
     is_workspace_node = mode == "workspace"
-    pair_code = str(websocket.query_params.get("pair_code") or "").strip()
+    pair_code = str(websocket.query_params.get("pair_code") or "").strip().upper()
     paired_mcp_session = None
+    workspace_pair_kind = "invalid"
     if is_workspace_node:
         try:
-            from app.services.mcp_workspace_sessions import resolve_pair_code
-            paired_mcp_session = resolve_pair_code(pair_code)
+            from app.services.mcp_workspace_sessions import pair_code_kind
+            workspace_pair_kind, paired_mcp_session = pair_code_kind(pair_code)
         except Exception:
-            paired_mcp_session = None
-        if not paired_mcp_session:
+            workspace_pair_kind, paired_mcp_session = "invalid", None
+        if workspace_pair_kind == "invalid":
             await websocket.send_json({"error": "Invalid or expired workspace pairing code"})
             await websocket.close(code=4003)
             return
@@ -393,7 +394,13 @@ async def websocket_connect(
     client_id = payload.get("client_id") or session_id or str(uuid.uuid4())
     
     # Ownership and tier come from authenticated server state, never query claims.
-    resolved_user_id = (f"workspace:{paired_mcp_session[:12]}" if is_workspace_node and paired_mcp_session else (payload.get("sub") or client_id))
+    if is_workspace_node:
+        resolved_user_id = (
+            f"workspace:{paired_mcp_session[:12]}" if paired_mcp_session
+            else f"workspace:web:{pair_code.replace('-', '')[:12].lower()}"
+        )
+    else:
+        resolved_user_id = payload.get("sub") or client_id
     resolved_tier = tier_service.get_user_tier(resolved_user_id) if authenticated else UserTier.GUEST
 
     aliases = {client_id}
@@ -470,14 +477,24 @@ async def websocket_connect(
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": False, "error": "client_workspace_tool must be advertised first"}})
                     continue
                 share = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
-                from app.services.mcp_workspace_sessions import bind_workspace
-                binding = bind_workspace(
-                    str(paired_mcp_session), connection,
-                    mode=str(share.get("mode") or "read_only"),
-                    task=str(share.get("task") or ""),
-                )
-                logger.info("Local workspace paired | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
-                await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": binding["mode"]}})
+                if workspace_pair_kind == "session" and paired_mcp_session:
+                    from app.services.mcp_workspace_sessions import bind_workspace
+                    binding = bind_workspace(
+                        str(paired_mcp_session), connection,
+                        mode=str(share.get("mode") or "read_only"),
+                        task=str(share.get("task") or ""),
+                    )
+                    logger.info("Local workspace paired | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": binding["mode"], "waiting_for_session": False}})
+                else:
+                    from app.services.mcp_workspace_sessions import register_waiting_workspace
+                    waiting = register_waiting_workspace(
+                        pair_code, connection,
+                        mode=str(share.get("mode") or "read_only"),
+                        task=str(share.get("task") or ""),
+                    )
+                    logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": waiting["mode"], "waiting_for_session": True}})
 
             elif data.get("method") == "workspace/revoke" and is_workspace_node:
                 from app.services.mcp_workspace_sessions import unbind_connection
