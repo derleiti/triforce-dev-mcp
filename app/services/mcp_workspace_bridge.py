@@ -8,6 +8,7 @@ advertised the exact capability during pairing.
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any, Dict, List
 
 from fastapi import Request
@@ -232,6 +233,65 @@ def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
     }
 
 
+_WORKSPACE_ID_RE = re.compile(r"^[0-9A-F]{4}(?:-[0-9A-F]{4}){5}$")
+
+
+def _workspace_id_from_legacy_arguments(arguments: Dict[str, Any]) -> str:
+    """Recognize an exact workspace ID carried through an older cached tool schema.
+
+    Some MCP hosts keep a pre-update schema for the lifetime of a chat.  If the
+    user pasted a workspace ID, the assistant can carry it in any existing
+    string argument of a browser workspace tool.  TriForce consumes the exact
+    ID only while no workspace is bound and never forwards it to the browser.
+    """
+    for value in arguments.values():
+        if not isinstance(value, str):
+            continue
+        candidate = value.strip().upper()
+        if _WORKSPACE_ID_RE.fullmatch(candidate):
+            return candidate
+    return ""
+
+
+async def _claim_workspace_for_session(request: Request, workspace_id: str) -> Dict[str, Any]:
+    sid = session_id(request)
+    effective_sid = sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
+    try:
+        from app.services.mcp_workspace_sessions import claim_waiting_workspace
+        binding = claim_waiting_workspace(workspace_id, effective_sid)
+        if not sid:
+            mark_transport_detached(effective_sid)
+    except Exception as exc:
+        return _tool_error(
+            "WORKSPACE_PAIR_FAILED",
+            f"Could not connect browser workspace: {exc}",
+            detail=str(exc),
+        )
+    connection = binding.get("connection")
+    if connection is not None and not bool(getattr(connection, "closed", True)):
+        try:
+            await connection.websocket.send_json({
+                "jsonrpc": "2.0",
+                "method": "workspace/paired",
+                "params": {
+                    "ok": True, "connected": True, "mode": binding["mode"],
+                    "lease_id": binding.get("lease_id", ""),
+                },
+            })
+        except Exception:
+            pass
+    return {
+        "content": [{"type": "text", "text": f"Browser workspace connected in {binding['mode']} mode."}],
+        "structuredContent": {
+            "ok": True, "connected": True, "mode": binding["mode"],
+            "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
+            "lease_id": binding.get("lease_id", ""),
+            "capabilities": list(binding.get("capabilities") or []),
+        },
+        "isError": False,
+    }
+
+
 async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     sid = session_id(request)
     arguments = dict(arguments or {})
@@ -285,33 +345,18 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if binding is None and workspace_token:
         binding = get_workspace_by_token(workspace_token)
 
+    # Compatibility for MCP hosts that cached the old parameterless
+    # workspace_status schema.  The assistant may carry an exact workspace ID
+    # through an existing string argument (for example code_search.query).
+    # Consume it only while unpaired and never forward it to the browser tool.
+    if binding is None and not workspace_id and name in (BROWSER_READ_TOOLS | BROWSER_WRITE_TOOLS):
+        legacy_workspace_id = _workspace_id_from_legacy_arguments(arguments)
+        if legacy_workspace_id:
+            return await _claim_workspace_for_session(request, legacy_workspace_id)
+
     if name == "workspace_status":
         if workspace_id:
-            effective_sid = sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
-            try:
-                from app.services.mcp_workspace_sessions import claim_waiting_workspace
-                binding = claim_waiting_workspace(workspace_id, effective_sid)
-                if not sid:
-                    mark_transport_detached(effective_sid)
-            except Exception as exc:
-                return _tool_error(
-                    "WORKSPACE_PAIR_FAILED",
-                    f"Could not connect browser workspace: {exc}",
-                    detail=str(exc),
-                )
-            connection = binding.get("connection")
-            if connection is not None and not bool(getattr(connection, "closed", True)):
-                try:
-                    await connection.websocket.send_json({
-                        "jsonrpc": "2.0",
-                        "method": "workspace/paired",
-                        "params": {
-                            "ok": True, "connected": True, "mode": binding["mode"],
-                            "lease_id": binding.get("lease_id", ""),
-                        },
-                    })
-                except Exception:
-                    pass
+            return await _claim_workspace_for_session(request, workspace_id)
 
         if binding:
             return {
