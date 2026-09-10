@@ -78,5 +78,4 @@ mypy==2.3.1
 # Antigravity SDK runs only in the isolated worker venv from requirements-antigravity.txt.
 crawlee>=1.9.2
 tenacity==9.1.4
-python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
