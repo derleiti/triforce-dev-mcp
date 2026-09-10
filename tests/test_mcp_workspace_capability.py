@@ -31,8 +31,6 @@ def clear_state():
     sessions._PAIR_INDEX.clear()
     sessions._SESSION_WORKSPACE.clear()
     sessions._WEB_PAIR.clear()
-    sessions._RESUME_INDEX.clear()
-    sessions._RESUME_INDEX.clear()
     yield
     sessions._SESSION_PAIR.clear()
     sessions._PAIR_INDEX.clear()
@@ -113,30 +111,28 @@ async def test_browser_capability_gate_rejects_unadvertised_tool():
     assert conn.calls == []
 
 
-def test_workspace_resume_token_rebinds_same_session_after_suspend():
+def test_same_pairing_id_reconnects_same_session_after_suspend():
     code = sessions.create_web_pair_code()
     first = DummyConnection('mobile-1')
-    waiting = sessions.register_waiting_workspace(code, first, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
-    token = waiting['resume_token']
+    sessions.register_waiting_workspace(code, first, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
     sessions.claim_waiting_workspace(code, 'session-A')
     sessions.suspend_connection(first)
     status = sessions.workspace_status('session-A')
     assert status['connected'] is False
     assert status['suspended'] is True
+    assert sessions.pair_code_kind(code) == ('reconnect', 'session-A')
     second = DummyConnection('mobile-2')
-    resumed = sessions.resume_workspace_connection(token, second, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
-    assert resumed['waiting_for_session'] is False
+    resumed = sessions.reconnect_web_workspace(code, second, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
+    assert resumed['session_id'] == 'session-A'
     bound = sessions.get_workspace('session-A')
     assert bound is not None
     assert bound['client_id'] == 'mobile-2'
-    assert bound['mode'] == 'write'
 
 
-def test_explicit_unbind_invalidates_resume_token_before_pair_claim():
+def test_same_pairing_id_cannot_be_claimed_by_another_session():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('mobile-1')
-    waiting = sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
-    token = waiting['resume_token']
-    assert sessions.resolve_resume_token(token) is not None
-    sessions.unbind_connection(conn)
-    assert sessions.resolve_resume_token(token) is None
+    sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    sessions.claim_waiting_workspace(code, 'session-A')
+    with pytest.raises(ValueError):
+        sessions.claim_waiting_workspace(code, 'session-B')
