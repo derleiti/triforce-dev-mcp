@@ -550,8 +550,8 @@ async def websocket_connect(
                 # last_seen was refreshed above; no response needed.
                 pass
 
-    except WebSocketDisconnect:
-        logger.info(f"Client disconnected: {client_id}")
+    except WebSocketDisconnect as exc:
+        logger.info("Client disconnected: %s code=%s", client_id, getattr(exc, "code", None))
     except Exception as e:
         logger.error(f"WebSocket error for {client_id}: {e}")
     finally:

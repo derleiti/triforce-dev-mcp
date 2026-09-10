@@ -155,6 +155,26 @@ def session_id(request: Request | None) -> str:
     return str(getattr(state, "mcp_session_id", "") or "")
 
 
+def workspace_affinity_id(request: Request | None) -> str:
+    """Stable workspace-only identity for OpenAI MCP transport fan-out.
+
+    ChatGPT may rotate x-openai-session between tool calls in the same account
+    context.  x-openai-subject remains the authenticated connector subject.
+    Hash it so the raw value is never stored, and use it only for the browser
+    workspace lease -- never for general MCP auth/session state.
+    """
+    if request is None:
+        return ""
+    headers = getattr(request, "headers", {})
+    ua = str(headers.get("user-agent") or "").lower()
+    subject = str(headers.get("x-openai-subject") or "").strip()
+    if not subject or "openai-mcp" not in ua:
+        return ""
+    import hashlib
+    digest = hashlib.sha256(subject.encode("utf-8")).hexdigest()
+    return "openai-subject-" + digest[:40]
+
+
 def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List[Dict[str, Any]]:
     """Overlay browser-workspace tools onto the canonical MCP surface.
 
@@ -255,7 +275,8 @@ def _workspace_id_from_legacy_arguments(arguments: Dict[str, Any]) -> str:
 
 async def _claim_workspace_for_session(request: Request, workspace_id: str) -> Dict[str, Any]:
     sid = session_id(request)
-    effective_sid = sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
+    affinity_sid = workspace_affinity_id(request)
+    effective_sid = affinity_sid or sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
     try:
         from app.services.mcp_workspace_sessions import claim_waiting_workspace
         binding = claim_waiting_workspace(workspace_id, effective_sid)
@@ -341,7 +362,10 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             "isError": False,
         }
 
-    binding = get_workspace(sid) if sid else None
+    affinity_sid = workspace_affinity_id(request)
+    binding = get_workspace(affinity_sid) if affinity_sid else None
+    if binding is None and sid:
+        binding = get_workspace(sid)
     if binding is None and workspace_token:
         binding = get_workspace_by_token(workspace_token)
 
@@ -369,9 +393,10 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
                 },
                 "isError": False,
             }
-        if sid:
+        pair_session_id = affinity_sid or sid
+        if pair_session_id:
             from app.services.mcp_workspace_sessions import get_or_create_pair_code
-            code = get_or_create_pair_code(sid)
+            code = get_or_create_pair_code(pair_session_id)
             return {
                 "content": [{"type": "text", "text": (
                     "No local workspace is paired. Open the TriForce MCP setup page, choose the folder and mode, "

@@ -321,3 +321,31 @@ async def test_workspace_status_rejects_invalid_workspace_id():
     req = DummyRequest('chatgpt-auto')
     result = await call_public_local_tool(req, 'workspace_status', {'workspace_id': 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'})
     assert result['structuredContent']['code'] == 'WORKSPACE_PAIR_FAILED'
+
+
+@pytest.mark.asyncio
+async def test_openai_subject_affinity_shares_workspace_across_transport_sessions():
+    from app.services.mcp_workspace_bridge import workspace_affinity_id
+
+    class OpenAIRequest:
+        def __init__(self, session_id):
+            self.state = SimpleNamespace(mcp_auth_method='public_guest', mcp_session_id=session_id)
+            self.headers = {
+                'user-agent': 'openai-mcp/1.0.0',
+                'x-openai-subject': 'same-subject',
+                'x-openai-session': session_id,
+            }
+
+    req_a = OpenAIRequest('transport-A')
+    req_b = OpenAIRequest('transport-B')
+    assert workspace_affinity_id(req_a) == workspace_affinity_id(req_b)
+
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('shared-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['code_tree'])
+    paired = await call_public_local_tool(req_a, 'code_search', {'query': code})
+    assert paired['structuredContent']['connected'] is True
+
+    result = await call_public_local_tool(req_b, 'code_tree', {'path': '.', 'depth': 1, 'max_entries': 10})
+    assert result['isError'] is False
+    assert conn.calls[-1][1]['tool'] == 'code_tree'
