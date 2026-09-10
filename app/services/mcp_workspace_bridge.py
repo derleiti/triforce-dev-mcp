@@ -147,17 +147,34 @@ def session_id(request: Request | None) -> str:
     return str(getattr(state, "mcp_session_id", "") or "")
 
 
-def merge_public_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List[Dict[str, Any]]:
-    if not is_public_guest(request):
-        return tools
-    merged = {
-        str(tool.get("name") or ""): deepcopy(tool)
-        for tool in tools
-        if isinstance(tool, dict) and str(tool.get("name") or "") in PUBLIC_GUEST_CLOUD_TOOLS
-    }
+def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List[Dict[str, Any]]:
+    """Overlay browser-workspace tools onto the canonical MCP surface.
+
+    Public guests retain the intentionally small cloud allowlist. Authenticated
+    clients keep their normal RBAC-filtered catalog and gain the same browser
+    workspace controls. Authentication therefore adds capabilities; it never
+    selects a different MCP product surface or downgrades privileges.
+    """
+    if is_public_guest(request):
+        merged = {
+            str(tool.get("name") or ""): deepcopy(tool)
+            for tool in tools
+            if isinstance(tool, dict) and str(tool.get("name") or "") in PUBLIC_GUEST_CLOUD_TOOLS
+        }
+    else:
+        merged = {
+            str(tool.get("name") or ""): deepcopy(tool)
+            for tool in tools
+            if isinstance(tool, dict) and str(tool.get("name") or "")
+        }
     for tool in _TOOL_SCHEMAS:
         merged[tool["name"]] = deepcopy(tool)
     return list(merged.values())
+
+
+# Backwards-compatible import name used by older tests/extensions.
+def merge_public_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List[Dict[str, Any]]:
+    return merge_workspace_tools(tools, request)
 
 
 def public_instructions(request: Request) -> str:
@@ -208,7 +225,7 @@ def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
     }
 
 
-async def call_public_local_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     sid = session_id(request)
 
     if name == "workspace_pair":
@@ -289,3 +306,9 @@ async def call_public_local_tool(request: Request, name: str, arguments: Dict[st
     if not isinstance(result, dict):
         raise RuntimeError("Browser workspace returned an invalid MCP tool result")
     return result
+
+
+# Backwards-compatible import name. Workspace routing is now shared by public
+# and authenticated sessions; RBAC for non-workspace tools remains unchanged.
+async def call_public_local_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    return await call_workspace_tool(request, name, arguments)

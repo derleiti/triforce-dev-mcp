@@ -279,8 +279,8 @@ def _finish_tools_list(
         filtered_tools.append(decorated)
     if request is not None:
         try:
-            from app.services.mcp_workspace_bridge import merge_public_workspace_tools
-            filtered_tools = merge_public_workspace_tools(filtered_tools, request)
+            from app.services.mcp_workspace_bridge import merge_workspace_tools
+            filtered_tools = merge_workspace_tools(filtered_tools, request)
         except Exception as exc:
             mcp_logger.warning("Public workspace tool merge failed: %s", exc)
     result: Dict[str, Any] = {
@@ -2465,9 +2465,9 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     arguments = params.get("arguments", {})
 
     if request is not None and tool_name:
-        from app.services.mcp_workspace_bridge import LOCAL_TOOL_NAMES, is_public_guest, call_public_local_tool
-        if is_public_guest(request) and str(tool_name) in LOCAL_TOOL_NAMES:
-            return await call_public_local_tool(
+        from app.services.mcp_workspace_bridge import LOCAL_TOOL_NAMES, call_workspace_tool
+        if str(tool_name) in LOCAL_TOOL_NAMES:
+            return await call_workspace_tool(
                 request, str(tool_name), arguments if isinstance(arguments, dict) else {}
             )
 

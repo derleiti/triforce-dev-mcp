@@ -21,8 +21,8 @@ class DummyConnection:
 
 
 class DummyRequest:
-    def __init__(self, session_id: str):
-        self.state = SimpleNamespace(mcp_auth_method='public_guest', mcp_session_id=session_id)
+    def __init__(self, session_id: str, auth_method: str = 'public_guest'):
+        self.state = SimpleNamespace(mcp_auth_method=auth_method, mcp_session_id=session_id)
 
 
 @pytest.fixture(autouse=True)
@@ -182,3 +182,16 @@ def test_live_transport_lease_cannot_be_hijacked_by_new_session():
     sessions.claim_waiting_workspace(code, 'transport-A')
     with pytest.raises(ValueError, match='active MCP session'):
         sessions.claim_waiting_workspace(code, 'transport-B')
+
+
+@pytest.mark.asyncio
+async def test_authenticated_session_can_pair_and_use_browser_workspace():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('authenticated-browser')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    req = DummyRequest('admin-session', auth_method='bearer')
+    paired = await call_public_local_tool(req, 'workspace_pair', {'code': code})
+    assert paired['structuredContent']['ok'] is True
+    read = await call_public_local_tool(req, 'file_read', {'path': 'README.md'})
+    assert read['isError'] is False
+    assert conn.calls[-1][1]['tool'] == 'file_read'

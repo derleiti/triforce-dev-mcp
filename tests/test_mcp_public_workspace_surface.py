@@ -29,10 +29,10 @@ async def test_public_guest_gets_cloud_surface_plus_local_workspace_tools():
 
 
 @pytest.mark.asyncio
-async def test_internal_admin_catalog_is_not_replaced_by_public_workspace_overlay():
+async def test_internal_admin_catalog_keeps_admin_tools_and_adds_workspace_overlay():
     result = await handle_tools_list({}, request=FakeRequest('bearer', True))
     names = {tool['name'] for tool in result['tools']}
-    assert 'workspace_status' not in names
+    assert {'workspace_status', 'workspace_pair', 'workspace_info', 'file_read', 'file_tree', 'file_edit'} <= names
     assert 'shell' in names
 
 
