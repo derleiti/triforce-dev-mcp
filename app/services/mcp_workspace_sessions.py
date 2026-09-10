@@ -14,6 +14,8 @@ All pairing codes are short-lived, single-use and kept only in memory.
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import secrets
 import time
 import uuid
@@ -21,7 +23,11 @@ from typing import Any, Optional
 
 PAIR_TTL_SECONDS = 15 * 60
 RECONNECT_TTL_SECONDS = 2 * 60 * 60
+LEASE_TTL_SECONDS = 30 * 24 * 60 * 60
 MAX_WEB_PAIR_TICKETS = 2048
+RESUME_TICKET_TTL_SECONDS = 60
+REDIS_LEASE_PREFIX = "triforce:workspace:lease:"
+REDIS_RESUME_PREFIX = "triforce:workspace:resume:"
 
 # Legacy/session-first pairing.
 _SESSION_PAIR: dict[str, dict[str, Any]] = {}
@@ -33,10 +39,156 @@ _WEB_PAIR: dict[str, dict[str, Any]] = {}
 
 # Active MCP session -> live local workspace binding.
 _SESSION_WORKSPACE: dict[str, dict[str, Any]] = {}
+# Resume-token hash -> live/in-memory web pair key. Raw resume tokens are never persisted server-side.
+_RESUME_INDEX: dict[str, str] = {}
+# One-shot WebSocket reconnect tickets. Values contain the raw resume token only
+# in process memory for at most 60 seconds so long-lived credentials never enter URLs/logs.
+_RESUME_TICKETS: dict[str, dict[str, Any]] = {}
 
 
 def _pair_key(code: str) -> str:
     return hashlib.sha256(str(code or "").strip().upper().encode("utf-8")).hexdigest()
+
+
+def _resume_key(token: str) -> str:
+    return hashlib.sha256(str(token or "").strip().encode("utf-8")).hexdigest()
+
+
+def _new_resume_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _redis_client():
+    try:
+        import redis
+        client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+        client.ping()
+        return client
+    except Exception:
+        return None
+
+
+def _persist_lease(item: dict[str, Any]) -> None:
+    """Persist reconnect metadata, never raw pair/resume credentials."""
+    lease_id = str(item.get("lease_id") or "")
+    resume_hash = str(item.get("resume_hash") or "")
+    if not lease_id or not resume_hash:
+        return
+    payload = {
+        "lease_id": lease_id,
+        "resume_hash": resume_hash,
+        "mode": normalize_workspace_access_mode(item.get("mode")),
+        "task": str(item.get("task") or "")[:4000],
+        "capabilities": list(item.get("capabilities") or []),
+        "paired_session_ids": list(item.get("paired_session_ids") or []),
+        "paired_session_id": item.get("paired_session_id"),
+        "helper_connected_at": float(item.get("helper_connected_at") or 0),
+        "expires_at": float(item.get("expires_at") or (time.time() + LEASE_TTL_SECONDS)),
+    }
+    client = _redis_client()
+    if client is None:
+        return
+    ttl = max(1, int(payload["expires_at"] - time.time()))
+    try:
+        client.setex(REDIS_LEASE_PREFIX + lease_id, ttl, json.dumps(payload, separators=(",", ":")))
+        client.setex(REDIS_RESUME_PREFIX + resume_hash, ttl, lease_id)
+    except Exception:
+        pass
+
+
+def _delete_persisted_lease(item: dict[str, Any]) -> None:
+    lease_id = str(item.get("lease_id") or "")
+    resume_hash = str(item.get("resume_hash") or "")
+    if resume_hash:
+        _RESUME_INDEX.pop(resume_hash, None)
+    client = _redis_client()
+    if client is None:
+        return
+    keys = []
+    if lease_id:
+        keys.append(REDIS_LEASE_PREFIX + lease_id)
+    if resume_hash:
+        keys.append(REDIS_RESUME_PREFIX + resume_hash)
+    if keys:
+        try:
+            client.delete(*keys)
+        except Exception:
+            pass
+
+
+def _load_lease_by_resume(token: str) -> Optional[dict[str, Any]]:
+    resume_hash = _resume_key(token)
+    pair_key = _RESUME_INDEX.get(resume_hash)
+    if pair_key:
+        item = _WEB_PAIR.get(pair_key)
+        if item and not _expired(item):
+            return item
+    client = _redis_client()
+    if client is None:
+        return None
+    try:
+        lease_id = client.get(REDIS_RESUME_PREFIX + resume_hash)
+        if not lease_id:
+            return None
+        raw = client.get(REDIS_LEASE_PREFIX + lease_id)
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if not secrets.compare_digest(str(data.get("resume_hash") or ""), resume_hash):
+            return None
+        now = time.time()
+        pair_key = "resume:" + resume_hash
+        item = {
+            "code": "",
+            "created_at": now,
+            "expires_at": float(data.get("expires_at") or (now + LEASE_TTL_SECONDS)),
+            "pair_expires_at": 0,
+            "connection": None,
+            "connection_id": None,
+            "client_id": "",
+            "mode": normalize_workspace_access_mode(data.get("mode")),
+            "task": str(data.get("task") or ""),
+            "capabilities": list(data.get("capabilities") or []),
+            "paired_session_id": data.get("paired_session_id"),
+            "paired_session_ids": list(data.get("paired_session_ids") or []),
+            "lease_id": str(data.get("lease_id") or lease_id),
+            "resume_hash": resume_hash,
+            "resume_token": str(token),
+            "helper_connected_at": float(data.get("helper_connected_at") or 0),
+        }
+        _WEB_PAIR[pair_key] = item
+        _RESUME_INDEX[resume_hash] = pair_key
+        return item
+    except Exception:
+        return None
+
+
+def resolve_resume_token(token: str) -> Optional[dict[str, Any]]:
+    item = _load_lease_by_resume(token)
+    return dict(item) if item and not _expired(item) else None
+
+
+def create_workspace_resume_ticket(token: str) -> str:
+    if not resolve_resume_token(token):
+        raise ValueError("Invalid or expired workspace resume token")
+    now = time.time()
+    for key, item in list(_RESUME_TICKETS.items()):
+        if float(item.get("expires_at") or 0) <= now:
+            _RESUME_TICKETS.pop(key, None)
+    code = _new_code()
+    _RESUME_TICKETS[_pair_key(code)] = {
+        "resume_token": str(token),
+        "expires_at": now + RESUME_TICKET_TTL_SECONDS,
+    }
+    return code
+
+
+def consume_workspace_resume_ticket(code: str) -> str:
+    item = _RESUME_TICKETS.pop(_pair_key(code), None)
+    if not item or float(item.get("expires_at") or 0) <= time.time():
+        return ""
+    token = str(item.get("resume_token") or "")
+    return token if resolve_resume_token(token) else ""
 
 
 
@@ -79,6 +231,7 @@ def create_web_pair_code() -> str:
         "code": code,
         "created_at": now,
         "expires_at": now + PAIR_TTL_SECONDS,
+        "pair_expires_at": now + PAIR_TTL_SECONDS,
         "connection": None,
         "connection_id": None,
         "client_id": "",
@@ -86,6 +239,7 @@ def create_web_pair_code() -> str:
         "task": "",
         "paired_session_id": None,
         "paired_session_ids": [],
+        "resume_hash": "",
     }
     return code
 
@@ -93,8 +247,7 @@ def create_web_pair_code() -> str:
 def resolve_web_pair_code(code: str) -> Optional[dict[str, Any]]:
     key = _pair_key(code)
     item = _WEB_PAIR.get(key)
-    if _expired(item):
-        _WEB_PAIR.pop(key, None)
+    if _expired(item) or float(item.get("pair_expires_at") or item.get("expires_at") or 0) <= time.time():
         return None
     if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         return None
@@ -151,10 +304,13 @@ def promote_session_pair_to_web_lease(
     normalized_mode = normalize_workspace_access_mode(mode)
     now = time.time()
     lease_id = uuid.uuid4().hex
+    resume_token = _new_resume_token()
+    resume_hash = _resume_key(resume_token)
     _WEB_PAIR[key] = {
         "code": str(code).strip().upper(),
         "created_at": now,
-        "expires_at": now + RECONNECT_TTL_SECONDS,
+        "expires_at": now + LEASE_TTL_SECONDS,
+        "pair_expires_at": now + PAIR_TTL_SECONDS,
         "connection": connection,
         "connection_id": id(connection),
         "client_id": str(getattr(connection, "client_id", "")),
@@ -164,15 +320,21 @@ def promote_session_pair_to_web_lease(
         "paired_session_id": session_id,
         "paired_session_ids": [session_id],
         "lease_id": lease_id,
+        "resume_hash": resume_hash,
+        "resume_token": resume_token,
         "helper_connected_at": now,
     }
+    _RESUME_INDEX[resume_hash] = key
+    _persist_lease(_WEB_PAIR[key])
     pair = _SESSION_PAIR.pop(session_id, None)
     if pair:
         _PAIR_INDEX.pop(key, None)
-    return bind_workspace(
+    binding = bind_workspace(
         session_id, connection, mode=normalized_mode, task=task, capabilities=capabilities,
         reconnect_pair_key=key, lease_id=lease_id,
     )
+    binding["resume_token"] = resume_token
+    return binding
 
 
 def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
@@ -184,12 +346,17 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     """
     key = _pair_key(code)
     item = _WEB_PAIR.get(key)
-    if _expired(item):
-        _WEB_PAIR.pop(key, None)
+    if _expired(item) or float((item or {}).get("pair_expires_at") or (item or {}).get("expires_at") or 0) <= time.time():
         raise ValueError("Invalid or expired workspace pairing code")
     if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         raise ValueError("Invalid workspace pairing code")
     connection = item.get("connection")
+    resume_token = str(item.get("resume_token") or "")
+    if not str(item.get("resume_hash") or ""):
+        resume_token = _new_resume_token()
+        item["resume_hash"] = _resume_key(resume_token)
+        item["resume_token"] = resume_token
+        _RESUME_INDEX[item["resume_hash"]] = key
     aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
     legacy = str(item.get("paired_session_id") or "")
     if legacy:
@@ -208,8 +375,8 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
         item["paired_session_id"] = session_id
         item["paired_session_ids"] = sorted(aliases)
         item["lease_id"] = lease_id
-        item["expires_at"] = time.time() + RECONNECT_TTL_SECONDS
-        return bind_workspace(
+        item["expires_at"] = time.time() + LEASE_TTL_SECONDS
+        binding = bind_workspace(
             session_id, None,
             mode=str(item.get("mode") or "read_only"),
             task=str(item.get("task") or ""),
@@ -217,6 +384,10 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
             reconnect_pair_key=key,
             lease_id=lease_id,
         )
+        _persist_lease(item)
+        if resume_token:
+            binding["resume_token"] = resume_token
+        return binding
 
     current = get_workspace(session_id)
     if current and current.get("reconnect_pair_key") == key:
@@ -227,8 +398,8 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     item["paired_session_id"] = session_id
     item["paired_session_ids"] = sorted(aliases)
     item["lease_id"] = lease_id
-    item["expires_at"] = time.time() + RECONNECT_TTL_SECONDS
-    return bind_workspace(
+    item["expires_at"] = time.time() + LEASE_TTL_SECONDS
+    binding = bind_workspace(
         session_id, connection,
         mode=str(item.get("mode") or "read_only"),
         task=str(item.get("task") or ""),
@@ -236,6 +407,73 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
         reconnect_pair_key=key,
         lease_id=lease_id,
     )
+    _persist_lease(item)
+    if resume_token:
+        binding["resume_token"] = resume_token
+    return binding
+
+
+def claim_workspace_with_resume_token(token: str, session_id: str) -> dict[str, Any]:
+    """Attach a new MCP transport identity to a persisted workspace lease."""
+    item = _load_lease_by_resume(token)
+    if not item or _expired(item):
+        raise ValueError("Invalid or expired workspace resume token")
+    key = _RESUME_INDEX.get(str(item.get("resume_hash") or ""))
+    if not key:
+        raise ValueError("Workspace lease is unavailable")
+    aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
+    aliases.add(session_id)
+    item["paired_session_ids"] = sorted(aliases)
+    item["paired_session_id"] = session_id
+    item["expires_at"] = time.time() + LEASE_TTL_SECONDS
+    connection = item.get("connection") if _connection_live(item) else None
+    binding = bind_workspace(
+        session_id, connection,
+        mode=str(item.get("mode") or "read_only"),
+        task=str(item.get("task") or ""),
+        capabilities=list(item.get("capabilities") or []),
+        reconnect_pair_key=key, lease_id=str(item.get("lease_id") or uuid.uuid4().hex),
+    )
+    _persist_lease(item)
+    return binding
+
+
+def reconnect_workspace_with_resume_token(token: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None) -> dict[str, Any]:
+    """Reconnect a browser executor using the durable lease handoff token."""
+    item = _load_lease_by_resume(token)
+    if not item or _expired(item):
+        raise ValueError("Invalid or expired workspace resume token")
+    key = _RESUME_INDEX.get(str(item.get("resume_hash") or ""))
+    if not key:
+        raise ValueError("Workspace lease is unavailable")
+    aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
+    legacy = str(item.get("paired_session_id") or "")
+    if legacy:
+        aliases.add(legacy)
+    normalized_mode = normalize_workspace_access_mode(mode)
+    # A reconnect may not silently escalate a read-only lease.
+    stored_mode = normalize_workspace_access_mode(item.get("mode"))
+    if stored_mode != "write":
+        normalized_mode = "read_only"
+    now = time.time()
+    item.update({
+        "connection": connection, "connection_id": id(connection),
+        "client_id": str(getattr(connection, "client_id", "")),
+        "mode": normalized_mode, "task": str(task or item.get("task") or "")[:4000],
+        "capabilities": sorted({str(x) for x in (capabilities or item.get("capabilities") or []) if str(x)}),
+        "expires_at": now + LEASE_TTL_SECONDS, "helper_connected_at": now,
+        "paired_session_ids": sorted(aliases),
+    })
+    result = None
+    for alias in sorted(aliases):
+        bound = bind_workspace(alias, connection, mode=normalized_mode, task=item["task"], capabilities=item["capabilities"], reconnect_pair_key=key, lease_id=str(item.get("lease_id") or uuid.uuid4().hex))
+        result = result or bound
+    _persist_lease(item)
+    return result or {
+        "session_id": "", "connection": connection, "mode": normalized_mode,
+        "task": item["task"], "capabilities": list(item["capabilities"]),
+        "lease_id": str(item.get("lease_id") or ""), "reconnect_pair_key": key,
+    }
 
 
 def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None) -> dict[str, Any]:
@@ -261,11 +499,13 @@ def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str 
         "mode": normalized_mode,
         "task": str(task or "")[:4000],
         "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
-        "expires_at": time.time() + RECONNECT_TTL_SECONDS,
+        "expires_at": time.time() + LEASE_TTL_SECONDS,
         "helper_connected_at": time.time(),
         "paired_session_ids": sorted(aliases),
     })
     lease_id = str(item.get("lease_id") or uuid.uuid4().hex)
+    item["lease_id"] = lease_id
+    _persist_lease(item)
     primary = str(item.get("paired_session_id") or next(iter(aliases)))
     result = None
     for alias in sorted(aliases):
@@ -328,7 +568,7 @@ def get_workspace_by_token(token: str | None) -> Optional[dict[str, Any]]:
     """Resolve a web pairing ID as a transport-independent workspace lease token."""
     if not token:
         return None
-    web = resolve_web_pair_code(str(token))
+    web = resolve_web_pair_code(str(token)) or resolve_resume_token(str(token))
     if not web:
         return None
     aliases = [str(x) for x in (web.get("paired_session_ids") or []) if str(x)]
@@ -383,7 +623,7 @@ def bind_workspace(
         "reconnect_pair_key": reconnect_pair_key,
         "lease_id": str(lease_id or uuid.uuid4().hex),
         "transport_active": True,
-        "reconnect_until": time.time() + RECONNECT_TTL_SECONDS if reconnect_pair_key else 0,
+        "reconnect_until": time.time() + LEASE_TTL_SECONDS if reconnect_pair_key else 0,
         "bound_at": time.time(),
     }
     _SESSION_WORKSPACE[session_id] = binding
@@ -395,6 +635,8 @@ def bind_workspace(
             aliases = {str(x) for x in (pair_item.get("paired_session_ids") or []) if str(x)}
             aliases.add(session_id)
             pair_item["paired_session_ids"] = sorted(aliases)
+            pair_item["expires_at"] = time.time() + LEASE_TTL_SECONDS
+            _persist_lease(pair_item)
     pair = _SESSION_PAIR.pop(session_id, None)
     if pair:
         _PAIR_INDEX.pop(_pair_key(str(pair.get("code") or "")), None)
@@ -473,11 +715,12 @@ def suspend_connection(connection: Any) -> None:
         if not pair_key:
             _SESSION_WORKSPACE.pop(session_id, None)
             continue
-        until = now + RECONNECT_TTL_SECONDS
+        until = now + LEASE_TTL_SECONDS
         item.update({"connection": None, "connection_id": None, "client_id": "", "suspended_at": now, "reconnect_until": until})
         pair = _WEB_PAIR.get(pair_key)
         if pair:
             pair.update({"connection": None, "connection_id": None, "client_id": "", "expires_at": until})
+            _persist_lease(pair)
     for item in _WEB_PAIR.values():
         if item.get("connection_id") == id(connection):
             item.update({"connection": None, "connection_id": None, "client_id": ""})
@@ -488,11 +731,15 @@ def unbind_connection(connection: Any) -> None:
         if item.get("connection_id") == id(connection):
             pair_key = str(item.get("reconnect_pair_key") or "")
             if pair_key:
-                _WEB_PAIR.pop(pair_key, None)
+                pair = _WEB_PAIR.pop(pair_key, None)
+                if pair:
+                    _delete_persisted_lease(pair)
             _SESSION_WORKSPACE.pop(session_id, None)
     for key, item in list(_WEB_PAIR.items()):
         if item.get("connection_id") == id(connection):
-            _WEB_PAIR.pop(key, None)
+            removed = _WEB_PAIR.pop(key, None)
+            if removed:
+                _delete_persisted_lease(removed)
 
 
 def clear_session(session_id: str) -> None:
@@ -510,7 +757,11 @@ def clear_session(session_id: str) -> None:
             if str(item.get("paired_session_id") or "") == session_id:
                 item["paired_session_id"] = next(iter(sorted(aliases)), None)
             if not aliases:
-                _WEB_PAIR.pop(pair_key, None)
+                removed = _WEB_PAIR.pop(pair_key, None)
+                if removed:
+                    _delete_persisted_lease(removed)
+            else:
+                _persist_lease(item)
 
 
 def _cleanup_web_pairs() -> None:
@@ -536,6 +787,7 @@ def workspace_status(session_id: str) -> dict[str, Any]:
             "transport_active": bool(binding.get("transport_active", True)),
             "capabilities": list(binding.get("capabilities") or []),
             "reconnect_until": float(binding.get("reconnect_until") or 0),
+            "persistent_lease": bool(binding.get("reconnect_pair_key")),
         }
     return {
         "state": "unpaired",

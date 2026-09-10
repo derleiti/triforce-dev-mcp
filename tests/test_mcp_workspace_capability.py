@@ -26,16 +26,21 @@ class DummyRequest:
 
 
 @pytest.fixture(autouse=True)
-def clear_state():
+def clear_state(monkeypatch):
     sessions._SESSION_PAIR.clear()
     sessions._PAIR_INDEX.clear()
     sessions._SESSION_WORKSPACE.clear()
     sessions._WEB_PAIR.clear()
+    sessions._RESUME_INDEX.clear()
+    sessions._RESUME_TICKETS.clear()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: None)
     yield
     sessions._SESSION_PAIR.clear()
     sessions._PAIR_INDEX.clear()
     sessions._SESSION_WORKSPACE.clear()
     sessions._WEB_PAIR.clear()
+    sessions._RESUME_INDEX.clear()
+    sessions._RESUME_TICKETS.clear()
 
 
 def test_pairing_code_is_session_scoped_and_consumed_on_bind():
@@ -224,9 +229,10 @@ async def test_sessionless_pair_uses_pair_code_as_transport_independent_token():
 
     paired = await call_public_local_tool(req, 'workspace_pair', {'code': code})
     assert paired['structuredContent']['ok'] is True
-    assert paired['structuredContent']['workspace_token'] == code
+    assert paired['structuredContent']['workspace_token'] != code
+    assert len(paired['structuredContent']['workspace_token']) >= 40
 
-    read = await call_public_local_tool(req, 'file_read', {'path': 'README.md', 'workspace_token': code})
+    read = await call_public_local_tool(req, 'file_read', {'path': 'README.md', 'workspace_token': paired['structuredContent']['workspace_token']})
     assert read['isError'] is False
     assert conn.calls[-1][1]['tool'] == 'file_read'
     assert 'workspace_token' not in conn.calls[-1][1]['arguments']
@@ -469,3 +475,87 @@ async def test_invalid_code_shaped_search_remains_search_on_live_workspace():
     result = await call_public_local_tool(req, 'code_search', {'query': query})
     assert result['isError'] is False
     assert conn.calls[-1][1]['arguments']['query'] == query
+
+
+class FakeRedis:
+    def __init__(self):
+        self.data = {}
+    def ping(self):
+        return True
+    def setex(self, key, ttl, value):
+        self.data[key] = value
+    def get(self, key):
+        return self.data.get(key)
+    def delete(self, *keys):
+        for key in keys:
+            self.data.pop(key, None)
+
+
+def test_resume_token_restores_lease_after_process_state_loss(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('persist-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'chatgpt-old')
+    token = first['resume_token']
+    lease_id = first['lease_id']
+
+    # Simulate a TriForce process restart: only Redis survives.
+    sessions._SESSION_WORKSPACE.clear()
+    sessions._WEB_PAIR.clear()
+    sessions._RESUME_INDEX.clear()
+
+    rebound = sessions.claim_workspace_with_resume_token(token, 'chatgpt-new')
+    assert rebound['lease_id'] == lease_id
+    assert sessions.workspace_status('chatgpt-new')['state'] == 'suspended'
+    replacement = DummyConnection('persist-browser-2')
+    resumed = sessions.reconnect_workspace_with_resume_token(
+        token, replacement, mode='write', capabilities=['file_read']
+    )
+    assert resumed['lease_id'] == lease_id
+    assert sessions.workspace_status('chatgpt-new')['state'] == 'connected'
+
+
+def test_pair_code_stays_short_lived_after_durable_lease_created(monkeypatch):
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('pair-expiry-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    bound = sessions.claim_waiting_workspace(code, 'session-A')
+    token = bound['resume_token']
+    item = sessions._WEB_PAIR[sessions._pair_key(code)]
+    item['pair_expires_at'] = sessions.time.time() - 1
+    assert sessions.resolve_web_pair_code(code) is None
+    with pytest.raises(ValueError, match='expired workspace pairing code'):
+        sessions.claim_waiting_workspace(code, 'session-B')
+    assert sessions.resolve_resume_token(token) is not None
+
+
+@pytest.mark.asyncio
+async def test_workspace_token_rebinds_new_mcp_transport(monkeypatch):
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('handoff-browser')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    first_req = DummyRequest('transport-old')
+    paired = await call_public_local_tool(first_req, 'workspace_pair', {'code': code})
+    token = paired['structuredContent']['workspace_token']
+
+    sessions._SESSION_WORKSPACE.pop('transport-old', None)
+    new_req = DummyRequest('transport-new')
+    read = await call_public_local_tool(new_req, 'file_read', {'path': 'README.md', 'workspace_token': token})
+    assert read['isError'] is False
+    assert sessions.get_workspace('transport-new')['lease_id'] == paired['structuredContent']['lease_id']
+
+
+def test_resume_ticket_is_one_shot_and_does_not_expose_resume_token():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('ticket-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    bound = sessions.claim_waiting_workspace(code, 'session-A')
+    token = bound['resume_token']
+    ticket = sessions.create_workspace_resume_ticket(token)
+    assert ticket != token
+    assert token not in ticket
+    consumed = sessions.consume_workspace_resume_ticket(ticket)
+    assert consumed == token
+    assert sessions.consume_workspace_resume_ticket(ticket) == ''

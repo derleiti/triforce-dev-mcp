@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 from fastapi import Request
 
 from .mcp_workspace_sessions import (
-    get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
+    claim_workspace_with_resume_token, get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
     resolve_web_pair_code, workspace_status as lease_status,
 )
 
@@ -285,6 +285,8 @@ def _workspace_binding_response(binding: Dict[str, Any], *, token: str = "") -> 
     }
     if token:
         data["workspace_token"] = token
+    elif binding.get("resume_token"):
+        data["workspace_token"] = binding["resume_token"]
     text = (
         f"Browser workspace connected with {data['access_mode']} access."
         if live else
@@ -338,17 +340,18 @@ async def _claim_workspace_for_session(request: Request, workspace_id: str) -> D
                     "ok": True, "state": "connected", "connected": True,
                     "access_mode": binding["mode"], "mode": binding["mode"],
                     "lease_id": binding.get("lease_id", ""),
+                    "resume_token": binding.get("resume_token", ""),
                 },
             })
         except Exception:
             pass
-    return _workspace_binding_response(binding, token=workspace_id)
+    return _workspace_binding_response(binding, token=str(binding.get("resume_token") or ""))
 
 
 async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     sid = session_id(request)
     arguments = dict(arguments or {})
-    workspace_token = str(arguments.pop("workspace_token", "") or "").strip().upper()
+    workspace_token = str(arguments.pop("workspace_token", "") or "").strip()
     workspace_id = str(arguments.pop("workspace_id", "") or "").strip().upper()
 
     if name == "workspace_pair":
@@ -376,18 +379,26 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
                     "params": {
                         "ok": True, "connected": True, "mode": binding["mode"],
                         "lease_id": binding.get("lease_id", ""),
+                        "resume_token": binding.get("resume_token", ""),
                     },
                 })
             except Exception:
                 pass
-        return _workspace_binding_response(binding, token=code)
+        return _workspace_binding_response(binding, token=str(binding.get("resume_token") or ""))
 
     affinity_sid = workspace_affinity_id(request)
     binding = get_workspace_lease(affinity_sid) if affinity_sid else None
     if binding is None and sid:
         binding = get_workspace_lease(sid)
     if binding is None and workspace_token:
-        binding = get_workspace_by_token(workspace_token)
+        effective_sid = affinity_sid or sid
+        if effective_sid:
+            try:
+                binding = claim_workspace_with_resume_token(workspace_token, effective_sid)
+            except Exception:
+                binding = None
+        else:
+            binding = get_workspace_by_token(workspace_token)
 
     # Compatibility for MCP hosts that cached an older workspace schema. The
     # assistant may carry an exact workspace ID through an existing string

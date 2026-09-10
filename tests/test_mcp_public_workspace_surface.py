@@ -43,9 +43,9 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'heartbeatTimer=null' in html
     assert "new URLSearchParams(location.search).get('pair_code')" in html
     assert 'history.replaceState' in html
-    assert 'manualDisconnect||!pairCode||reconnectTimer||!navigator.onLine' in html
-    assert 'manualDisconnect||!pairCode||(!rootHandle&&!rootEntry)||!navigator.onLine' in html
-    assert "/pairing code/i.test" in html
+    assert 'manualDisconnect||(!resumeToken&&!pairCode)||reconnectTimer||!navigator.onLine' in html
+    assert 'manualDisconnect||(!resumeToken&&!pairCode)||(!rootHandle&&!rootEntry)||!navigator.onLine' in html
+    assert "pairing code|workspace credential|resume token" in html
     assert "sessionStorage.removeItem('tf_pair_code')" in html
     assert 'Workspace pairing expired. Creating a fresh pairing ID' in html
     assert 'function startHeartbeat()' in html
@@ -82,10 +82,17 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'isSameEntry' in html
     assert 'Folder handle shared and persistence verified.' in html
     assert 'Saved directory handle restored · permission=' in html
-    assert 'resume_token' not in html
+    assert '&resume_token=' not in html
     assert 'data-cfasync="false"' in html
     assert 'client_workspace_tool' in html
     assert 'triforce-workspace://' not in html
     assert 'id="pairPanel" class="hidden"' in html
     assert '/v1/mcp/workspace/pair-ticket' in html
+    assert "deleteWorkspaceState('resumeToken')" in html
+    assert "loadWorkspaceState('workspaceMode')" in html
+    assert '/v1/mcp/workspace/resume-ticket' in html
     assert '__PAIR_CODE__' not in html
+    assert 'persistent workspace session' in html
+    assert "saveWorkspaceState('resumeToken'" in html
+    assert "resume_token" in html
+    assert "resumeToken" in html

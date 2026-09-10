@@ -345,16 +345,21 @@ async def websocket_connect(
     is_telemetry_only = mode == "telemetry"
     is_workspace_node = mode == "workspace"
     pair_code = str(websocket.query_params.get("pair_code") or "").strip().upper()
+    resume_token = ""
     paired_mcp_session = None
     workspace_pair_kind = "invalid"
     if is_workspace_node:
         try:
-            from app.services.mcp_workspace_sessions import pair_code_kind
-            workspace_pair_kind, paired_mcp_session = pair_code_kind(pair_code)
+            from app.services.mcp_workspace_sessions import consume_workspace_resume_ticket, pair_code_kind
+            resume_token = consume_workspace_resume_ticket(pair_code)
+            if resume_token:
+                workspace_pair_kind = "resume"
+            else:
+                workspace_pair_kind, paired_mcp_session = pair_code_kind(pair_code)
         except Exception:
             workspace_pair_kind, paired_mcp_session = "invalid", None
         if workspace_pair_kind == "invalid":
-            await websocket.send_json({"error": "Invalid or expired workspace pairing code"})
+            await websocket.send_json({"error": "Invalid or expired workspace credential"})
             await websocket.close(code=4003)
             return
     
@@ -481,7 +486,17 @@ async def websocket_connect(
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": False, "error": "client_workspace_tool must be advertised first"}})
                     continue
                 share = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
-                if workspace_pair_kind == "reconnect" and paired_mcp_session:
+                if workspace_pair_kind == "resume" and resume_token:
+                    from app.services.mcp_workspace_sessions import reconnect_workspace_with_resume_token
+                    binding = reconnect_workspace_with_resume_token(
+                        resume_token, connection,
+                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
+                        task=str(share.get("task") or ""),
+                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                    )
+                    logger.info("Local workspace resumed | lease=%s client=%s mode=%s", str(binding.get("lease_id") or "")[:12], client_id, binding["mode"])
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True}})
+                elif workspace_pair_kind == "reconnect" and paired_mcp_session:
                     from app.services.mcp_workspace_sessions import reconnect_web_workspace
                     binding = reconnect_web_workspace(
                         pair_code, connection,
@@ -500,7 +515,7 @@ async def websocket_connect(
                         capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace paired | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "resume_token": binding.get("resume_token", "")}})
                 else:
                     from app.services.mcp_workspace_sessions import register_waiting_workspace
                     waiting = register_waiting_workspace(
