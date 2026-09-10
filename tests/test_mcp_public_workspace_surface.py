@@ -77,6 +77,11 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "window.addEventListener('pagehide'" not in html
     assert 'tf_resume_token' not in html
     assert 'indexedDB' in html
+    assert "const persistentHandleStore='indexedDB' in window" in html
+    assert 'directory handle did not survive IndexedDB round-trip' in html
+    assert 'isSameEntry' in html
+    assert 'Folder handle shared and persistence verified.' in html
+    assert 'Saved directory handle restored · permission=' in html
     assert 'resume_token' not in html
     assert 'data-cfasync="false"' in html
     assert 'client_workspace_tool' in html
