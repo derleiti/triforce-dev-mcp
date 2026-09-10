@@ -14,7 +14,8 @@ from typing import Any, Dict, List
 from fastapi import Request
 
 from .mcp_workspace_sessions import (
-    get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached, workspace_status as lease_status,
+    get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
+    resolve_web_pair_code, workspace_status as lease_status,
 )
 
 CONTROL_TOOLS = {"workspace_status", "workspace_pair"}
@@ -388,13 +389,15 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if binding is None and workspace_token:
         binding = get_workspace_by_token(workspace_token)
 
-    # Compatibility for MCP hosts that cached the old parameterless
-    # workspace_status schema.  The assistant may carry an exact workspace ID
-    # through an existing string argument (for example code_search.query).
-    # Consume it only while unpaired and never forward it to the browser tool.
-    if binding is None and not workspace_id and name in (BROWSER_READ_TOOLS | BROWSER_WRITE_TOOLS):
+    # Compatibility for MCP hosts that cached an older workspace schema. The
+    # assistant may carry an exact workspace ID through an existing string
+    # argument (for example code_search.query). A *currently valid* browser
+    # pairing ID is explicit authorization to switch/rebind workspaces, even if
+    # this MCP identity still has an older suspended lease. Invalid code-shaped
+    # strings keep normal tool semantics when a live workspace already exists.
+    if not workspace_id and name in (BROWSER_READ_TOOLS | BROWSER_WRITE_TOOLS):
         legacy_workspace_id = _workspace_id_from_legacy_arguments(arguments)
-        if legacy_workspace_id:
+        if legacy_workspace_id and (resolve_web_pair_code(legacy_workspace_id) or binding is None):
             return await _claim_workspace_for_session(request, legacy_workspace_id)
 
     if name == "workspace_status":

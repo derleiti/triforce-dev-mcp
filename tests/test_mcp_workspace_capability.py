@@ -433,3 +433,39 @@ def test_unseen_browser_ticket_cannot_be_claimed_while_offline():
     code = sessions.create_web_pair_code()
     with pytest.raises(RuntimeError, match='browser has not connected'):
         sessions.claim_waiting_workspace(code, 'chatgpt-too-early')
+
+
+@pytest.mark.asyncio
+async def test_valid_new_workspace_id_rebinds_from_old_suspended_lease():
+    old_code = sessions.create_web_pair_code()
+    old_conn = DummyConnection('old-browser')
+    sessions.register_waiting_workspace(old_code, old_conn, mode='write', capabilities=['code_search'])
+    sessions.claim_waiting_workspace(old_code, 'session-A')
+    sessions.suspend_connection(old_conn)
+
+    new_code = sessions.create_web_pair_code()
+    new_conn = DummyConnection('new-browser')
+    sessions.register_waiting_workspace(new_code, new_conn, mode='read_only', capabilities=['code_search'])
+
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'code_search', {'query': new_code})
+    assert result['structuredContent']['connected'] is True
+    assert result['structuredContent']['access_mode'] == 'read_only'
+    assert sessions.get_workspace('session-A')['client_id'] == 'new-browser'
+
+    old_pair = sessions.resolve_web_pair_code(old_code)
+    assert old_pair is not None
+    assert 'session-A' not in old_pair['paired_session_ids']
+    assert old_pair['paired_session_id'] != 'session-A'
+
+
+@pytest.mark.asyncio
+async def test_invalid_code_shaped_search_remains_search_on_live_workspace():
+    conn = DummyConnection('live-browser')
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['code_search'])
+    req = DummyRequest('session-A')
+    query = 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'
+
+    result = await call_public_local_tool(req, 'code_search', {'query': query})
+    assert result['isError'] is False
+    assert conn.calls[-1][1]['arguments']['query'] == query

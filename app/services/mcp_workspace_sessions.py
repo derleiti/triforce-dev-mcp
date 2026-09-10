@@ -342,12 +342,36 @@ def get_workspace_by_token(token: str | None) -> Optional[dict[str, Any]]:
     return None
 
 
+def _detach_session_from_previous_pair(session_id: str, new_pair_key: str | None) -> None:
+    """Remove one MCP alias from its old workspace lease before rebinding it.
+
+    Without this, reconnecting an older browser tab could later bind the same
+    logical MCP identity back to a stale workspace after the user deliberately
+    switched to a new pairing ID.
+    """
+    current = _SESSION_WORKSPACE.get(session_id)
+    if not current:
+        return
+    old_pair_key = str(current.get("reconnect_pair_key") or "")
+    if not old_pair_key or old_pair_key == str(new_pair_key or ""):
+        return
+    old_pair = _WEB_PAIR.get(old_pair_key)
+    if old_pair is None:
+        return
+    aliases = {str(x) for x in (old_pair.get("paired_session_ids") or []) if str(x)}
+    aliases.discard(session_id)
+    old_pair["paired_session_ids"] = sorted(aliases)
+    if str(old_pair.get("paired_session_id") or "") == session_id:
+        old_pair["paired_session_id"] = next(iter(sorted(aliases)), None)
+
+
 def bind_workspace(
     session_id: str, connection: Any, *, mode: str, task: str = "",
     capabilities: list[str] | None = None, reconnect_pair_key: str | None = None,
     lease_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_mode = normalize_workspace_access_mode(mode)
+    _detach_session_from_previous_pair(session_id, reconnect_pair_key)
     binding = {
         "session_id": session_id,
         "connection": connection,
