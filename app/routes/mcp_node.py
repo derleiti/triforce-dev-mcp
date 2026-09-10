@@ -454,6 +454,10 @@ async def websocket_connect(
             if not isinstance(data, dict):
                 logger.warning("Ignoring non-object MCP message from %s", client_id)
                 continue
+            # Any valid application message proves the peer is alive. Browser
+            # clients additionally send an explicit 10s ping because mobile
+            # proxies/background policies can otherwise reap an idle socket.
+            connection.last_seen = datetime.now()
 
             # Response auf Tool-Call?
             if "result" in data or "error" in data or ("id" in data and "method" not in data):
@@ -550,8 +554,10 @@ async def websocket_connect(
 
             # Heartbeat
             elif data.get("method") == "ping":
-                connection.last_seen = datetime.now()
-                await websocket.send_json({"method": "pong"})
+                await websocket.send_json({"jsonrpc": "2.0", "method": "pong", "params": data.get("params", {})})
+            elif data.get("method") == "pong":
+                # last_seen was refreshed above; no response needed.
+                pass
 
     except WebSocketDisconnect:
         logger.info(f"Client disconnected: {client_id}")
