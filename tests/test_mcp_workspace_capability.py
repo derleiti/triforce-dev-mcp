@@ -620,3 +620,50 @@ async def test_mixed_local_tools_respect_read_only_mode():
     assert edit['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
     commit = await call_public_local_tool(req, 'git', {'mode': 'commit', 'message': 'x'})
     assert commit['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
+
+
+def test_workspace_join_id_persists_for_lease_lifetime(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('join-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
+    assert first['lease_id']
+    resolved = sessions.resolve_web_pair_code(code)
+    assert resolved is not None
+    assert resolved['lease_id'] == first['lease_id']
+    assert resolved['pair_expires_at'] > sessions.time.time() + sessions.PAIR_TTL_SECONDS
+
+
+def test_workspace_join_id_can_add_second_client_alias(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('join-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
+    second = sessions.claim_waiting_workspace(code, 'telegram-B')
+    assert second['lease_id'] == first['lease_id']
+    assert sessions.workspace_status('telegram-B')['access_mode'] == 'write'
+
+
+def test_workspace_join_id_restores_from_redis_after_process_loss(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('join-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
+    lease_id = first['lease_id']
+
+    sessions._SESSION_WORKSPACE.clear()
+    sessions._WEB_PAIR.clear()
+    sessions._RESUME_INDEX.clear()
+
+    restored = sessions.resolve_web_pair_code(code)
+    assert restored is not None
+    assert restored['lease_id'] == lease_id
+    second = sessions.claim_waiting_workspace(code, 'telegram-after-restart')
+    assert second['lease_id'] == lease_id
+    assert sessions.workspace_status('telegram-after-restart')['state'] == 'ready'

@@ -29,6 +29,7 @@ RESUME_TICKET_TTL_SECONDS = 60
 REDIS_LEASE_PREFIX = "triforce:workspace:lease:"
 REDIS_RESUME_PREFIX = "triforce:workspace:resume:"
 REDIS_ALIAS_PREFIX = "triforce:workspace:alias:"
+REDIS_JOIN_PREFIX = "triforce:workspace:join:"
 
 # Legacy/session-first pairing.
 _SESSION_PAIR: dict[str, dict[str, Any]] = {}
@@ -78,6 +79,7 @@ def _persist_lease(item: dict[str, Any]) -> None:
     payload = {
         "lease_id": lease_id,
         "resume_hash": resume_hash,
+        "join_hash": str(item.get("join_hash") or ""),
         "mode": normalize_workspace_access_mode(item.get("mode")),
         "task": str(item.get("task") or "")[:4000],
         "capabilities": list(item.get("capabilities") or []),
@@ -93,6 +95,8 @@ def _persist_lease(item: dict[str, Any]) -> None:
     try:
         client.setex(REDIS_LEASE_PREFIX + lease_id, ttl, json.dumps(payload, separators=(",", ":")))
         client.setex(REDIS_RESUME_PREFIX + resume_hash, ttl, lease_id)
+        if payload["join_hash"]:
+            client.setex(REDIS_JOIN_PREFIX + payload["join_hash"], ttl, lease_id)
         for alias in payload["paired_session_ids"]:
             if alias:
                 client.setex(REDIS_ALIAS_PREFIX + hashlib.sha256(str(alias).encode("utf-8")).hexdigest(), ttl, lease_id)
@@ -113,6 +117,9 @@ def _delete_persisted_lease(item: dict[str, Any]) -> None:
         keys.append(REDIS_LEASE_PREFIX + lease_id)
     if resume_hash:
         keys.append(REDIS_RESUME_PREFIX + resume_hash)
+    join_hash = str(item.get("join_hash") or "")
+    if join_hash:
+        keys.append(REDIS_JOIN_PREFIX + join_hash)
     for alias in item.get("paired_session_ids") or []:
         if alias:
             keys.append(REDIS_ALIAS_PREFIX + hashlib.sha256(str(alias).encode("utf-8")).hexdigest())
@@ -251,12 +258,63 @@ def create_web_pair_code() -> str:
     return code
 
 
+def _load_lease_by_join_code(code: str) -> Optional[dict[str, Any]]:
+    join_hash = _pair_key(code)
+    item = _WEB_PAIR.get(join_hash)
+    if item and not _expired(item):
+        return item
+    client = _redis_client()
+    if client is None:
+        return None
+    try:
+        lease_id = client.get(REDIS_JOIN_PREFIX + join_hash)
+        if not lease_id:
+            return None
+        raw = client.get(REDIS_LEASE_PREFIX + str(lease_id))
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if not secrets.compare_digest(str(data.get("join_hash") or ""), join_hash):
+            return None
+        now = time.time()
+        if float(data.get("expires_at") or 0) <= now:
+            return None
+        resume_hash = str(data.get("resume_hash") or "")
+        item = {
+            "code": str(code).strip().upper(),
+            "join_hash": join_hash,
+            "created_at": now,
+            "expires_at": float(data.get("expires_at") or (now + LEASE_TTL_SECONDS)),
+            "pair_expires_at": float(data.get("expires_at") or (now + LEASE_TTL_SECONDS)),
+            "connection": None,
+            "connection_id": None,
+            "client_id": "",
+            "mode": normalize_workspace_access_mode(data.get("mode")),
+            "task": str(data.get("task") or ""),
+            "capabilities": list(data.get("capabilities") or []),
+            "paired_session_id": data.get("paired_session_id"),
+            "paired_session_ids": list(data.get("paired_session_ids") or []),
+            "lease_id": str(data.get("lease_id") or lease_id),
+            "resume_hash": resume_hash,
+            "helper_connected_at": float(data.get("helper_connected_at") or 0),
+        }
+        _WEB_PAIR[join_hash] = item
+        if resume_hash:
+            _RESUME_INDEX[resume_hash] = join_hash
+        return item
+    except Exception:
+        return None
+
+
 def resolve_web_pair_code(code: str) -> Optional[dict[str, Any]]:
     key = _pair_key(code)
-    item = _WEB_PAIR.get(key)
+    item = _load_lease_by_join_code(code) or _WEB_PAIR.get(key)
     if _expired(item) or float(item.get("pair_expires_at") or item.get("expires_at") or 0) <= time.time():
         return None
-    if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
+    if item.get("join_hash"):
+        if not secrets.compare_digest(str(item.get("join_hash")), key):
+            return None
+    elif not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         return None
     return dict(item)
 
@@ -268,7 +326,10 @@ def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: s
     if _expired(item):
         _WEB_PAIR.pop(key, None)
         raise ValueError("Invalid or expired workspace pairing code")
-    if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
+    if item.get("join_hash"):
+        if not secrets.compare_digest(str(item.get("join_hash")), key):
+            raise ValueError("Invalid workspace pairing code")
+    elif not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         raise ValueError("Invalid workspace pairing code")
     existing = item.get("connection")
     if existing is not None and not bool(getattr(existing, "closed", True)) and id(existing) != id(connection):
@@ -317,7 +378,8 @@ def promote_session_pair_to_web_lease(
         "code": str(code).strip().upper(),
         "created_at": now,
         "expires_at": now + LEASE_TTL_SECONDS,
-        "pair_expires_at": now + PAIR_TTL_SECONDS,
+        "pair_expires_at": now + LEASE_TTL_SECONDS,
+        "join_hash": key,
         "connection": connection,
         "connection_id": id(connection),
         "client_id": str(getattr(connection, "client_id", "")),
@@ -352,7 +414,7 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     same browser lease concurrently instead of stealing a single session slot.
     """
     key = _pair_key(code)
-    item = _WEB_PAIR.get(key)
+    item = _load_lease_by_join_code(code) or _WEB_PAIR.get(key)
     if _expired(item) or float((item or {}).get("pair_expires_at") or (item or {}).get("expires_at") or 0) <= time.time():
         raise ValueError("Invalid or expired workspace pairing code")
     if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
@@ -364,6 +426,8 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
         item["resume_hash"] = _resume_key(resume_token)
         item["resume_token"] = resume_token
         _RESUME_INDEX[item["resume_hash"]] = key
+    item["join_hash"] = key
+    item["pair_expires_at"] = time.time() + LEASE_TTL_SECONDS
     aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
     legacy = str(item.get("paired_session_id") or "")
     if legacy:

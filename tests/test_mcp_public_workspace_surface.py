@@ -116,5 +116,9 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert '__PAIR_CODE__' not in html
     assert 'persistent workspace session' in html
     assert "saveWorkspaceState('resumeToken'" in html
+    assert "saveWorkspaceState('joinCode'" in html
+    assert "loadWorkspaceState('joinCode')" in html
+    assert "deleteWorkspaceState('joinCode')" in html
+    assert 'this Join ID remains valid until disconnect or workspace replacement.' in html
     assert "resume_token" in html
     assert "resumeToken" in html
