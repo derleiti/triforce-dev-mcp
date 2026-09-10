@@ -3906,8 +3906,10 @@ _mcp_sessions: Dict[str, Dict[str, TypingAny]] = {}
 def _get_session(session_id: str) -> Dict[str, TypingAny]:
     """Get or create a session"""
     if session_id not in _mcp_sessions:
+        now = dt_datetime.now()
         _mcp_sessions[session_id] = {
-            "created": dt_datetime.now(),
+            "created": now,
+            "last_seen": now,
             "queue": asyncio.Queue(),
             "initialized": False,
         }
@@ -3981,11 +3983,15 @@ def _clear_mcp_session(session_id: str, *, clear_workspace: bool = False) -> Non
 
 
 def _cleanup_old_sessions():
-    """Remove sessions older than 1 hour"""
+    """Remove MCP sessions only after one hour of inactivity, not age.
+
+    A long-lived Telegram/Mistral takeover may remain valid indefinitely while
+    heartbeats or real tool traffic keep refreshing ``last_seen``.
+    """
     now = dt_datetime.now()
     expired = [
         sid for sid, data in _mcp_sessions.items()
-        if (now - data["created"]).total_seconds() > 3600
+        if (now - data.get("last_seen", data["created"])).total_seconds() > 3600
     ]
     for sid in expired:
         _clear_mcp_session(sid)
@@ -4116,7 +4122,7 @@ async def mcp_sse_connect(request: Request):
     session = _get_session(session_id)
     _store_session_request_state(session, request)
     session["authenticated"] = True
-    session["last_seen"] = datetime.now(timezone.utc)
+    session["last_seen"] = dt_datetime.now()
     request.state.mcp_session_id = session_id
 
     mcp_logger.info(f"SSE_CONNECT | IP: {client_ip} | Session: {session_id}")

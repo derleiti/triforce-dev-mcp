@@ -667,3 +667,25 @@ def test_workspace_join_id_restores_from_redis_after_process_loss(monkeypatch):
     second = sessions.claim_waiting_workspace(code, 'telegram-after-restart')
     assert second['lease_id'] == lease_id
     assert sessions.workspace_status('telegram-after-restart')['state'] == 'ready'
+
+
+def test_active_mcp_session_is_not_expired_by_creation_age():
+    from datetime import timedelta
+    from app.routes import mcp as mcp_route
+    now = mcp_route.dt_datetime.now()
+    mcp_route._mcp_sessions['keepalive-session'] = {
+        'created': now - timedelta(hours=3),
+        'last_seen': now - timedelta(minutes=5),
+        'queue': None,
+        'initialized': True,
+    }
+    mcp_route._mcp_sessions['idle-session'] = {
+        'created': now - timedelta(hours=3),
+        'last_seen': now - timedelta(hours=2),
+        'queue': None,
+        'initialized': True,
+    }
+    mcp_route._cleanup_old_sessions()
+    assert 'keepalive-session' in mcp_route._mcp_sessions
+    assert 'idle-session' not in mcp_route._mcp_sessions
+    mcp_route._mcp_sessions.pop('keepalive-session', None)
