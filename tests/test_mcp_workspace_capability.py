@@ -616,6 +616,8 @@ async def test_mixed_local_tools_respect_read_only_mode():
 
     write = await call_public_local_tool(req, 'file_ops', {'action': 'write', 'path': 'x.txt', 'content': 'x'})
     assert write['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
+    delete = await call_public_local_tool(req, 'file_ops', {'action': 'delete', 'path': 'folder', 'recursive': True})
+    assert delete['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
     edit = await call_public_local_tool(req, 'code_edit', {'path': 'x.py', 'mode': 'append', 'new_text': 'x'})
     assert edit['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
     commit = await call_public_local_tool(req, 'git', {'mode': 'commit', 'message': 'x'})

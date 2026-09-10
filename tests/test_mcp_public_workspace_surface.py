@@ -39,6 +39,10 @@ async def test_public_guest_gets_synced_non_admin_local_catalog():
     # Execution routing is explicit and cannot silently fall through to Hetzner.
     assert by_name['shell']['x_execution'] == 'local_workspace'
     assert by_name['file_ops']['x_execution'] == 'local_workspace'
+    file_ops_schema = by_name['file_ops']['inputSchema']['properties']
+    assert {'delete', 'remove'} <= set(file_ops_schema['action']['enum'])
+    assert file_ops_schema['recursive']['type'] == 'boolean'
+    assert by_name['file_ops']['annotations']['destructiveHint'] is True
     assert by_name['code_edit']['x_execution'] == 'local_workspace'
     assert by_name['git']['x_execution'] == 'local_workspace'
     assert by_name['models']['x_execution'] == 'triforce_server'
@@ -76,6 +80,10 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'readwrite' in html
     assert 'createWritable' in html
     assert 'async function fileOps(args)' in html
+    assert "action==='delete'||action==='remove'" in html
+    assert "removeEntry(name,{recursive})" in html
+    assert "ws.close(4000,'heartbeat timeout')" not in html
+    assert "ws.close(4000,'stale after background')" not in html
     assert 'async function codeEdit(args)' in html
     assert "'file_ops'" in html
     assert "'code_edit'" in html

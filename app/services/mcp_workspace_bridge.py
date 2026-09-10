@@ -205,6 +205,29 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
                 continue
             cloned = deepcopy(tool)
+            if name == "file_ops":
+                cloned["description"] = (
+                    "Local workspace file operations: read, write, append, list, find, size, "
+                    "or delete files/directories. delete/remove requires Write access; set "
+                    "recursive=true to remove a non-empty directory. The workspace root itself cannot be deleted."
+                )
+                schema = deepcopy(cloned.get("inputSchema") or {"type": "object"})
+                props = schema.setdefault("properties", {})
+                action = props.setdefault("action", {"type": "string"})
+                action["enum"] = ["read", "write", "append", "list", "find", "size", "delete", "remove"]
+                props["recursive"] = {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "For delete/remove: recursively delete a non-empty directory."
+                }
+                props.setdefault("query", {"type": "string"})
+                props.setdefault("max_results", {"type": "integer", "minimum": 1, "maximum": 500})
+                props.setdefault("max_entries", {"type": "integer", "minimum": 1, "maximum": 1000})
+                schema["required"] = ["action", "path"]
+                cloned["inputSchema"] = schema
+                annotations = deepcopy(cloned.get("annotations") or {})
+                annotations["destructiveHint"] = True
+                cloned["annotations"] = annotations
             execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
             cloned["x_execution"] = execution
             if execution == "triforce_server" and name in PRIVILEGED_TOOLS:
@@ -283,7 +306,7 @@ def workspace_tool_requires_write(name: str, arguments: Dict[str, Any] | None = 
     if name in {"file_edit", "directory_create", "workspace_clear", "code_edit", "shell"}:
         return True
     if name == "file_ops":
-        return str(args.get("action") or "read").lower() in {"write", "append"}
+        return str(args.get("action") or "read").lower() in {"write", "append", "delete", "remove"}
     if name == "git":
         mode = str(args.get("mode") or args.get("action") or "status").lower()
         return mode not in {"status", "diff", "log", "show", "blame"}
