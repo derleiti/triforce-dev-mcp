@@ -42,6 +42,10 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'showDirectoryPicker' in html
     assert 'heartbeatTimer=null' in html
     assert 'function startHeartbeat()' in html
+    assert 'watchdogTimer' in html
+    assert 'workspace/paired' in html
+    assert 'workspace/detached' in html
+    assert 'Workspace connected and AI-reachable.' in html
     assert 'openChromeBtn' in html
     assert 'com.android.chrome' in html
     assert 'readwrite' in html
@@ -63,6 +67,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'new WebSocket' in html
     assert 'visibilitychange' in html
     assert 'pageshow' in html
+    assert "window.addEventListener('pagehide'" not in html
     assert 'tf_resume_token' not in html
     assert 'indexedDB' in html
     assert 'resume_token' not in html

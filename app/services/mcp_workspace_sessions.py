@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
+import uuid
 from typing import Any, Optional
 
 PAIR_TTL_SECONDS = 15 * 60
@@ -125,17 +126,28 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         raise ValueError("Invalid workspace pairing code")
     paired = str(item.get("paired_session_id") or "")
-    if paired and paired != session_id:
-        raise ValueError("Workspace pairing code is already bound to another MCP session")
     if paired == session_id:
         current = get_workspace(session_id)
         if current:
             return current
         raise RuntimeError("Workspace is paired but the browser is currently disconnected")
+
+    # A browser workspace is an application lease, not an MCP transport session.
+    # MCP clients routinely DELETE/recreate transport sessions. The same secret
+    # pairing ID may therefore move its lease only after the previous transport
+    # was explicitly detached; a still-live transport cannot be hijacked.
+    previous = _SESSION_WORKSPACE.get(paired) if paired else None
+    if paired and previous and bool(previous.get("transport_active", True)):
+        raise ValueError("Workspace pairing code is already bound to another active MCP session")
+
     connection = item.get("connection")
     if connection is None or bool(getattr(connection, "closed", True)) or id(connection) != item.get("connection_id"):
         raise RuntimeError("Local workspace browser has not connected for this code yet")
+    lease_id = str((previous or {}).get("lease_id") or item.get("lease_id") or uuid.uuid4().hex)
+    if paired and paired != session_id:
+        _SESSION_WORKSPACE.pop(paired, None)
     item["paired_session_id"] = session_id
+    item["lease_id"] = lease_id
     item["expires_at"] = time.time() + RECONNECT_TTL_SECONDS
     return bind_workspace(
         session_id, connection,
@@ -143,6 +155,7 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
         task=str(item.get("task") or ""),
         capabilities=list(item.get("capabilities") or []),
         reconnect_pair_key=key,
+        lease_id=lease_id,
     )
 
 
@@ -169,7 +182,10 @@ def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str 
         "expires_at": time.time() + RECONNECT_TTL_SECONDS,
         "helper_connected_at": time.time(),
     })
-    return bind_workspace(session_id, connection, mode=normalized_mode, task=task, capabilities=capabilities, reconnect_pair_key=key)
+    return bind_workspace(
+        session_id, connection, mode=normalized_mode, task=task, capabilities=capabilities,
+        reconnect_pair_key=key, lease_id=str(item.get("lease_id") or uuid.uuid4().hex),
+    )
 
 
 def get_or_create_pair_code(session_id: str) -> str:
@@ -215,7 +231,11 @@ def pair_code_kind(code: str) -> tuple[str, Optional[str]]:
     return "invalid", None
 
 
-def bind_workspace(session_id: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None, reconnect_pair_key: str | None = None) -> dict[str, Any]:
+def bind_workspace(
+    session_id: str, connection: Any, *, mode: str, task: str = "",
+    capabilities: list[str] | None = None, reconnect_pair_key: str | None = None,
+    lease_id: str | None = None,
+) -> dict[str, Any]:
     normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
     binding = {
         "session_id": session_id,
@@ -226,10 +246,17 @@ def bind_workspace(session_id: str, connection: Any, *, mode: str, task: str = "
         "task": str(task or "")[:4000],
         "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
         "reconnect_pair_key": reconnect_pair_key,
+        "lease_id": str(lease_id or uuid.uuid4().hex),
+        "transport_active": True,
         "reconnect_until": time.time() + RECONNECT_TTL_SECONDS if reconnect_pair_key else 0,
         "bound_at": time.time(),
     }
     _SESSION_WORKSPACE[session_id] = binding
+    if reconnect_pair_key:
+        pair_item = _WEB_PAIR.get(reconnect_pair_key)
+        if pair_item is not None:
+            pair_item["lease_id"] = binding["lease_id"]
+            pair_item["paired_session_id"] = session_id
     pair = _SESSION_PAIR.pop(session_id, None)
     if pair:
         _PAIR_INDEX.pop(_pair_key(str(pair.get("code") or "")), None)
@@ -250,6 +277,29 @@ def get_workspace(session_id: str | None) -> Optional[dict[str, Any]]:
         return None
     return dict(item)
 
+
+
+def mark_transport_detached(session_id: str) -> Optional[dict[str, Any]]:
+    """Detach an MCP transport while preserving the browser workspace lease.
+
+    The lease remains reconnectable/re-bindable with its existing secret pairing
+    ID. This is deliberately different from ``clear_session``, which revokes it.
+    """
+    item = _SESSION_WORKSPACE.get(session_id)
+    if not item:
+        return None
+    item["transport_active"] = False
+    item["transport_detached_at"] = time.time()
+    return dict(item)
+
+
+def mark_transport_attached(session_id: str) -> Optional[dict[str, Any]]:
+    item = _SESSION_WORKSPACE.get(session_id)
+    if not item:
+        return None
+    item["transport_active"] = True
+    item.pop("transport_detached_at", None)
+    return dict(item)
 
 def suspend_connection(connection: Any) -> None:
     """Keep a paired browser workspace reconnectable with the same pairing ID."""
@@ -312,6 +362,8 @@ def workspace_status(session_id: str) -> dict[str, Any]:
             "mode": binding["mode"],
             "task": binding.get("task", ""),
             "client_id": binding.get("client_id", ""),
+            "lease_id": binding.get("lease_id", ""),
+            "transport_active": bool(binding.get("transport_active", True)),
             "capabilities": list(binding.get("capabilities") or []),
         }
     suspended = _SESSION_WORKSPACE.get(session_id)

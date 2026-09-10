@@ -158,3 +158,27 @@ def test_explicit_workspace_cleanup_still_revokes_binding():
     sessions.bind_workspace('session-A', conn, mode='read_only', capabilities=['file_read'])
     mcp_route._clear_mcp_session('session-A', clear_workspace=True)
     assert sessions.get_workspace('session-A') is None
+
+
+def test_detached_transport_can_rebind_same_lease_to_new_mcp_session():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('lease-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read', 'file_edit'])
+    first = sessions.claim_waiting_workspace(code, 'transport-A')
+    lease_id = first['lease_id']
+    sessions.mark_transport_detached('transport-A')
+
+    rebound = sessions.claim_waiting_workspace(code, 'transport-B')
+    assert rebound['lease_id'] == lease_id
+    assert sessions.get_workspace('transport-A') is None
+    assert sessions.get_workspace('transport-B')['client_id'] == 'lease-browser'
+    assert sessions.workspace_status('transport-B')['transport_active'] is True
+
+
+def test_live_transport_lease_cannot_be_hijacked_by_new_session():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('lease-browser')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    sessions.claim_waiting_workspace(code, 'transport-A')
+    with pytest.raises(ValueError, match='active MCP session'):
+        sessions.claim_waiting_workspace(code, 'transport-B')

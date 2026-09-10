@@ -222,11 +222,25 @@ async def call_public_local_tool(request: Request, name: str, arguments: Dict[st
             binding = claim_waiting_workspace(code, sid)
         except Exception as exc:
             return _tool_error("WORKSPACE_PAIR_FAILED", f"Could not pair browser workspace: {exc}", detail=str(exc))
+        connection = binding.get("connection")
+        if connection is not None and not bool(getattr(connection, "closed", True)):
+            try:
+                await connection.websocket.send_json({
+                    "jsonrpc": "2.0",
+                    "method": "workspace/paired",
+                    "params": {
+                        "ok": True, "connected": True, "mode": binding["mode"],
+                        "lease_id": binding.get("lease_id", ""),
+                    },
+                })
+            except Exception:
+                pass
         return {
             "content": [{"type": "text", "text": f"Browser workspace paired successfully in {binding['mode']} mode."}],
             "structuredContent": {
                 "ok": True, "connected": True, "mode": binding["mode"],
                 "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
+                "lease_id": binding.get("lease_id", ""),
                 "capabilities": list(binding.get("capabilities") or []),
             },
             "isError": False,
