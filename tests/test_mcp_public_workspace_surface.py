@@ -80,8 +80,12 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'readwrite' in html
     assert 'createWritable' in html
     assert 'async function fileOps(args)' in html
+    assert 'toolQueue=Promise.resolve()' in html
+    assert 'function queueToolCall(msg)' in html
+    assert 'async function removeEntryCompat(parent,name,recursive=false)' in html
+    assert 'await parent.removeEntry(name);' in html
     assert "action==='delete'||action==='remove'" in html
-    assert "removeEntry(name,{recursive})" in html
+    assert "removeEntry(name,{recursive})" not in html
     assert "ws.close(4000,'heartbeat timeout')" not in html
     assert "ws.close(4000,'stale after background')" not in html
     assert 'async function codeEdit(args)' in html

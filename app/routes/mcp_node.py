@@ -536,7 +536,7 @@ async def websocket_connect(
                 request_id = str(params.get("request_id") or "")
                 stage = str(params.get("stage") or "")
                 tool_name = str(params.get("tool") or "")
-                if request_id in connection.pending_requests and stage in {"started", "finished"}:
+                if request_id in connection.pending_requests and stage in {"started", "finished", "failed"}:
                     connection.pending_request_stages[request_id] = stage
                     logger.info(
                         "Local workspace tool stage | client=%s request=%s tool=%s stage=%s",
