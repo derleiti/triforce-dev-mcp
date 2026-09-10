@@ -136,3 +136,25 @@ def test_same_pairing_id_cannot_be_claimed_by_another_session():
     sessions.claim_waiting_workspace(code, 'session-A')
     with pytest.raises(ValueError):
         sessions.claim_waiting_workspace(code, 'session-B')
+
+
+def test_transport_session_cleanup_does_not_revoke_workspace():
+    from app.routes import mcp as mcp_route
+    conn = DummyConnection('browser-lifecycle')
+    mcp_route._mcp_sessions['session-A'] = {
+        'created': mcp_route.dt_datetime.now(),
+        'queue': None,
+        'initialized': True,
+    }
+    sessions.bind_workspace('session-A', conn, mode='read_only', capabilities=['file_read'])
+    mcp_route._clear_mcp_session('session-A', clear_workspace=False)
+    assert 'session-A' not in mcp_route._mcp_sessions
+    assert sessions.get_workspace('session-A') is not None
+
+
+def test_explicit_workspace_cleanup_still_revokes_binding():
+    from app.routes import mcp as mcp_route
+    conn = DummyConnection('browser-lifecycle')
+    sessions.bind_workspace('session-A', conn, mode='read_only', capabilities=['file_read'])
+    mcp_route._clear_mcp_session('session-A', clear_workspace=True)
+    assert sessions.get_workspace('session-A') is None

@@ -3924,13 +3924,21 @@ def _restore_session_request_state(session: Dict[str, TypingAny], request: Reque
     request.state.mcp_auth_client_id = session.get("auth_client_id")
 
 
-def _clear_mcp_session(session_id: str) -> None:
+def _clear_mcp_session(session_id: str, *, clear_workspace: bool = False) -> None:
+    """Clear MCP transport state without implicitly revoking a browser workspace.
+
+    Streamable HTTP/SSE transports are routinely opened and closed by MCP clients.
+    The local browser workspace has its own explicit revoke + TTL lifecycle and must
+    survive transport churn, otherwise a successful workspace_pair is lost as soon
+    as the client closes its HTTP/SSE session.
+    """
     _mcp_sessions.pop(session_id, None)
-    try:
-        from app.services.mcp_workspace_sessions import clear_session
-        clear_session(session_id)
-    except Exception:
-        pass
+    if clear_workspace:
+        try:
+            from app.services.mcp_workspace_sessions import clear_session
+            clear_session(session_id)
+        except Exception:
+            pass
 
 
 def _cleanup_old_sessions():
@@ -4119,9 +4127,10 @@ async def mcp_sse_connect(request: Request):
         except asyncio.CancelledError:
             mcp_logger.info(f"SSE_DISCONNECT | Session: {session_id}")
         finally:
-            # Cleanup session on disconnect
+            # The SSE stream is only a transport. Do not revoke a paired browser
+            # workspace when this stream is cancelled or replaced.
             if session_id in _mcp_sessions:
-                _clear_mcp_session(session_id)
+                _clear_mcp_session(session_id, clear_workspace=False)
 
     return StreamingResponse(
         event_generator(),
@@ -4623,8 +4632,8 @@ async def mcp_delete_session(request: Request):
         )
 
     if session_id in _mcp_sessions:
-        _clear_mcp_session(session_id)
-        mcp_logger.info(f"MCP_SESSION_DELETED | Session: {session_id}")
+        _clear_mcp_session(session_id, clear_workspace=False)
+        mcp_logger.info(f"MCP_SESSION_DELETED | Session: {session_id} | Workspace: preserved")
         return JSONResponse(content={"status":"deleted"}, status_code=200)
 
     return JSONResponse(
