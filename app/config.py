@@ -4,7 +4,7 @@ VERSION = "2.85 Beta 1"
 from functools import lru_cache
 from typing import Dict, List, Optional, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AliasChoices, AnyHttpUrl, Field
+from pydantic import AliasChoices, AnyHttpUrl, Field, model_validator
 
 from .settings_store import effective_environment
 
@@ -188,12 +188,21 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "GOOGLE_AI_STUDIO_KEY",
             "GEMINI_API_KEY",
             "GOOGLE_GEMINI_KEY",
         ),
     )
     google_ai_studio_key: str | None = Field(default=None, validation_alias="GOOGLE_AI_STUDIO_KEY")
+
+    @model_validator(mode="after")
+    def _normalize_google_ai_studio_key(self) -> "Settings":
+        # GOOGLE_AI_STUDIO_KEY is the canonical working credential. Keep the
+        # legacy gemini_api_key attribute populated for existing consumers, but
+        # do not assign the same validation alias to two fields: pydantic-settings
+        # can otherwise raise KeyError while restoring init kwargs.
+        if self.google_ai_studio_key:
+            self.gemini_api_key = self.google_ai_studio_key
+        return self
     google_url: Optional[str] = Field(default=None, validation_alias="GOOGLE_URL")
     google_user: Optional[str] = Field(default=None, validation_alias="GOOGLE_USER")
     google_pass: Optional[str] = Field(default=None, validation_alias="GOOGLE_PASS")
