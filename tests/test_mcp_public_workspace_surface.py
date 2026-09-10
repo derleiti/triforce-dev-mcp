@@ -40,14 +40,15 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
     assert 'showDirectoryPicker' in html
-    assert '.showPicker' in html
+    assert 'readwrite' in html
+    assert 'createWritable' in html
+    assert 'Nothing has been enumerated' in html
     assert "mode:workspaceMode==='write'?'readwrite':'read'" in html
-    assert 'Write is unavailable in this browser' in html
-    assert 'Path indexing is deferred' in html
-    assert 'ensureFallbackIndex' in html
-    assert 'Nothing is uploaded' in html or 'Nothing was uploaded' in html
-    assert 'id="folderListPicker"' in html
-    assert 'webkitdirectory' in html
+    assert 'Selecting a folder does not enumerate or analyze it' in html
+    assert 'legacyEntries' in html
+    assert 'stays on this device' in html
+    assert 'folderListPicker' not in html
+    assert 'webkitdirectory' not in html
     assert 'fallbackLabel' not in html
     assert 'dropZone' in html
     assert 'getAsFileSystemHandle' in html
@@ -62,4 +63,3 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'id="pairPanel" class="hidden"' in html
     assert '/v1/mcp/workspace/pair-ticket' in html
     assert '__PAIR_CODE__' not in html
-    assert 'No app, helper, account or API key' in html
