@@ -50,6 +50,23 @@ def _expired(item: dict[str, Any] | None) -> bool:
     return not item or float(item.get("expires_at") or 0) <= time.time()
 
 
+def normalize_workspace_access_mode(mode: str | None) -> str:
+    """Canonical permission mode for browser-selected local workspaces."""
+    value = str(mode or "").strip().lower().replace("-", "_")
+    return "write" if value in {"write", "readwrite", "read_write"} else "read_only"
+
+
+def _connection_live(item: dict[str, Any] | None) -> bool:
+    if not item:
+        return False
+    connection = item.get("connection")
+    return bool(
+        connection is not None
+        and not bool(getattr(connection, "closed", True))
+        and id(connection) == item.get("connection_id")
+    )
+
+
 def create_web_pair_code() -> str:
     """Create a fresh browser-first pairing code after local folder selection."""
     _cleanup_web_pairs()
@@ -96,11 +113,11 @@ def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: s
     existing = item.get("connection")
     if existing is not None and not bool(getattr(existing, "closed", True)) and id(existing) != id(connection):
         raise ValueError("Pairing code is already used by another live workspace helper")
-    normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
+    normalized_mode = normalize_workspace_access_mode(mode)
     item.update({
         "connection": connection,
-        "connection_id": id(connection),
-        "client_id": str(getattr(connection, "client_id", "")),
+        "connection_id": id(connection) if connection is not None else None,
+        "client_id": str(getattr(connection, "client_id", "")) if connection is not None else "",
         "mode": normalized_mode,
         "task": str(task or "")[:4000],
         "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
@@ -131,7 +148,7 @@ def promote_session_pair_to_web_lease(
     if resolved != session_id:
         raise ValueError("Invalid or expired session pairing code")
     key = _pair_key(code)
-    normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
+    normalized_mode = normalize_workspace_access_mode(mode)
     now = time.time()
     lease_id = uuid.uuid4().hex
     _WEB_PAIR[key] = {
@@ -173,17 +190,34 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     if not secrets.compare_digest(str(item.get("code") or ""), str(code or "").strip().upper()):
         raise ValueError("Invalid workspace pairing code")
     connection = item.get("connection")
-    if connection is None or bool(getattr(connection, "closed", True)) or id(connection) != item.get("connection_id"):
-        raise RuntimeError("Local workspace browser has not connected for this code yet")
+    aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
+    legacy = str(item.get("paired_session_id") or "")
+    if legacy:
+        aliases.add(legacy)
+    if not _connection_live(item):
+        # A previously paired lease remains valid while the browser transport
+        # reconnects. The same high-entropy code may authorize another MCP
+        # transport alias without pretending that the browser is currently live.
+        if not aliases or not str(item.get("lease_id") or ""):
+            raise RuntimeError("Local workspace browser has not connected for this code yet")
+        aliases.add(session_id)
+        lease_id = str(item.get("lease_id"))
+        item["paired_session_id"] = session_id
+        item["paired_session_ids"] = sorted(aliases)
+        item["expires_at"] = time.time() + RECONNECT_TTL_SECONDS
+        return bind_workspace(
+            session_id, None,
+            mode=str(item.get("mode") or "read_only"),
+            task=str(item.get("task") or ""),
+            capabilities=list(item.get("capabilities") or []),
+            reconnect_pair_key=key,
+            lease_id=lease_id,
+        )
 
     current = get_workspace(session_id)
     if current and current.get("reconnect_pair_key") == key:
         return current
 
-    aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
-    legacy = str(item.get("paired_session_id") or "")
-    if legacy:
-        aliases.add(legacy)
     aliases.add(session_id)
     lease_id = str(item.get("lease_id") or uuid.uuid4().hex)
     item["paired_session_id"] = session_id
@@ -215,7 +249,7 @@ def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str 
         aliases.add(legacy)
     if not aliases:
         raise ValueError("Workspace pairing code has not been paired to an MCP session yet")
-    normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
+    normalized_mode = normalize_workspace_access_mode(mode)
     item.update({
         "connection": connection,
         "connection_id": id(connection),
@@ -298,7 +332,7 @@ def get_workspace_by_token(token: str | None) -> Optional[dict[str, Any]]:
     if legacy and legacy not in aliases:
         aliases.append(legacy)
     for alias in reversed(aliases):
-        binding = get_workspace(alias)
+        binding = get_workspace_lease(alias)
         if binding:
             return binding
     return None
@@ -309,12 +343,12 @@ def bind_workspace(
     capabilities: list[str] | None = None, reconnect_pair_key: str | None = None,
     lease_id: str | None = None,
 ) -> dict[str, Any]:
-    normalized_mode = "write" if str(mode).strip().lower() == "write" else "read_only"
+    normalized_mode = normalize_workspace_access_mode(mode)
     binding = {
         "session_id": session_id,
         "connection": connection,
-        "connection_id": id(connection),
-        "client_id": str(getattr(connection, "client_id", "")),
+        "connection_id": id(connection) if connection is not None else None,
+        "client_id": str(getattr(connection, "client_id", "")) if connection is not None else "",
         "mode": normalized_mode,
         "task": str(task or "")[:4000],
         "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
@@ -353,6 +387,30 @@ def get_workspace(session_id: str | None) -> Optional[dict[str, Any]]:
         return None
     return dict(item)
 
+
+def get_workspace_lease(session_id: str | None) -> Optional[dict[str, Any]]:
+    """Return either a live binding or a reconnectable suspended lease."""
+    if not session_id:
+        return None
+    live = get_workspace(session_id)
+    if live:
+        live.update({"state": "connected", "connected": True, "suspended": False})
+        return live
+    item = _SESSION_WORKSPACE.get(session_id)
+    if not item:
+        return None
+    if float(item.get("reconnect_until") or 0) <= time.time():
+        _SESSION_WORKSPACE.pop(session_id, None)
+        return None
+    suspended = dict(item)
+    suspended.update({
+        "state": "suspended",
+        "connected": False,
+        "suspended": True,
+        "connection": None,
+        "connection_id": None,
+    })
+    return suspended
 
 
 def mark_transport_detached(session_id: str) -> Optional[dict[str, Any]]:
@@ -435,22 +493,27 @@ def _cleanup_web_pairs() -> None:
 
 
 def workspace_status(session_id: str) -> dict[str, Any]:
-    binding = get_workspace(session_id)
+    binding = get_workspace_lease(session_id)
     if binding:
         return {
-            "connected": True,
-            "mode": binding["mode"],
+            "state": binding.get("state", "connected"),
+            "connected": bool(binding.get("connected", False)),
+            "suspended": bool(binding.get("suspended", False)),
+            "reconnectable": True,
+            "access_mode": binding["mode"],
+            "mode": binding["mode"],  # compatibility
             "task": binding.get("task", ""),
             "client_id": binding.get("client_id", ""),
             "lease_id": binding.get("lease_id", ""),
             "transport_active": bool(binding.get("transport_active", True)),
             "capabilities": list(binding.get("capabilities") or []),
+            "reconnect_until": float(binding.get("reconnect_until") or 0),
         }
-    suspended = _SESSION_WORKSPACE.get(session_id)
-    if suspended and float(suspended.get("reconnect_until") or 0) > time.time():
-        return {"connected": False, "suspended": True, "mode": suspended.get("mode", "read_only"), "task": suspended.get("task", ""), "capabilities": list(suspended.get("capabilities") or []), "reconnect_until": float(suspended.get("reconnect_until") or 0)}
     return {
+        "state": "unpaired",
         "connected": False,
+        "suspended": False,
+        "reconnectable": False,
         "setup_url": "https://api.ailinux.me/v1/mcp",
         "procedure": "Open the setup page, choose a local folder, then post its pairing code in this chat.",
     }

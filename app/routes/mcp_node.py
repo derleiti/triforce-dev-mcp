@@ -485,32 +485,32 @@ async def websocket_connect(
                     from app.services.mcp_workspace_sessions import reconnect_web_workspace
                     binding = reconnect_web_workspace(
                         pair_code, connection,
-                        mode=str(share.get("mode") or "read_only"),
+                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
                         task=str(share.get("task") or ""),
                         capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace reconnected | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": binding["mode"], "waiting_for_session": False, "reconnected": True}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True}})
                 elif workspace_pair_kind == "session" and paired_mcp_session:
                     from app.services.mcp_workspace_sessions import promote_session_pair_to_web_lease
                     binding = promote_session_pair_to_web_lease(
                         pair_code, str(paired_mcp_session), connection,
-                        mode=str(share.get("mode") or "read_only"),
+                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
                         task=str(share.get("task") or ""),
                         capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace paired | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": binding["mode"], "waiting_for_session": False}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False}})
                 else:
                     from app.services.mcp_workspace_sessions import register_waiting_workspace
                     waiting = register_waiting_workspace(
                         pair_code, connection,
-                        mode=str(share.get("mode") or "read_only"),
+                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
                         task=str(share.get("task") or ""),
                         capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "mode": waiting["mode"], "waiting_for_session": True}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting", "access_mode": waiting["mode"], "mode": waiting["mode"], "waiting_for_session": True}})
 
             elif data.get("method") == "workspace/revoke" and is_workspace_node:
                 from app.services.mcp_workspace_sessions import unbind_connection

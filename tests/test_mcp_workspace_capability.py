@@ -324,7 +324,7 @@ async def test_workspace_status_rejects_invalid_workspace_id():
 
 
 @pytest.mark.asyncio
-async def test_openai_subject_affinity_shares_workspace_across_transport_sessions():
+async def test_openai_workspace_affinity_is_stable_but_isolates_transport_contexts():
     from app.services.mcp_workspace_bridge import workspace_affinity_id
 
     class OpenAIRequest:
@@ -336,16 +336,70 @@ async def test_openai_subject_affinity_shares_workspace_across_transport_session
                 'x-openai-session': session_id,
             }
 
-    req_a = OpenAIRequest('transport-A')
+    req_a1 = OpenAIRequest('transport-A')
+    req_a2 = OpenAIRequest('transport-A')
     req_b = OpenAIRequest('transport-B')
-    assert workspace_affinity_id(req_a) == workspace_affinity_id(req_b)
+    assert workspace_affinity_id(req_a1) == workspace_affinity_id(req_a2)
+    assert workspace_affinity_id(req_a1) != workspace_affinity_id(req_b)
 
     code = sessions.create_web_pair_code()
     conn = DummyConnection('shared-browser')
     sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['code_tree'])
-    paired = await call_public_local_tool(req_a, 'code_search', {'query': code})
+    paired = await call_public_local_tool(req_a1, 'code_search', {'query': code})
     assert paired['structuredContent']['connected'] is True
 
-    result = await call_public_local_tool(req_b, 'code_tree', {'path': '.', 'depth': 1, 'max_entries': 10})
-    assert result['isError'] is False
-    assert conn.calls[-1][1]['tool'] == 'code_tree'
+    same_transport = await call_public_local_tool(req_a2, 'code_tree', {'path': '.', 'depth': 1, 'max_entries': 10})
+    assert same_transport['isError'] is False
+    isolated = await call_public_local_tool(req_b, 'code_tree', {'path': '.', 'depth': 1, 'max_entries': 10})
+    assert isolated['structuredContent']['code'] == 'WORKSPACE_REQUIRED'
+
+
+def test_workspace_status_distinguishes_suspended_from_unpaired():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('mobile-status')
+    sessions.register_waiting_workspace(code, conn, mode='readwrite', capabilities=['file_read', 'file_edit'])
+    sessions.claim_waiting_workspace(code, 'session-A')
+    sessions.suspend_connection(conn)
+
+    status = sessions.workspace_status('session-A')
+    assert status['state'] == 'suspended'
+    assert status['connected'] is False
+    assert status['suspended'] is True
+    assert status['reconnectable'] is True
+    assert status['access_mode'] == 'write'
+    assert status['mode'] == 'write'
+
+
+def test_suspended_workspace_can_authorize_new_transport_alias_with_same_code():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('mobile-alias')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['code_tree'])
+    first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
+    sessions.suspend_connection(conn)
+
+    second = sessions.claim_waiting_workspace(code, 'mistral-B')
+    assert second['lease_id'] == first['lease_id']
+    assert sessions.workspace_status('mistral-B')['state'] == 'suspended'
+
+    replacement = DummyConnection('mobile-alias-reconnected')
+    sessions.reconnect_web_workspace(code, replacement, mode='write', capabilities=['code_tree'])
+    assert sessions.workspace_status('chatgpt-A')['state'] == 'connected'
+    assert sessions.workspace_status('mistral-B')['state'] == 'connected'
+    assert sessions.get_workspace('chatgpt-A')['client_id'] == 'mobile-alias-reconnected'
+    assert sessions.get_workspace('mistral-B')['client_id'] == 'mobile-alias-reconnected'
+
+
+@pytest.mark.asyncio
+async def test_bridge_reports_workspace_suspended_instead_of_required():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('mobile-bridge')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['code_tree'])
+    sessions.claim_waiting_workspace(code, 'session-A')
+    sessions.suspend_connection(conn)
+
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'code_tree', {'path': '.', 'depth': 1})
+    assert result['structuredContent']['code'] == 'WORKSPACE_SUSPENDED'
+    assert result['structuredContent']['state'] == 'suspended'
+    assert result['structuredContent']['reconnectable'] is True
+    assert result['structuredContent']['access_mode'] == 'write'

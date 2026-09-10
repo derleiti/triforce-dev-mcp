@@ -13,7 +13,9 @@ from typing import Any, Dict, List
 
 from fastapi import Request
 
-from .mcp_workspace_sessions import get_workspace, get_workspace_by_token, mark_transport_detached
+from .mcp_workspace_sessions import (
+    get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached, workspace_status as lease_status,
+)
 
 CONTROL_TOOLS = {"workspace_status", "workspace_pair"}
 BROWSER_READ_TOOLS = {
@@ -156,23 +158,23 @@ def session_id(request: Request | None) -> str:
 
 
 def workspace_affinity_id(request: Request | None) -> str:
-    """Stable workspace-only identity for OpenAI MCP transport fan-out.
+    """Stable workspace identity for one OpenAI connector transport context.
 
-    ChatGPT may rotate x-openai-session between tool calls in the same account
-    context.  x-openai-subject remains the authenticated connector subject.
-    Hash it so the raw value is never stored, and use it only for the browser
-    workspace lease -- never for general MCP auth/session state.
+    Both high-entropy OpenAI headers are required.  Using x-openai-subject alone
+    would be stable but too broad: separate chats/transports owned by the same
+    connector subject could accidentally inherit one local workspace lease.
     """
     if request is None:
         return ""
     headers = getattr(request, "headers", {})
     ua = str(headers.get("user-agent") or "").lower()
     subject = str(headers.get("x-openai-subject") or "").strip()
-    if not subject or "openai-mcp" not in ua:
+    transport = str(headers.get("x-openai-session") or "").strip()
+    if not subject or not transport or "openai-mcp" not in ua:
         return ""
     import hashlib
-    digest = hashlib.sha256(subject.encode("utf-8")).hexdigest()
-    return "openai-subject-" + digest[:40]
+    digest = hashlib.sha256((subject + "\0" + transport).encode("utf-8")).hexdigest()
+    return "openai-workspace-" + digest[:40]
 
 
 def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List[Dict[str, Any]]:
@@ -206,15 +208,17 @@ def merge_public_workspace_tools(tools: List[Dict[str, Any]], request: Request) 
 
 
 def public_instructions(request: Request) -> str:
-    sid = session_id(request)
-    status = get_workspace(sid)
+    sid = workspace_affinity_id(request) or session_id(request)
+    status = get_workspace_lease(sid)
     if status:
         capabilities = ", ".join(status.get("capabilities") or []) or "none"
+        state = status.get("state", "connected")
         return (
             "This is the public TriForce MCP. Safe TriForce cloud tools execute on the server. "
             "The user paired a browser-selected local workspace; only its advertised browser capabilities execute locally. "
-            f"Workspace mode: {status['mode']}. Local capabilities: {capabilities}. "
-            f"User task: {status.get('task') or 'follow the current user request'}."
+            f"Workspace state: {state}. Access mode: {status['mode']}. Local capabilities: {capabilities}. "
+            + ("The browser transport is temporarily suspended but the lease is still valid and reconnectable. " if state == "suspended" else "")
+            + f"User task: {status.get('task') or 'follow the current user request'}."
         )
     return (
         "This is the public TriForce MCP. To work with local files, ask the user to open "
@@ -224,22 +228,30 @@ def public_instructions(request: Request) -> str:
 
 
 def _workspace_required(request: Request) -> Dict[str, Any]:
-    if not session_id(request):
+    effective_sid = workspace_affinity_id(request) or session_id(request)
+    if not effective_sid:
         return {
             "content": [{"type": "text", "text": "Local workspace requires an initialized MCP session."}],
-            "structuredContent": {"ok": False, "code": "MCP_SESSION_REQUIRED"},
+            "structuredContent": {"ok": False, "code": "MCP_SESSION_REQUIRED", "state": "unpaired"},
             "isError": True,
+        }
+    status = lease_status(effective_sid)
+    if status.get("state") == "suspended":
+        return {
+            "content": [{"type": "text", "text": "The local workspace lease is still paired, but the browser transport is temporarily suspended. Reopen the workspace page; it can reconnect with the same pairing ID."}],
+            "structuredContent": {"ok": False, "code": "WORKSPACE_SUSPENDED", **status},
+            "isError": False,
         }
     text = (
         "No local workspace is paired. Open https://api.ailinux.me/v1/mcp in a browser, choose the local folder and access mode, "
-        "then paste the one-time ID shown by that page into this chat. I can bind it with workspace_pair."
+        "then paste the one-time ID shown by that page into this chat."
     )
     return {
         "content": [{"type": "text", "text": text}],
         "structuredContent": {
-            "ok": False, "code": "WORKSPACE_REQUIRED", "connected": False,
+            "ok": False, "code": "WORKSPACE_REQUIRED", "state": "unpaired", "connected": False,
             "setup_url": "https://api.ailinux.me/v1/mcp",
-            "procedure": "Open setup page -> choose folder/mode -> connect in browser -> paste ID -> workspace_pair.",
+            "procedure": "Open setup page -> choose folder/access mode -> connect in browser -> paste ID.",
         },
         "isError": False,
     }
@@ -251,6 +263,33 @@ def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
         "structuredContent": {"ok": False, "code": code, **extra},
         "isError": True,
     }
+
+
+def _workspace_binding_response(binding: Dict[str, Any], *, token: str = "") -> Dict[str, Any]:
+    connection = binding.get("connection")
+    live = connection is not None and not bool(getattr(connection, "closed", True))
+    state = "connected" if live else "suspended"
+    data = {
+        "ok": True,
+        "state": state,
+        "connected": live,
+        "suspended": not live,
+        "reconnectable": True,
+        "access_mode": binding.get("mode", "read_only"),
+        "mode": binding.get("mode", "read_only"),  # compatibility
+        "task": binding.get("task", ""),
+        "client_id": binding.get("client_id", ""),
+        "lease_id": binding.get("lease_id", ""),
+        "capabilities": list(binding.get("capabilities") or []),
+    }
+    if token:
+        data["workspace_token"] = token
+    text = (
+        f"Browser workspace connected with {data['access_mode']} access."
+        if live else
+        f"Workspace lease is paired with {data['access_mode']} access; browser transport is suspended and may reconnect with the same ID."
+    )
+    return {"content": [{"type": "text", "text": text}], "structuredContent": data, "isError": False}
 
 
 _WORKSPACE_ID_RE = re.compile(r"^[0-9A-F]{4}(?:-[0-9A-F]{4}){5}$")
@@ -295,22 +334,14 @@ async def _claim_workspace_for_session(request: Request, workspace_id: str) -> D
                 "jsonrpc": "2.0",
                 "method": "workspace/paired",
                 "params": {
-                    "ok": True, "connected": True, "mode": binding["mode"],
+                    "ok": True, "state": "connected", "connected": True,
+                    "access_mode": binding["mode"], "mode": binding["mode"],
                     "lease_id": binding.get("lease_id", ""),
                 },
             })
         except Exception:
             pass
-    return {
-        "content": [{"type": "text", "text": f"Browser workspace connected in {binding['mode']} mode."}],
-        "structuredContent": {
-            "ok": True, "connected": True, "mode": binding["mode"],
-            "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
-            "lease_id": binding.get("lease_id", ""),
-            "capabilities": list(binding.get("capabilities") or []),
-        },
-        "isError": False,
-    }
+    return _workspace_binding_response(binding, token=workspace_id)
 
 
 async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -327,7 +358,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         # initialize a session but omit Mcp-Session-Id on later tools/call POSTs.
         # Bind those calls to a logical lease session keyed only by the secret pair
         # code; never infer identity from IP, User-Agent or another shared signal.
-        effective_sid = sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
+        effective_sid = workspace_affinity_id(request) or sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
         try:
             from app.services.mcp_workspace_sessions import claim_waiting_workspace
             binding = claim_waiting_workspace(code, effective_sid)
@@ -348,24 +379,12 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
                 })
             except Exception:
                 pass
-        return {
-            "content": [{"type": "text", "text": (
-                f"Browser workspace paired successfully in {binding['mode']} mode. "
-                "For MCP calls that do not preserve Mcp-Session-Id, pass workspace_token from this result."
-            )}],
-            "structuredContent": {
-                "ok": True, "connected": True, "mode": binding["mode"],
-                "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
-                "lease_id": binding.get("lease_id", ""), "workspace_token": code,
-                "capabilities": list(binding.get("capabilities") or []),
-            },
-            "isError": False,
-        }
+        return _workspace_binding_response(binding, token=code)
 
     affinity_sid = workspace_affinity_id(request)
-    binding = get_workspace(affinity_sid) if affinity_sid else None
+    binding = get_workspace_lease(affinity_sid) if affinity_sid else None
     if binding is None and sid:
-        binding = get_workspace(sid)
+        binding = get_workspace_lease(sid)
     if binding is None and workspace_token:
         binding = get_workspace_by_token(workspace_token)
 
@@ -383,16 +402,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             return await _claim_workspace_for_session(request, workspace_id)
 
         if binding:
-            return {
-                "content": [{"type": "text", "text": f"Browser workspace connected in {binding['mode']} mode."}],
-                "structuredContent": {
-                    "ok": True, "connected": True, "mode": binding["mode"],
-                    "task": binding.get("task", ""), "client_id": binding.get("client_id", ""),
-                    "lease_id": binding.get("lease_id", ""),
-                    "capabilities": list(binding.get("capabilities") or []),
-                },
-                "isError": False,
-            }
+            return _workspace_binding_response(binding, token=workspace_token)
         pair_session_id = affinity_sid or sid
         if pair_session_id:
             from app.services.mcp_workspace_sessions import get_or_create_pair_code
@@ -414,6 +424,18 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
 
     if not binding:
         return _workspace_required(request)
+    if binding.get("state") == "suspended" or binding.get("connection") is None:
+        return {
+            "content": [{"type": "text", "text": "Workspace lease is paired but the browser transport is suspended. Reopen the workspace page; the same lease will reconnect."}],
+            "structuredContent": {
+                "ok": False, "code": "WORKSPACE_SUSPENDED", "state": "suspended",
+                "connected": False, "suspended": True, "reconnectable": True,
+                "access_mode": binding.get("mode", "read_only"), "mode": binding.get("mode", "read_only"),
+                "lease_id": binding.get("lease_id", ""),
+                "capabilities": list(binding.get("capabilities") or []),
+            },
+            "isError": False,
+        }
 
     mode = str(binding.get("mode") or "read_only")
     if mode != "write" and name in (BROWSER_WRITE_TOOLS - BROWSER_READ_TOOLS):
