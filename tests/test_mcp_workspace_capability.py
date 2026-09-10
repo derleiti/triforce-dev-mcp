@@ -301,3 +301,23 @@ def test_session_pair_promotes_to_shared_web_lease():
     assert second['lease_id'] == bound['lease_id']
     assert sessions.get_workspace('chatgpt-session')['client_id'] == 'browser-direct'
     assert sessions.get_workspace('mistral-session')['client_id'] == 'browser-direct'
+
+
+@pytest.mark.asyncio
+async def test_workspace_status_can_pair_from_user_supplied_workspace_id():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('auto-pair-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read', 'file_edit'])
+    req = DummyRequest('chatgpt-auto')
+    result = await call_public_local_tool(req, 'workspace_status', {'workspace_id': code})
+    assert result['structuredContent']['ok'] is True
+    assert result['structuredContent']['connected'] is True
+    assert result['structuredContent']['mode'] == 'write'
+    assert sessions.get_workspace('chatgpt-auto')['client_id'] == 'auto-pair-browser'
+
+
+@pytest.mark.asyncio
+async def test_workspace_status_rejects_invalid_workspace_id():
+    req = DummyRequest('chatgpt-auto')
+    result = await call_public_local_tool(req, 'workspace_status', {'workspace_id': 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'})
+    assert result['structuredContent']['code'] == 'WORKSPACE_PAIR_FAILED'

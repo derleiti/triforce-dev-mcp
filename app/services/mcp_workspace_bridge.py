@@ -37,8 +37,15 @@ PUBLIC_GUEST_CLOUD_TOOLS = {
 _TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "workspace_status",
-        "description": "Check whether this MCP session is paired with a browser-selected local workspace.",
-        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
+        "description": (
+            "Check whether this MCP session is paired with a browser-selected local workspace. "
+            "If the user message contains a TriForce workspace ID in the form XXXX-XXXX-XXXX-XXXX-XXXX-XXXX, "
+            "pass it as workspace_id; this tool validates the waiting browser and pairs it automatically."
+        ),
+        "inputSchema": {"type": "object", "properties": {
+            "workspace_id": {"type": "string", "description": "Optional one-time TriForce workspace ID pasted by the user."},
+            "workspace_token": {"type": "string"}
+        }},
         "annotations": {"readOnlyHint": True},
     },
     {
@@ -229,6 +236,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     sid = session_id(request)
     arguments = dict(arguments or {})
     workspace_token = str(arguments.pop("workspace_token", "") or "").strip().upper()
+    workspace_id = str(arguments.pop("workspace_id", "") or "").strip().upper()
 
     if name == "workspace_pair":
         code = str(arguments.get("code") or "").strip().upper()
@@ -278,6 +286,33 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         binding = get_workspace_by_token(workspace_token)
 
     if name == "workspace_status":
+        if workspace_id:
+            effective_sid = sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
+            try:
+                from app.services.mcp_workspace_sessions import claim_waiting_workspace
+                binding = claim_waiting_workspace(workspace_id, effective_sid)
+                if not sid:
+                    mark_transport_detached(effective_sid)
+            except Exception as exc:
+                return _tool_error(
+                    "WORKSPACE_PAIR_FAILED",
+                    f"Could not connect browser workspace: {exc}",
+                    detail=str(exc),
+                )
+            connection = binding.get("connection")
+            if connection is not None and not bool(getattr(connection, "closed", True)):
+                try:
+                    await connection.websocket.send_json({
+                        "jsonrpc": "2.0",
+                        "method": "workspace/paired",
+                        "params": {
+                            "ok": True, "connected": True, "mode": binding["mode"],
+                            "lease_id": binding.get("lease_id", ""),
+                        },
+                    })
+                except Exception:
+                    pass
+
         if binding:
             return {
                 "content": [{"type": "text", "text": f"Browser workspace connected in {binding['mode']} mode."}],
