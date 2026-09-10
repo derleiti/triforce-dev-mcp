@@ -21,22 +21,19 @@ from .mcp_workspace_sessions import (
 CONTROL_TOOLS = {"workspace_status", "workspace_pair"}
 BROWSER_READ_TOOLS = {
     "workspace_info", "file_read", "file_tree", "code_read", "code_tree",
-    "code_search", "code_grep",
+    "code_search", "code_grep", "file_ops", "git",
 }
-BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {"file_edit", "directory_create", "workspace_clear"}
+BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {
+    "file_edit", "directory_create", "workspace_clear", "code_edit", "shell",
+}
 READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS
 WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS
 LOCAL_TOOL_NAMES = WRITE_TOOLS
 
-PUBLIC_GUEST_CLOUD_TOOLS = {
-    "chat", "list_models", "ask_specialist", "list_specialists", "models", "specialist",
-    "analyze_image", "crawl", "crawl_url", "crawl_site", "crawl_status",
-    "conversation", "prompt_template", "prompts", "api_docs", "web_search", "search",
-    "search_health", "multi_search", "smart_search", "quick_smart_search",
-    "google_deep_search", "ailinux_search", "grokipedia_search", "image_search",
-    "weather", "crypto_prices", "stock_indices", "market_overview", "current_time",
-    "list_timezones",
-}
+# Local MCP mirrors the canonical TriForce inventory automatically. These three
+# product domains intentionally stay invisible because they operate privileged
+# shared services rather than the user's paired workspace.
+LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
 
 _TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
@@ -185,19 +182,31 @@ def workspace_affinity_id(request: Request | None) -> str:
 
 
 def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List[Dict[str, Any]]:
-    """Overlay browser-workspace tools onto the canonical MCP surface.
+    """Overlay the persistent local-workspace surface on canonical TriForce tools.
 
-    Public guests retain the intentionally small cloud allowlist. Authenticated
-    clients keep their normal RBAC-filtered catalog and gain the same browser
-    workspace controls. Authentication therefore adds capabilities; it never
-    selects a different MCP product surface or downgrades privileges.
+    Public Local-MCP clients mirror the canonical full TriForce inventory so the
+    catalog cannot drift. Forum, WordPress and mail remain admin-only and are
+    omitted completely. Host/workspace-sensitive tool names are marked for local
+    execution; server-side RBAC remains authoritative for online tools.
     """
     if is_public_guest(request):
-        merged = {
-            str(tool.get("name") or ""): deepcopy(tool)
-            for tool in tools
-            if isinstance(tool, dict) and str(tool.get("name") or "") in PUBLIC_GUEST_CLOUD_TOOLS
-        }
+        from app.mcp.tool_registry_unified import get_canonical_all_tools
+        from app.utils.mcp_security import PRIVILEGED_TOOLS
+
+        merged: Dict[str, Dict[str, Any]] = {}
+        for tool in get_canonical_all_tools():
+            if not isinstance(tool, dict):
+                continue
+            name = str(tool.get("name") or "")
+            inventory = str(tool.get("x_inventory") or "misc")
+            if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
+                continue
+            cloned = deepcopy(tool)
+            execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
+            cloned["x_execution"] = execution
+            if execution == "triforce_server" and name in PRIVILEGED_TOOLS:
+                cloned["x_requires_admin"] = True
+            merged[name] = cloned
     else:
         merged = {
             str(tool.get("name") or ""): deepcopy(tool)
@@ -205,7 +214,9 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             if isinstance(tool, dict) and str(tool.get("name") or "")
         }
     for tool in _TOOL_SCHEMAS:
-        merged[tool["name"]] = deepcopy(tool)
+        cloned = deepcopy(tool)
+        cloned["x_execution"] = "local_workspace"
+        merged[tool["name"]] = cloned
     return list(merged.values())
 
 
@@ -262,6 +273,32 @@ def _workspace_required(request: Request) -> Dict[str, Any]:
         },
         "isError": False,
     }
+
+
+def workspace_tool_requires_write(name: str, arguments: Dict[str, Any] | None = None) -> bool:
+    args = arguments or {}
+    if name in {"file_edit", "directory_create", "workspace_clear", "code_edit", "shell"}:
+        return True
+    if name == "file_ops":
+        return str(args.get("action") or "read").lower() in {"write", "append"}
+    if name == "git":
+        mode = str(args.get("mode") or args.get("action") or "status").lower()
+        return mode not in {"status", "diff", "log", "show", "blame"}
+    return False
+
+
+def should_route_tool_locally(request: Request | None, name: str) -> bool:
+    """Route workspace-sensitive tools locally without hijacking admin MCP calls."""
+    if name not in LOCAL_TOOL_NAMES:
+        return False
+    if name in CONTROL_TOOLS:
+        return True
+    if request is None:
+        return False
+    if is_public_guest(request):
+        return True
+    sid = workspace_affinity_id(request) or session_id(request)
+    return bool(sid and get_workspace_lease(sid))
 
 
 def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
@@ -462,7 +499,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         }
 
     mode = str(binding.get("mode") or "read_only")
-    if mode != "write" and name in (BROWSER_WRITE_TOOLS - BROWSER_READ_TOOLS):
+    if mode != "write" and workspace_tool_requires_write(name, arguments):
         return _tool_error("WORKSPACE_READ_ONLY", f"Browser workspace is Read only; tool '{name}' requires Write mode.", tool=name)
 
     capabilities = set(binding.get("capabilities") or [])

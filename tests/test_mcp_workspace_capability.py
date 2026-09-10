@@ -587,3 +587,36 @@ def test_persisted_mcp_alias_restores_lease_without_workspace_token(monkeypatch)
     assert restored['transport_state'] == 'offline'
     assert restored['lease_id'] == lease_id
     assert restored['access_mode'] == 'write'
+
+
+@pytest.mark.asyncio
+async def test_public_shell_is_forced_to_local_workspace_and_never_server():
+    conn = DummyConnection('local-shell')
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['shell'])
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'shell', {'command': 'pwd'})
+    assert result['isError'] is False
+    assert conn.calls[-1][0] == 'client_workspace_tool'
+    assert conn.calls[-1][1]['tool'] == 'shell'
+
+
+@pytest.mark.asyncio
+async def test_mixed_local_tools_respect_read_only_mode():
+    conn = DummyConnection('mixed-local')
+    sessions.bind_workspace(
+        'session-A', conn, mode='read_only',
+        capabilities=['file_ops', 'git', 'code_edit'],
+    )
+    req = DummyRequest('session-A')
+
+    read = await call_public_local_tool(req, 'file_ops', {'action': 'read', 'path': 'README.md'})
+    assert read['isError'] is False
+    status = await call_public_local_tool(req, 'git', {'mode': 'status'})
+    assert status['isError'] is False
+
+    write = await call_public_local_tool(req, 'file_ops', {'action': 'write', 'path': 'x.txt', 'content': 'x'})
+    assert write['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
+    edit = await call_public_local_tool(req, 'code_edit', {'path': 'x.py', 'mode': 'append', 'new_text': 'x'})
+    assert edit['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
+    commit = await call_public_local_tool(req, 'git', {'mode': 'commit', 'message': 'x'})
+    assert commit['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'

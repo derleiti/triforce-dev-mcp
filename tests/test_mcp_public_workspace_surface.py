@@ -20,12 +20,30 @@ class FakeRequest:
 
 
 @pytest.mark.asyncio
-async def test_public_guest_gets_cloud_surface_plus_local_workspace_tools():
+async def test_public_guest_gets_synced_non_admin_local_catalog():
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
-    names = {tool['name'] for tool in result['tools']}
-    assert {'search', 'models', 'workspace_status', 'workspace_pair', 'workspace_info', 'file_read', 'file_tree', 'code_search', 'file_edit', 'directory_create'} <= names
-    assert {'shell', 'test', 'lint', 'task_runner', 'binary_exec', 'git', 'service_control', 'restart_backend'}.isdisjoint(names)
-    assert {'mail_inbox', 'mail_read', 'memory_search', 'notify_list', 'group_chat_read', 'system_info', 'logs'}.isdisjoint(names)
+    by_name = {tool['name']: tool for tool in result['tools']}
+    names = set(by_name)
+
+    # Canonical TriForce tools are mirrored automatically, plus workspace helpers.
+    assert {'search', 'models', 'agent_start', 'memory_clear', 'service_control',
+            'shell', 'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
+            'workspace_status', 'workspace_pair', 'workspace_info', 'file_read',
+            'file_tree', 'file_edit', 'directory_create', 'workspace_clear'} <= names
+
+    # Shared-service administration is intentionally absent from Local MCP.
+    assert not any(name.startswith('mail_') for name in names)
+    assert not any(name.startswith('wp_') for name in names)
+    assert not any(name.startswith('flarum_') for name in names)
+
+    # Execution routing is explicit and cannot silently fall through to Hetzner.
+    assert by_name['shell']['x_execution'] == 'local_workspace'
+    assert by_name['file_ops']['x_execution'] == 'local_workspace'
+    assert by_name['code_edit']['x_execution'] == 'local_workspace'
+    assert by_name['git']['x_execution'] == 'local_workspace'
+    assert by_name['models']['x_execution'] == 'triforce_server'
+    assert by_name['service_control']['x_execution'] == 'triforce_server'
+    assert by_name['service_control']['x_requires_admin'] is True
 
 
 @pytest.mark.asyncio
@@ -57,6 +75,10 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'com.android.chrome' in html
     assert 'readwrite' in html
     assert 'createWritable' in html
+    assert 'async function fileOps(args)' in html
+    assert 'async function codeEdit(args)' in html
+    assert "'file_ops'" in html
+    assert "'code_edit'" in html
     assert 'Nothing has been enumerated' in html
     assert "mode:workspaceMode==='write'?'readwrite':'read'" in html
     assert 'Selecting a folder does not enumerate or analyze it' in html

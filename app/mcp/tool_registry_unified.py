@@ -319,6 +319,38 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     return tools
 
 
+def get_canonical_all_tools() -> List[Dict[str, Any]]:
+    """Return the single canonical full MCP inventory used by all surfaces."""
+    from .handlers_wordpress import WORDPRESS_TOOL_SCHEMAS
+    from .handlers_browser import BROWSER_TOOL_SCHEMAS
+    from ..services.n8n_mcp import N8N_TOOLS
+
+    tools = get_unified_tools(
+        extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS)
+    )
+    existing = {tool.get("name") for tool in tools}
+    if "nova_chat_agent" not in existing:
+        tools.append({
+            "name": "nova_chat_agent",
+            "description": "Chat through Nova's configured account-backed agent bridge.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "default": "auto"},
+                    "message": {"type": "string"},
+                    "messages": {"type": "array", "items": {"type": "object"}},
+                    "system": {"type": "string"},
+                    "model": {"type": "string"},
+                    "temperature": {"type": "number"},
+                    "max_tokens": {"type": "integer"},
+                },
+                "required": ["message"],
+            },
+            "x_inventory": "ai",
+        })
+    return _dedupe_tools(tools)
+
+
 def get_inventory_map(tools: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     result: Dict[str, List[str]] = {}
     for tool in tools:

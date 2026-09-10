@@ -123,8 +123,8 @@ def _workspace_setup_html() -> str:
 <script data-cfasync="false">
 'use strict';
 const $=id=>document.getElementById(id);
-const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tree','code_search','code_grep'];
-const WRITE_TOOLS=['file_edit','directory_create','workspace_clear'];
+const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tree','code_search','code_grep','file_ops'];
+const WRITE_TOOLS=['file_edit','directory_create','workspace_clear','code_edit'];
 const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
 const MAX_TEXT=2*1024*1024;
 const urlPair=(new URLSearchParams(location.search).get('pair_code')||'').trim().toUpperCase();let pairCode=urlPair||sessionStorage.getItem('tf_pair_code')||'',rootHandle=null,rootEntry=null,ws=null,workspaceMode=sessionStorage.getItem('tf_workspace_mode')||'read_only',capabilities=[],heartbeatTimer=null,watchdogTimer=null,reconnectTimer=null,reconnectAttempt=0,manualDisconnect=false,lastPongAt=0,workspaceAttached=false,resumeToken='';if(urlPair){sessionStorage.setItem('tf_pair_code',urlPair);try{history.replaceState({},document.title,location.pathname)}catch{}}
@@ -169,9 +169,11 @@ async function ensureHandlePermission(mode='read'){if(!rootHandle)throw new Erro
 async function ensureWritePermission(){return ensureHandlePermission('readwrite');}
 async function editFile(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');await ensureWritePermission();const path=cleanPath(args.path),op=String(args.operation||'write');let old='';try{old=await readText(path)}catch(e){if(!['create','write'].includes(op))throw e}let next;if(op==='create')next=String(args.content||'');else if(op==='write')next=String(args.content||'');else if(op==='append')next=old+String(args.content||'');else if(op==='replace'){const needle=String(args.old_text||'');if(!needle)throw new Error('old_text required');const count=old.split(needle).length-1;if(count!==1)throw new Error('old_text must occur exactly once');next=old.replace(needle,String(args.new_text||''))}else throw new Error('unknown edit operation');const h=await modernFileHandle(path,true),w=await h.createWritable();await w.write(next);await w.close();return {path,operation:op,bytes:new Blob([next]).size};}
 async function createDir(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');await ensureWritePermission();const p=cleanPath(args.path);await modernDir(p,true);return {path:p,created:true};}
+async function fileOps(args){const action=String(args.action||'read').toLowerCase(),path=cleanPath(args.path||'');if(action==='read')return {path,...lineSlice(await readText(path),args)};if(action==='size'){const f=await fileObj(path);return {path,size:f.size}}if(action==='list')return await tree({path,max_depth:1,max_entries:Math.min(1000,Number(args.max_entries||300))});if(action==='find')return await search({query:String(args.pattern||args.query||''),path,max_results:Number(args.max_results||100)},false);if(action==='write'||action==='append'){return await editFile({path,operation:action,content:String(args.content||'')})}throw new Error('unsupported file_ops action: '+action);}
+async function codeEdit(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');await ensureWritePermission();const path=cleanPath(args.path),mode=String(args.mode||'replace'),old=await readText(path);let next=old;if(mode==='replace'){const needle=String(args.old_text||'');if(!needle)throw new Error('old_text required');const count=old.split(needle).length-1;if(count!==1)throw new Error('old_text must occur exactly once');next=old.replace(needle,String(args.new_text||''))}else if(mode==='append'){next=old+String(args.new_text||'')}else if(mode==='insert'){const lines=old.split(/\r?\n/),line=Math.max(1,Number(args.line||1));lines.splice(Math.min(lines.length,line-1),0,String(args.new_text||''));next=lines.join('\n')}else if(mode==='delete'){const lines=old.split(/\r?\n/),line=Math.max(1,Number(args.line||1));if(line>lines.length)throw new Error('line outside file');lines.splice(line-1,1);next=lines.join('\n')}else throw new Error('unsupported code_edit mode: '+mode);if(args.dry_run)return {ok:true,dry_run:true,path,mode,changed:next!==old,preview:next.slice(0,20000)};const h=await modernFileHandle(path,false),w=await h.createWritable();await w.write(next);await w.close();return {ok:true,path,mode,bytes:new Blob([next]).size};}
 async function clearWorkspace(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');if(String(args.confirm||'')!=='DELETE_ALL')throw new Error('workspace_clear requires confirm=DELETE_ALL');await ensureWritePermission();const names=[];for await(const [name] of rootHandle.entries())names.push(name);for(const name of names)await rootHandle.removeEntry(name,{recursive:true});return {ok:true,removed_entries:names.length,root_preserved:true};}
 function result(data,isError=false){const structured=(data&&typeof data==='object'&&!Array.isArray(data))?data:{result:data};return {content:[{type:'text',text:typeof data==='string'?data:JSON.stringify(data)}],structuredContent:structured,isError};}
-async function execute(tool,args){if(!capabilities.includes(tool))throw new Error('tool not available in this workspace: '+tool);if(tool==='workspace_info')return result(await workspaceInfo());if(tool==='file_read'||tool==='code_read')return result({path:cleanPath(args.path),...lineSlice(await readText(args.path),args)});if(tool==='file_tree'||tool==='code_tree')return result(await tree(args));if(tool==='code_search')return result(await search(args,false));if(tool==='code_grep')return result(await search(args,true));if(tool==='file_edit')return result(await editFile(args));if(tool==='directory_create')return result(await createDir(args));if(tool==='workspace_clear')return result(await clearWorkspace(args));throw new Error('unsupported browser tool');}
+async function execute(tool,args){if(!capabilities.includes(tool))throw new Error('tool not available in this workspace: '+tool);if(tool==='workspace_info')return result(await workspaceInfo());if(tool==='file_read'||tool==='code_read')return result({path:cleanPath(args.path),...lineSlice(await readText(args.path),args)});if(tool==='file_tree'||tool==='code_tree')return result(await tree(args));if(tool==='code_search')return result(await search(args,false));if(tool==='code_grep')return result(await search(args,true));if(tool==='file_edit')return result(await editFile(args));if(tool==='directory_create')return result(await createDir(args));if(tool==='workspace_clear')return result(await clearWorkspace(args));if(tool==='file_ops')return result(await fileOps(args));if(tool==='code_edit')return result(await codeEdit(args));throw new Error('unsupported browser tool');}
 async function chooseFolder(){await disconnect(true);$('pairPanel').classList.add('hidden');workspaceMode=document.querySelector('input[name=mode]:checked').value;if(!directPicker){status('This browser cannot create a lazy local directory handle from a picker. For full browser workspace access use Chrome/Chromium/Edge.','warn');return}try{const h=await window.showDirectoryPicker({mode:workspaceMode==='write'?'readwrite':'read',id:'triforce-workspace'});rootHandle=h;rootEntry=null;sessionStorage.setItem('tf_workspace_mode',workspaceMode);await saveWorkspaceState('workspaceMode',workspaceMode);let permission='unknown';try{if(typeof h.queryPermission==='function')permission=await h.queryPermission({mode:workspaceMode==='write'?'readwrite':'read'})}catch{}const persisted=await saveDirectoryHandle(h);$('folderName').textContent=(h.name||'Local folder')+' · '+(workspaceMode==='write'?'Read/Write':'Read only');$('connectBtn').disabled=false;const persistenceText=persisted.ok?'persistent handle verified':'handle persistence unavailable: '+persisted.error;$('analysis').textContent='Lazy directory handle ready · permission='+permission+' · '+persistenceText;status(persisted.ok?'Folder handle shared and persistence verified. Nothing has been enumerated or read.':'Folder handle shared for this tab, but it could not be persisted. Keep this page alive or reselect the folder after a reload.',''+(persisted.ok?'ok':'warn'));}catch(e){if(e.name==='AbortError')status('Folder was not shared. The browser may have cancelled the selection or rejected a sensitive directory such as the filesystem/home root.','warn');else status('Folder selection failed: '+e.message,'warn')}}
 function useDroppedHandle(h){rootHandle=h;rootEntry=null;workspaceMode='read_only';document.querySelector('input[name=mode][value=read_only]').checked=true;$('folderName').textContent=(h.name||'Dropped folder')+' · lazy Read only';$('connectBtn').disabled=false;status('Folder handle shared by drag-and-drop. Nothing has been enumerated.','ok');$('analysis').textContent='Lazy directory handle ready.';}
 function useDroppedEntry(e){rootEntry=e;rootHandle=null;workspaceMode='read_only';document.querySelector('input[name=mode][value=read_only]').checked=true;$('folderName').textContent=(e.name||'Dropped folder')+' · lazy Read only';$('connectBtn').disabled=false;status('Folder entry shared by drag-and-drop. Nothing has been enumerated.','ok');$('analysis').textContent='Lazy read-only directory entry ready.';}
@@ -1739,35 +1741,8 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
     
     # Primary: unified inventory (Pre-Killer style, full toolbox with handlers)
     try:
-        from ..mcp.tool_registry_unified import get_unified_tools, filter_tools_for_profile
-        from ..mcp.handlers_wordpress import WORDPRESS_TOOL_SCHEMAS
-        from ..mcp.handlers_browser import BROWSER_TOOL_SCHEMAS
-        
-        tools = get_unified_tools(
-            extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS)
-        )
-        existing = {t.get("name") for t in tools}
-        if "nova_chat_agent" not in existing:
-            tools.append({
-                "name": "nova_chat_agent",
-                "description": "Chat through Nova's configured account-backed agent bridge.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "provider": {"type": "string", "default": "auto"},
-                        "message": {"type": "string"},
-                        "messages": {"type": "array", "items": {"type": "object"}},
-                        "system": {"type": "string"},
-                        "model": {"type": "string"},
-                        "temperature": {"type": "number"},
-                        "max_tokens": {"type": "integer"},
-                    },
-                    "required": ["message"],
-                },
-            })
-            existing.add("nova_chat_agent")
-        
-        tools = filter_tools_for_profile(tools, inventory)
+        from ..mcp.tool_registry_unified import get_canonical_all_tools, filter_tools_for_profile
+        tools = filter_tools_for_profile(get_canonical_all_tools(), inventory)
 
         for tool in tools:
             if isinstance(tool, dict) and "outputSchema" not in tool:
@@ -2495,8 +2470,8 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     arguments = params.get("arguments", {})
 
     if request is not None and tool_name:
-        from app.services.mcp_workspace_bridge import LOCAL_TOOL_NAMES, call_workspace_tool
-        if str(tool_name) in LOCAL_TOOL_NAMES:
+        from app.services.mcp_workspace_bridge import call_workspace_tool, should_route_tool_locally
+        if should_route_tool_locally(request, str(tool_name)):
             return await call_workspace_tool(
                 request, str(tool_name), arguments if isinstance(arguments, dict) else {}
             )
