@@ -21,6 +21,7 @@ def test_prepare_instance_home_isolates_aicoder_state_and_links_provider_login(t
     (source / ".config" / "ai-coder" / "session.json").write_text('{"token":"secret"}')
     (source / ".config" / "ai-coder" / "state.json").write_text('{"selected_model":"x"}')
     (source / ".codex").mkdir()
+    (source / ".claude.json").write_text('{"loggedIn":true}')
     (source / ".npm-global").mkdir()
     (source / ".local" / "bin").mkdir(parents=True)
     (source / ".local" / "share" / "uv" / "tools").mkdir(parents=True)
@@ -29,6 +30,8 @@ def test_prepare_instance_home_isolates_aicoder_state_and_links_provider_login(t
 
     assert (home / ".codex").is_symlink()
     assert (home / ".codex").resolve() == (source / ".codex").resolve()
+    assert (home / ".claude.json").is_symlink()
+    assert (home / ".claude.json").resolve() == (source / ".claude.json").resolve()
     assert (home / ".npm-global").is_symlink()
     assert (home / ".local" / "bin").is_symlink()
     assert (home / ".local" / "share" / "uv" / "tools").is_symlink()

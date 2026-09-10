@@ -17,6 +17,7 @@ from typing import Any, Iterable
 DEFAULT_AICODER = "/usr/bin/aicoder"
 DEFAULT_INSTANCE_ROOT = Path("/var/tristar/agents/instances")
 PROVIDER_HOME_DIRS = (".codex", ".claude", ".vibe", ".gemini", ".antigravity")
+PROVIDER_HOME_FILES = (".claude.json",)
 PROVIDER_EXEC_LINKS = (
     (".npm-global", ".npm-global"),
     (".local/bin", ".local/bin"),
@@ -103,6 +104,12 @@ def prepare_instance_home(
         target = home / name
         if source.exists() and not target.exists():
             target.symlink_to(source, target_is_directory=True)
+
+    for name in PROVIDER_HOME_FILES:
+        source = source_home / name
+        target = home / name
+        if source.is_file() and not target.exists():
+            target.symlink_to(source)
 
     # Official account transports discover provider CLIs relative to Path.home().
     # Keep the instance HOME isolated while exposing only the user's executable
