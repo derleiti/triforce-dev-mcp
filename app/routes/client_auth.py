@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import secrets
+import base64
+import time
 import jwt
 import logging
 import urllib.request
@@ -557,6 +559,23 @@ class AuthConfigResponse(BaseModel):
     google_enabled: bool = False
 
 
+class BrowserCodeRequest(BaseModel):
+    purpose: str = Field(..., pattern="^(wordpress|app)$")
+    app_id: str = ""
+    redirect_uri: str = ""
+    code_challenge: str = ""
+    code_challenge_method: str = "S256"
+    state: str = ""
+
+
+class BrowserCodeExchangeRequest(BaseModel):
+    code: str
+    purpose: str = Field(..., pattern="^(wordpress|app)$")
+    app_id: str = ""
+    redirect_uri: str = ""
+    code_verifier: str = ""
+
+
 class UserLoginResponse(BaseModel):
     """User Login Response"""
     user_id: str
@@ -720,6 +739,105 @@ def verify_google_credential(credential: str) -> dict:
 
 
 # =============================================================================
+# Browser login one-time codes (WordPress bridge + native app PKCE)
+# =============================================================================
+
+_BROWSER_CODE_TTL = 90
+_BROWSER_CODE_PREFIX = "ailinux:auth:browser-code:"
+_BROWSER_CODE_FALLBACK: Dict[str, tuple[float, dict]] = {}
+_BROWSER_APP_IDS = {
+    "ailinux-ai-coder",
+    "ailinux-copa",
+    "ailinux-control-center",
+    "ailinux-client",
+}
+_browser_redis = None
+
+
+async def _get_browser_redis():
+    global _browser_redis
+    if _browser_redis is False:
+        return None
+    if _browser_redis is None:
+        try:
+            import redis.asyncio as aioredis
+            _browser_redis = aioredis.from_url(
+                os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+                encoding="utf-8", decode_responses=True,
+            )
+            await _browser_redis.ping()
+        except Exception as exc:
+            logger.warning("Browser auth Redis unavailable, using process-local fallback: %s", exc)
+            _browser_redis = False
+            return None
+    return _browser_redis
+
+
+def _validate_browser_app_redirect(app_id: str, redirect_uri: str) -> str:
+    from urllib.parse import urlparse
+    app_id = (app_id or "").strip()
+    if app_id not in _BROWSER_APP_IDS:
+        raise HTTPException(400, "Unsupported AILinux app")
+    parsed = urlparse((redirect_uri or "").strip())
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1"}:
+        raise HTTPException(400, "App redirect_uri must use an HTTP loopback address")
+    if not parsed.port or not (1024 <= int(parsed.port) <= 65535):
+        raise HTTPException(400, "App redirect_uri requires a non-privileged loopback port")
+    if parsed.username or parsed.password or parsed.fragment:
+        raise HTTPException(400, "Invalid app redirect_uri")
+    return redirect_uri.strip()
+
+
+def _validate_pkce_challenge(challenge: str, method: str) -> str:
+    challenge = (challenge or "").strip()
+    if method != "S256" or not (43 <= len(challenge) <= 128):
+        raise HTTPException(400, "PKCE S256 challenge required")
+    if any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in challenge):
+        raise HTTPException(400, "Invalid PKCE challenge")
+    return challenge
+
+
+def _pkce_s256(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+async def _store_browser_code(payload: dict) -> str:
+    code = secrets.token_urlsafe(32)
+    key = _BROWSER_CODE_PREFIX + code
+    redis_client = await _get_browser_redis()
+    if redis_client is not None:
+        await redis_client.set(key, json.dumps(payload, separators=(",", ":")), ex=_BROWSER_CODE_TTL, nx=True)
+    else:
+        now = time.monotonic()
+        for old, (expires, _value) in list(_BROWSER_CODE_FALLBACK.items()):
+            if expires <= now:
+                _BROWSER_CODE_FALLBACK.pop(old, None)
+        _BROWSER_CODE_FALLBACK[code] = (now + _BROWSER_CODE_TTL, payload)
+    return code
+
+
+async def _consume_browser_code(code: str) -> Optional[dict]:
+    code = (code or "").strip()
+    if not code:
+        return None
+    key = _BROWSER_CODE_PREFIX + code
+    redis_client = await _get_browser_redis()
+    if redis_client is not None:
+        raw = await redis_client.getdel(key)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+    item = _BROWSER_CODE_FALLBACK.pop(code, None)
+    if not item or item[0] <= time.monotonic():
+        return None
+    return item[1]
+
+
+# =============================================================================
 # Auth Endpoints
 # =============================================================================
 
@@ -730,6 +848,64 @@ async def auth_config():
         google_client_id=GOOGLE_CLIENT_ID,
         google_enabled=bool(GOOGLE_CLIENT_ID),
     )
+
+
+@router.post("/browser/code")
+async def create_browser_code(request: BrowserCodeRequest, authorization: str = Header(None)):
+    """Create a short-lived one-time code from an already authenticated browser session."""
+    payload = decode_authorization_header(authorization)
+    email = str(payload.get("email") or payload.get("sub") or "").lower().strip()
+    if not email or email not in USER_REGISTRY:
+        raise HTTPException(401, "Authenticated account not found")
+
+    record = {
+        "purpose": request.purpose,
+        "email": email,
+        "created_at": int(time.time()),
+    }
+    if request.purpose == "app":
+        redirect_uri = _validate_browser_app_redirect(request.app_id, request.redirect_uri)
+        challenge = _validate_pkce_challenge(request.code_challenge, request.code_challenge_method)
+        if not request.state or len(request.state) < 16 or len(request.state) > 256:
+            raise HTTPException(400, "Strong state value required")
+        record.update({
+            "app_id": request.app_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": request.state,
+        })
+
+    code = await _store_browser_code(record)
+    return {"ok": True, "code": code, "expires_in": _BROWSER_CODE_TTL, "state": record.get("state", "")}
+
+
+@router.post("/browser/exchange", response_model=UserLoginResponse)
+async def exchange_browser_code(request: BrowserCodeExchangeRequest):
+    """Consume a one-time browser code and issue a fresh purpose-specific AILinux session."""
+    record = await _consume_browser_code(request.code)
+    if not record or record.get("purpose") != request.purpose:
+        raise HTTPException(400, "Invalid or expired browser login code")
+
+    if request.purpose == "app":
+        redirect_uri = _validate_browser_app_redirect(request.app_id, request.redirect_uri)
+        if request.app_id != record.get("app_id") or redirect_uri != record.get("redirect_uri"):
+            raise HTTPException(400, "Browser login binding mismatch")
+        verifier = (request.code_verifier or "").strip()
+        if not (43 <= len(verifier) <= 128):
+            raise HTTPException(400, "Invalid PKCE verifier")
+        try:
+            challenge = _pkce_s256(verifier)
+        except (UnicodeEncodeError, ValueError):
+            raise HTTPException(400, "Invalid PKCE verifier")
+        if not secrets.compare_digest(challenge, str(record.get("code_challenge") or "")):
+            raise HTTPException(400, "PKCE verification failed")
+
+    email = str(record.get("email") or "").lower().strip()
+    user = USER_REGISTRY.get(email)
+    if not user:
+        raise HTTPException(401, "Browser login account no longer exists")
+    return issue_user_login_response(email, user)
 
 
 @router.post("/google", response_model=UserLoginResponse)
@@ -765,20 +941,6 @@ async def google_login(request: GoogleLoginRequest):
             user["name"] = name
         user["updated_at"] = datetime.now().isoformat()
         save_user_to_file(email, user)
-
-    # Refresh organizational authority even when a legacy local password hash
-    # authenticated the account. Failure to reach WordPress does not break login,
-    # but stale high authority will fail closed in resolve_user_authority().
-    if wp_user is None:
-        wp_user = verify_wordpress_login(email, request.password)
-        if wp_user:
-            user["auth_provider"] = "wordpress"
-            user["wordpress_roles"] = list(wp_user.get("wordpress_roles") or [])
-            user["wordpress_can_admin"] = bool(wp_user.get("wordpress_can_admin", False))
-            user["authority_role"] = str(wp_user.get("authority_role") or "")
-            user["wordpress_authority_verified_at"] = datetime.now(timezone.utc).isoformat()
-            save_user_to_file(email, user)
-            USER_REGISTRY[email] = user
 
     response = issue_user_login_response(email, user)
     logger.info("Google user logged in: %s (%s) -> %s", email, response.tier, response.client_id)

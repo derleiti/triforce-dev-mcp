@@ -528,6 +528,13 @@ function nova_copa_auth_validate(WP_REST_Request $request): WP_REST_Response {
             'email' => $user->user_email,
             'name' => $user->display_name ?: $user->user_login,
             'tier' => get_user_meta($user->ID, 'nova_tier', true) ?: 'free',
+            // Organizational authority is separate from subscription tier.
+            // These values are derived server-side from WordPress state and
+            // consumed by TriForce only after this shared-secret + password
+            // validation succeeds.
+            'wordpress_roles' => array_values((array)$user->roles),
+            'wordpress_can_admin' => user_can($user, 'manage_options'),
+            'authority_role' => sanitize_key((string)get_user_meta($user->ID, 'nova_authority_role', true)),
             'nova_entitlements' => (array)(get_user_meta($user->ID, 'nova_entitlements', true) ?: []),
         ],
     ], 200);

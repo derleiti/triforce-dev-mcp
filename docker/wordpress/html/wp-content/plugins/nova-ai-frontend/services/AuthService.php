@@ -51,6 +51,7 @@ class AuthService {
 
         // New shortcode
         add_shortcode('nova_login_button', [$this, 'render_nova_login_button']);
+        add_shortcode('ailinux_google_login', [$this, 'render_google_login_button']);
 
         // Login/register redirect
         add_action('login_form_login',    [$this, 'maybe_redirect_login']);
@@ -155,7 +156,7 @@ class AuthService {
             ? $settings['api_endpoint_internal']
             : ($settings['api_endpoint'] ?? 'https://api.ailinux.me');
 
-        $response = wp_remote_get($endpoint . '/v1/auth/validate', [
+        $response = wp_remote_get($endpoint . '/v1/auth/verify', [
             'headers'   => ['Authorization' => 'Bearer ' . $token],
             'timeout'   => 5,
             'sslverify' => true,
@@ -247,7 +248,7 @@ class AuthService {
             ? $settings['api_endpoint_internal']
             : ($settings['api_endpoint'] ?? 'https://api.ailinux.me');
 
-        $response = wp_remote_get($endpoint . '/v1/auth/validate', [
+        $response = wp_remote_get($endpoint . '/v1/auth/verify', [
             'headers' => ['Authorization' => 'Bearer ' . $nova_token],
             'timeout' => 8,
         ]);
@@ -357,6 +358,22 @@ HTML;
 
         $login_with_redirect = esc_url($login_url . '?redirect_back=' . urlencode($current_url));
         return '<a href="' . $login_with_redirect . '" class="nova-auth-login-btn">Sign in with AILinux</a>';
+    }
+
+    /**
+     * [ailinux_google_login] - top-level Google broker entry.
+     */
+    public function render_google_login_button($atts): string {
+        if (self::is_logged_in()) {
+            return '';
+        }
+        $atts = shortcode_atts(['redirect' => home_url('/')], $atts, 'ailinux_google_login');
+        $redirect = $this->resolve_redirect_url((string) $atts['redirect']);
+        $url = add_query_arg([
+            'google' => '1',
+            'redirect' => $redirect,
+        ], 'https://login.ailinux.me/');
+        return '<a class="ail-btn ail-google-login" data-no-swup href="' . esc_url($url) . '" aria-label="Continue with Google"><span class="ail-google-g" aria-hidden="true">G</span> Continue with Google</a>';
     }
 
     /**
@@ -735,9 +752,9 @@ HTML;
 
     private function verify_ailinux_token(string $email, string $token) {
         $endpoint = $this->get_server_api_endpoint();
-        // FIX 2026-04-24: /v1/auth/verify existiert nicht — korrekter Endpoint ist /v1/auth/client/me.
-        // HTTP 200 == gültiger Token. Email liegt unter body.session.email, nicht top-level.
-        $response = wp_remote_get($endpoint . '/v1/auth/client/me', [
+        // Canonical TriForce session verification endpoint.
+        // HTTP 200 means the bearer token is valid; the canonical email is returned top-level.
+        $response = wp_remote_get($endpoint . '/v1/auth/verify', [
             'headers' => ['Authorization' => 'Bearer ' . $token],
             'timeout' => 10,
         ]);
@@ -1166,12 +1183,38 @@ HTML;
      * Browser navigiert direkt auf ailinux.me, daher Cookie korrekt gesetzt.
      */
     public function api_wp_login_redirect(\WP_REST_Request $request) {
-        $token     = sanitize_text_field($request->get_param('token'));
-        $email     = sanitize_email($request->get_param('email'));
+        $code      = sanitize_text_field($request->get_param('code') ?: '');
+        $token     = sanitize_text_field($request->get_param('token') ?: '');
+        $email     = sanitize_email($request->get_param('email') ?: '');
         $tier      = sanitize_text_field($request->get_param('tier') ?: 'free');
         $name      = sanitize_text_field($request->get_param('name') ?: '');
         $redirect  = esc_url_raw($request->get_param('redirect') ?: home_url('/'));
         $client_id = sanitize_text_field($request->get_param('client_id') ?: '');
+
+        // Preferred bridge: exchange the short-lived one-time code server-to-server.
+        // Legacy token/email query parameters remain accepted temporarily for older clients.
+        if ($code) {
+            $endpoint = $this->get_server_api_endpoint();
+            $exchange = wp_remote_post($endpoint . '/v1/auth/browser/exchange', [
+                'headers' => ['Content-Type' => 'application/json'],
+                'body' => wp_json_encode(['code' => $code, 'purpose' => 'wordpress']),
+                'timeout' => 10,
+            ]);
+            if (is_wp_error($exchange) || wp_remote_retrieve_response_code($exchange) !== 200) {
+                wp_redirect(home_url('/') . '?login_error=bridge_exchange_failed');
+                exit;
+            }
+            $payload = json_decode(wp_remote_retrieve_body($exchange), true);
+            if (!is_array($payload) || empty($payload['token']) || empty($payload['user_id'])) {
+                wp_redirect(home_url('/') . '?login_error=bridge_payload_invalid');
+                exit;
+            }
+            $token = sanitize_text_field($payload['token']);
+            $email = sanitize_email($payload['user_id']);
+            $tier = sanitize_text_field($payload['tier'] ?? 'free');
+            $name = sanitize_text_field($payload['name'] ?? '');
+            $client_id = sanitize_text_field($payload['client_id'] ?? '');
+        }
 
         if (!$token || !$email) {
             wp_redirect(home_url('/') . '?login_error=missing_params');

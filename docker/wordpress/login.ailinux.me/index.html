@@ -681,8 +681,7 @@ function initGoogleLogin(){
       ux_mode:'popup',
       auto_select:false,
       cancel_on_tap_outside:true,
-      use_fedcm_for_prompt:false,
-      use_fedcm_for_button:false
+      use_fedcm_for_button:true
     });
     const target=document.getElementById('google-signin-button');
     const available=Math.floor(target?.parentElement?.getBoundingClientRect().width||340);
@@ -702,18 +701,11 @@ function initGoogleLogin(){
     const timer=setInterval(()=>{tries++; if(render()||tries>20)clearInterval(timer)},250);
   }
   fallback.addEventListener('click',()=>{
-    if(window.self!==window.top){
-      const url=new URL(location.href);
-      url.searchParams.delete('embed');
-      url.searchParams.set('google','1');
-      window.top.location.href=url.toString();
-      return;
-    }
-    try{
-      google.accounts.id.prompt();
-    }catch{
-      showMsg('login-msg','Google Login konnte nicht geöffnet werden. Bitte Seite neu laden oder Passwort-Login verwenden.');
-    }
+    const url=new URL(location.href);
+    url.searchParams.delete('embed');
+    url.searchParams.set('google','1');
+    if(window.self!==window.top){ window.top.location.href=url.toString(); return; }
+    showMsg('login-msg','Der Google-Button konnte nicht geladen werden. Bitte Tracker-/Script-Blocker für accounts.google.com prüfen oder Passwort-Login verwenden.');
   });
 }
 
@@ -730,9 +722,8 @@ async function handleGoogleCredential(response){
       lsSet('ailinux_client_id',d.client_id||'');
       lsSet('ailinux_name',d.name||'');
       showMsg('login-msg','Google Login erfolgreich! WordPress-Session wird gesetzt …','ok');
-      if (wpLoginBridge(d, d.user_id || d.email)) return;
+      if (await completeBrowserLogin(d, d.user_id || d.email)) return;
       setTimeout(()=>showDashboard(d.user_id||d.email,d.tier,d.client_id,d.name),300);
-      try{window.opener?.postMessage({type:'ailinux_login',token:d.token,email:d.user_id||d.email,tier:d.tier},'*')}catch{}
     }else{
       showMsg('login-msg',d.detail||d.error||'Google Login fehlgeschlagen');
     }
@@ -810,9 +801,7 @@ document.getElementById('login-form').addEventListener('submit',async e=>{
       lsSet('ailinux_client_id',d.client_id||'');
       lsSet('ailinux_name',d.name||'');
       showMsg('login-msg','Willkommen! WordPress-Session wird gesetzt …','ok');
-      if (wpLoginBridge(d, d.user_id || email)) return;
-      // postMessage für Parent-Fenster
-      try{window.opener?.postMessage({type:'ailinux_login',token:d.token,email:d.user_id,tier:d.tier},'*')}catch{}
+      if (await completeBrowserLogin(d, d.user_id || email)) return;
     }else{
       showMsg('login-msg',d.detail||d.error||'Login fehlgeschlagen');
     }
@@ -848,29 +837,67 @@ document.getElementById('reg-form').addEventListener('submit',async e=>{
   btn.disabled=false;btn.classList.remove('loading');
 });
 
-// ── WP Sync ──────────────────────────────────────────────────────────────────
-function buildWpLoginUrl(data, fallbackEmail){
-  const redirect = new URLSearchParams(location.search).get('redirect') || 'https://ailinux.me/';
-  try{
-    const target=new URL(redirect);
-    if(target.protocol==='https:' && (target.hostname==='ai.ailinux.me' || target.hostname.endsWith('.ailinux.me'))){
-      setSharedAuthCookie(data.token||'');
-      return target.toString();
-    }
-  }catch{}
-  const url = new URL(WP_API + '/auth/wp-login');
-  url.searchParams.set('token', data.token || '');
-  url.searchParams.set('email', data.user_id || data.email || fallbackEmail || '');
-  url.searchParams.set('tier', data.tier || 'free');
-  url.searchParams.set('name', data.name || '');
-  url.searchParams.set('client_id', data.client_id || '');
-  url.searchParams.set('redirect', redirect);
-  return url.toString();
+// ── Browser destination bridge: WordPress or native AILinux app ──────────────
+function appLoginRequest(){
+  const p=new URLSearchParams(location.search);
+  const appId=p.get('app_id')||'';
+  const redirectUri=p.get('redirect_uri')||'';
+  const codeChallenge=p.get('code_challenge')||'';
+  const state=p.get('state')||'';
+  if(!appId&&!redirectUri&&!codeChallenge&&!state)return null;
+  if(!appId||!redirectUri||!codeChallenge||!state)return {invalid:true};
+  return {app_id:appId,redirect_uri:redirectUri,code_challenge:codeChallenge,code_challenge_method:'S256',state};
 }
 
-function wpLoginBridge(data, fallbackEmail){
-  if(!data || !data.token)return false;
-  window.location.href = buildWpLoginUrl(data, fallbackEmail);
+async function createOneTimeBrowserCode(token, payload){
+  const r=await fetch(API+'/auth/browser/code',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify(payload)
+  });
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.code)throw new Error(d.detail||d.error||'Browser login code could not be created');
+  return d;
+}
+
+async function completeBrowserLogin(data, fallbackEmail){
+  if(!data?.token)return false;
+  const app=appLoginRequest();
+  if(app?.invalid){showMsg('login-msg','Ungültige App-Login-Parameter. Bitte den Login erneut aus der AILinux-App starten.');return false;}
+  if(app){
+    try{
+      const issued=await createOneTimeBrowserCode(data.token,Object.assign({purpose:'app'},app));
+      const target=new URL(app.redirect_uri);
+      target.searchParams.set('code',issued.code);
+      target.searchParams.set('state',app.state);
+      target.searchParams.set('provider','google');
+      location.replace(target.toString());
+      return true;
+    }catch(err){showMsg('login-msg','App-Login konnte nicht abgeschlossen werden: '+err.message);return false;}
+  }
+
+  const redirect=new URLSearchParams(location.search).get('redirect')||'https://ailinux.me/';
+  let target=null;
+  try{target=new URL(redirect)}catch{}
+  const isWordPressTarget=!!target && target.protocol==='https:' && ['ailinux.me','www.ailinux.me'].includes(target.hostname);
+  if(isWordPressTarget){
+    try{
+      const issued=await createOneTimeBrowserCode(data.token,{purpose:'wordpress'});
+      const bridge=new URL(WP_API+'/auth/wp-login');
+      bridge.searchParams.set('code',issued.code);
+      bridge.searchParams.set('redirect',target.toString());
+      location.replace(bridge.toString());
+      return true;
+    }catch(err){showMsg('login-msg','WordPress-Login konnte nicht synchronisiert werden: '+err.message);return false;}
+  }
+
+  // Compatibility for existing AILinux subdomains that still consume the shared token cookie.
+  if(target && target.protocol==='https:' && target.hostname.endsWith('.ailinux.me')){
+    setSharedAuthCookie(data.token||'');
+    location.replace(target.toString());
+    return true;
+  }
+  showDashboard(fallbackEmail||data.user_id||data.email,data.tier,data.client_id,data.name);
   return true;
 }
 // ── Verify token via Backend ──────────────────────────────────────────────────
@@ -1037,21 +1064,19 @@ function openApp(){
 
   await loadAuthConfig();
   if(params.get('google')==='1'){
-    setTimeout(()=>document.getElementById('google-login-fallback')?.click(),700);
+    setTimeout(()=>{document.getElementById('google-login-wrap')?.scrollIntoView({block:'center',behavior:'smooth'});},350);
   }
 
   // Restore session via Backend verify
   const restored=await verifyAndRestoreSession();
   const redirect=params.get('redirect');
-  if(restored && redirect){
-    try{
-      const target=new URL(redirect);
-      if(target.protocol==='https:' && (target.hostname==='ai.ailinux.me' || target.hostname.endsWith('.ailinux.me'))){
-        setSharedAuthCookie(lsGet('ailinux_token'));
-        location.replace(target.toString());
-        return;
-      }
-    }catch{}
+  const pendingAppLogin=appLoginRequest();
+  if(restored && (redirect || pendingAppLogin)){
+    const token=lsGet('ailinux_token');
+    if(token){
+      const restoredData={token,user_id:lsGet('ailinux_email'),tier:lsGet('ailinux_tier'),client_id:lsGet('ailinux_client_id'),name:lsGet('ailinux_name')};
+      if(await completeBrowserLogin(restoredData,restoredData.user_id))return;
+    }
   }
 
   // If logged in and view param → switch to that panel

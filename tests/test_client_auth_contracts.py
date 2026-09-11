@@ -140,3 +140,29 @@ async def test_wordpress_admin_login_becomes_mcp_admin(monkeypatch):
     verified = await client_auth.verify_auth(f"Bearer {login.token}")
     assert verified["authority_role"] == "human_admin"
     assert verified["mcp_admin"] is True
+
+@pytest.mark.asyncio
+async def test_google_login_existing_user_does_not_require_password_or_wordpress(monkeypatch):
+    email = "google@example.test"
+    client_auth.USER_REGISTRY[email] = {
+        "password_hash": client_auth.hash_secret("legacy-secret"),
+        "tier": "pro",
+        "name": "Google User",
+    }
+    monkeypatch.setattr(
+        client_auth,
+        "verify_google_credential",
+        lambda credential: {
+            "email": email,
+            "email_verified": True,
+            "name": "Google User",
+            "sub": "google-sub-123",
+        },
+    )
+    monkeypatch.setattr(client_auth, "save_user_to_file", lambda *_args, **_kwargs: True)
+
+    login = await client_auth.google_login(client_auth.GoogleLoginRequest(credential="x" * 64))
+
+    assert login.email == email
+    assert login.token
+    assert client_auth.USER_REGISTRY[email]["google_sub"] == "google-sub-123"
