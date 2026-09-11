@@ -11,6 +11,8 @@ Wants=network-online.target
 # KEIN Requires=docker.service — Hub-Nodes laufen ohne Docker
 
 [Service]
+RuntimeDirectory=triforce
+RuntimeDirectoryMode=0750
 Type=simple
 User=zombie
 Group=zombie

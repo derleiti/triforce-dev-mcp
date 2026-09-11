@@ -31,6 +31,8 @@ ExecStartPre=+/usr/bin/install -d -o zombie -g zombie -m 755 /var/tristar
 # systemd legt /var/lib/triforce mit User/Group des Services an.
 StateDirectory=triforce
 StateDirectoryMode=0750
+RuntimeDirectory=triforce
+RuntimeDirectoryMode=0750
 
 ExecStart=/home/zombie/triforce/scripts/start-triforce.sh
 

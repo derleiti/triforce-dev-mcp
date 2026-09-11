@@ -4,6 +4,8 @@ After=network-online.target redis-server.service
 Wants=network-online.target
 
 [Service]
+RuntimeDirectory=triforce
+RuntimeDirectoryMode=0750
 Type=simple
 User=zombie
 Group=zombie
