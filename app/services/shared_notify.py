@@ -716,7 +716,11 @@ class SharedNotifyStore:
         unique: dict[str, dict[str, Any]] = {}
         for row in rows:
             public = self._message_public(row)
-            logical = str(public.get("correlation_id") or public["message_id"])
+            metadata = public.get("metadata") if isinstance(public.get("metadata"), dict) else {}
+            # Only server fan-out copies share logical_message_id. correlation_id
+            # is causal tracing and may intentionally be shared by a reply; using
+            # it for dedup hid AI answers behind the original human message.
+            logical = str(metadata.get("logical_message_id") or public["message_id"])
             if logical in unique:
                 unique[logical]["delivery_count"] += 1
                 continue
