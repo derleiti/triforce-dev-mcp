@@ -87,3 +87,56 @@ async def test_refresh_rejects_expired_token():
         await client_auth.refresh_auth(f"Bearer {expired}")
 
     assert exc.value.status_code == 401
+
+
+def test_resolve_authority_primary_owner_and_fresh_wordpress(monkeypatch):
+    from datetime import datetime, timezone, timedelta
+    monkeypatch.setenv("ADMIN_EMAIL", "owner@example.test")
+    role, level, source = client_auth.resolve_user_authority("owner@example.test", {})
+    assert role.value == "human_owner" and level == 100 and source == "primary_owner"
+
+    user = {
+        "wordpress_roles": ["administrator"],
+        "wordpress_can_admin": True,
+        "wordpress_authority_verified_at": datetime.now(timezone.utc).isoformat(),
+    }
+    role, level, source = client_auth.resolve_user_authority("admin@example.test", user)
+    assert role.value == "human_admin" and level == 90 and source == "wordpress"
+
+    stale = dict(user)
+    stale["wordpress_authority_verified_at"] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    role, level, source = client_auth.resolve_user_authority("admin@example.test", stale)
+    assert role.value == "human_member" and level == 20
+
+
+def test_enterprise_subscription_is_not_organizational_admin(monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    role, level, _ = client_auth.resolve_user_authority(
+        "paid@example.test", {"tier": "enterprise"}
+    )
+    assert role.value == "human_member"
+    assert level == 20
+
+
+@pytest.mark.asyncio
+async def test_wordpress_admin_login_becomes_mcp_admin(monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    monkeypatch.setattr(client_auth, "save_user_to_file", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(client_auth, "verify_wordpress_login", lambda email, password: {
+        "email": email,
+        "name": "WP Admin",
+        "tier": "free",
+        "wordpress_roles": ["administrator"],
+        "wordpress_can_admin": True,
+        "authority_role": "",
+        "nova_entitlements": {},
+    })
+    login = await client_auth.user_login(
+        client_auth.UserLoginRequest(email="wpadmin@example.test", password="secret")
+    )
+    assert login.authority_role == "human_admin"
+    assert login.authority_level == 90
+    assert login.mcp_admin is True
+    verified = await client_auth.verify_auth(f"Bearer {login.token}")
+    assert verified["authority_role"] == "human_admin"
+    assert verified["mcp_admin"] is True

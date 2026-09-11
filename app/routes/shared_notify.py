@@ -79,6 +79,22 @@ class SharedMessage(BaseModel):
     dedup_key: str = Field(default="", max_length=256)
 
 
+class ConversationCreate(BaseModel):
+    title: str = Field(default="", max_length=120)
+    created_by_endpoint_id: str = Field(min_length=1, max_length=96)
+    member_handles: list[str] = Field(default_factory=list, min_length=1, max_length=31)
+    kind: str = Field(default="group", max_length=16)
+
+
+class ConversationSend(BaseModel):
+    sender_endpoint_id: str = Field(min_length=1, max_length=96)
+    kind: str = Field(default="human_chat", max_length=32)
+    title: str = Field(default="", max_length=300)
+    body: str = Field(default="", max_length=10000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    ttl_seconds: int = Field(default=86400, ge=30, le=604800)
+
+
 class AckRequest(BaseModel):
     endpoint_id: str
     message_id: str
@@ -184,6 +200,7 @@ async def send_message(body: SharedMessage, authorization: str = Header(None)):
             thread_id=body.thread_id, correlation_id=body.correlation_id,
             message_id=body.message_id, hop_count=body.hop_count,
             ttl_seconds=body.ttl_seconds, metadata=body.metadata, dedup_key=body.dedup_key,
+            actor_authority_role=str(session.get("authority_role") or ""),
         )
         delivery: dict[str, Any] = {"mode": "mailbox", "target": target.handle}
         # Local model/agent endpoints can be invoked immediately through the existing
@@ -269,7 +286,66 @@ async def memory_recall(body: MemoryRecallRequest, authorization: str = Header(N
         return {"ok": True, "status": "degraded", "context": "", "ids": []}
 
 
+@router.post("/conversations")
+async def create_conversation(body: ConversationCreate, authorization: str = Header(None)):
+    session = _session(authorization)
+    try:
+        conversation = get_shared_notify_store().create_conversation(
+            owner_id=session["owner_id"], created_by_endpoint_id=body.created_by_endpoint_id,
+            title=body.title, member_handles=body.member_handles, kind=body.kind,
+        )
+        return {"ok": True, "conversation": conversation}
+    except Exception as exc:
+        _fail(exc)
+
+
+@router.get("/conversations")
+async def list_conversations(endpoint_id: str = "", authorization: str = Header(None)):
+    session = _session(authorization)
+    return {"ok": True, "conversations": get_shared_notify_store().list_conversations(
+        owner_id=session["owner_id"], endpoint_id=endpoint_id,
+    )}
+
+
+@router.get("/conversations/{conversation_id}/history")
+async def conversation_history(conversation_id: str, limit: int = 200, authorization: str = Header(None)):
+    session = _session(authorization)
+    try:
+        return {"ok": True, "messages": get_shared_notify_store().conversation_history(
+            owner_id=session["owner_id"], conversation_id=conversation_id, limit=limit,
+        )}
+    except Exception as exc:
+        _fail(exc)
+
+
+@router.post("/conversations/{conversation_id}/send")
+async def send_conversation(conversation_id: str, body: ConversationSend, authorization: str = Header(None)):
+    session = _session(authorization)
+    try:
+        result = get_shared_notify_store().send_conversation(
+            owner_id=session["owner_id"], conversation_id=conversation_id,
+            sender_endpoint_id=body.sender_endpoint_id, kind=body.kind,
+            title=body.title, body=body.body, metadata=body.metadata, ttl_seconds=body.ttl_seconds,
+            actor_authority_role=str(session.get("authority_role") or ""),
+        )
+        return {"ok": True, **result}
+    except Exception as exc:
+        _fail(exc)
+
+
 @router.get("/status")
 async def status(authorization: str = Header(None)):
     session = _session(authorization)
-    return {"ok": True, **get_shared_notify_store().stats(owner_id=session["owner_id"])}
+    result: dict[str, Any] = {"ok": True, **get_shared_notify_store().stats(owner_id=session["owner_id"])}
+    try:
+        from ..services.memory_trigger import get_memory_engine
+        memory = get_memory_engine().health()
+        if hasattr(memory, "__await__"):
+            memory = await memory
+        if isinstance(memory, dict):
+            # Expose operational health only. Memory contents/history stay behind
+            # the authenticated scoped recall endpoint.
+            result["episodic_memory"] = memory
+    except Exception:
+        result["episodic_memory"] = {"status": "degraded", "healthy": False}
+    return result

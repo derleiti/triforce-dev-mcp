@@ -3931,6 +3931,9 @@ def _store_session_request_state(session: Dict[str, TypingAny], request: Request
     session["auth_user"] = getattr(state, "mcp_auth_user", None)
     session["auth_method"] = getattr(state, "mcp_auth_method", None)
     session["auth_full_access"] = bool(getattr(state, "mcp_auth_full_access", False))
+    session["authority_role"] = getattr(state, "mcp_authority_role", None)
+    session["authority_level"] = getattr(state, "mcp_authority_level", None)
+    session["authority_source"] = getattr(state, "mcp_authority_source", None)
     session["auth_client_id"] = getattr(state, "mcp_auth_client_id", None)
 
 
@@ -3938,6 +3941,9 @@ def _restore_session_request_state(session: Dict[str, TypingAny], request: Reque
     request.state.mcp_auth_user = session.get("auth_user")
     request.state.mcp_auth_method = session.get("auth_method")
     request.state.mcp_auth_full_access = bool(session.get("auth_full_access", False))
+    request.state.mcp_authority_role = session.get("authority_role")
+    request.state.mcp_authority_level = session.get("authority_level")
+    request.state.mcp_authority_source = session.get("authority_source")
     request.state.mcp_auth_client_id = session.get("auth_client_id")
 
 

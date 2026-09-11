@@ -340,9 +340,10 @@ class MeshCommandFilter:
     """
     Role-based MCP command filtering for Mesh AI agents.
 
-    - Lead agents (Gemini): Full access
-    - Worker agents: Filtered access, dangerous commands queued
-    - Reviewer agents: Read-only access
+    - Lead agents: coordination/read access only, never implicit admin
+    - Worker agents: explicit allow-list; dangerous commands queued
+    - Reviewer agents: read-only access
+    - Unknown roles/commands: denied by default
     """
 
     # Commands that Workers can execute directly
@@ -358,6 +359,11 @@ class MeshCommandFilter:
         'queue.status', 'queue.agents',
         # Safe LLM operations
         'chat', 'llm.invoke', 'tristar.models',
+    }
+
+    # Leads coordinate but do not inherit mutation/admin authority.
+    LEAD_ALLOWED = WORKER_ALLOWED | {
+        'queue.get', 'llm.consensus', 'llm.broadcast',
     }
 
     # Commands that must be queued for Workers
@@ -425,9 +431,24 @@ class MeshCommandFilter:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Lead/Admin have full access
-        if agent_role in ("lead", "admin"):
-            result["reason"] = "Lead/Admin has full access"
+        # A role string supplied by an agent is not authority. Only the two
+        # reserved internal principals may ever exercise this legacy admin path.
+        if agent_role == "admin":
+            if agent_id not in {"tristar_kernel", "system"}:
+                result["action"] = "deny"
+                result["reason"] = "Admin authority cannot be self-asserted by an agent"
+                self._log_audit(result)
+                return result
+            result["reason"] = "Trusted internal system principal"
+            self._log_audit(result)
+            return result
+
+        if agent_role == "lead":
+            if command in self.LEAD_ALLOWED:
+                result["reason"] = "Lead coordination command explicitly allowed"
+            else:
+                result["action"] = "deny"
+                result["reason"] = "Lead role is coordination-only and has no implicit mutation authority"
             self._log_audit(result)
             return result
 
@@ -480,8 +501,10 @@ class MeshCommandFilter:
                 self._log_audit(result)
                 return result
 
-        # Default: allow but log
-        result["reason"] = "Command allowed (not in restricted list)"
+        # Unknown worker commands are denied. New tools must be classified
+        # explicitly instead of silently inheriting execution authority.
+        result["action"] = "deny"
+        result["reason"] = "Command is not explicitly allowed or queued for worker role"
         self._log_audit(result)
         return result
 

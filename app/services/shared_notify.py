@@ -20,6 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .shared_authority import (
+    AuthorityRole, HUMAN_AUTHORITY_ROLES, authorize_message, default_role_for_kind, parse_authority_role,
+)
+
 
 AVAILABILITIES = {
     "available", "busy", "waiting", "blocked", "do_not_disturb", "quota_limited", "offline",
@@ -29,7 +33,7 @@ ACTIVITIES = {
     "researching", "coding", "reviewing", "thinking", "waiting_for_operator", "waiting_for_agent",
 }
 ENDPOINT_KINDS = {"human", "ai", "client", "agent", "model", "service"}
-MESSAGE_KINDS = {"human_chat", "task", "review", "coordination", "ai_optimization", "brainstorm", "handoff"}
+MESSAGE_KINDS = {"human_chat", "request", "task", "review", "coordination", "ai_optimization", "brainstorm", "handoff"}
 VISIBILITIES = {"account", "public", "private"}
 _HANDLE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
 _ENDPOINT_RE = re.compile(r"^ep_[a-zA-Z0-9_-]{12,64}$")
@@ -158,6 +162,7 @@ class SharedNotifyStore:
                     device_id TEXT NOT NULL,
                     handle TEXT NOT NULL COLLATE NOCASE UNIQUE,
                     kind TEXT NOT NULL,
+                    authority_role TEXT NOT NULL DEFAULT 'client_member',
                     label TEXT NOT NULL DEFAULT '',
                     transport TEXT NOT NULL DEFAULT 'mailbox',
                     target TEXT NOT NULL DEFAULT '',
@@ -211,8 +216,41 @@ class SharedNotifyStore:
                 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_sender_dedup
                     ON messages(sender_owner_id, dedup_key) WHERE dedup_key <> '';
+
+                CREATE TABLE IF NOT EXISTS conversations (
+                    conversation_id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'group',
+                    thread_id TEXT NOT NULL UNIQUE,
+                    created_by_endpoint_id TEXT NOT NULL REFERENCES endpoints(endpoint_id),
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_conversations_owner
+                    ON conversations(owner_id, enabled, updated_at);
+
+                CREATE TABLE IF NOT EXISTS conversation_members (
+                    conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+                    endpoint_id TEXT NOT NULL REFERENCES endpoints(endpoint_id),
+                    role TEXT NOT NULL DEFAULT 'member',
+                    joined_at INTEGER NOT NULL,
+                    PRIMARY KEY(conversation_id, endpoint_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_conversation_members_endpoint
+                    ON conversation_members(endpoint_id, conversation_id);
                     """
                 )
+                # Forward-compatible migration for databases created before the
+                # authority layer existed. Existing endpoints receive only the
+                # least-privilege role implied by their server-known endpoint kind.
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(endpoints)").fetchall()}
+                if "authority_role" not in columns:
+                    conn.execute("ALTER TABLE endpoints ADD COLUMN authority_role TEXT NOT NULL DEFAULT 'client_member'")
+                    conn.execute("UPDATE endpoints SET authority_role='human_member' WHERE kind='human'")
+                    conn.execute("UPDATE endpoints SET authority_role='ai_observer' WHERE kind IN ('ai','agent','model')")
+                    conn.execute("UPDATE endpoints SET authority_role='service' WHERE kind='service'")
             finally:
                 conn.close()
         try:
@@ -236,6 +274,7 @@ class SharedNotifyStore:
             "device_id": row["device_id"],
             "handle": "@" + row["handle"],
             "kind": row["kind"],
+            "authority_role": row["authority_role"],
             "label": row["label"],
             "capabilities": json.loads(row["capabilities_json"] or "[]"),
             "visibility": row["visibility"],
@@ -278,6 +317,7 @@ class SharedNotifyStore:
             raise ValueError("device_id required")
         if kind not in ENDPOINT_KINDS:
             raise ValueError("unsupported endpoint kind")
+        authority_role = default_role_for_kind(kind).value
         if visibility not in VISIBILITIES:
             raise ValueError("unsupported visibility")
         capabilities = _bounded_list(capabilities)
@@ -296,9 +336,9 @@ class SharedNotifyStore:
             handle = self._allocate_handle(conn, requested_handle or label or device_id, endpoint_id=endpoint_id)
             if existing is None:
                 conn.execute(
-                    """INSERT INTO endpoints(endpoint_id,owner_id,device_id,handle,kind,label,transport,target,
-                       capabilities_json,visibility,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (endpoint_id, owner_id, device_id, handle, kind, str(label)[:120], transport[:32], target[:256],
+                    """INSERT INTO endpoints(endpoint_id,owner_id,device_id,handle,kind,authority_role,label,transport,target,
+                       capabilities_json,visibility,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (endpoint_id, owner_id, device_id, handle, kind, authority_role, str(label)[:120], transport[:32], target[:256],
                      _json(capabilities), visibility, 1, now, now),
                 )
                 conn.execute(
@@ -433,7 +473,7 @@ class SharedNotifyStore:
         title: str = "", sender_endpoint_id: str = "", thread_id: str = "",
         correlation_id: str = "", message_id: str = "", hop_count: int = 0,
         ttl_seconds: int = 86400, metadata: dict[str, Any] | None = None,
-        dedup_key: str = "",
+        dedup_key: str = "", actor_authority_role: str = "",
     ) -> tuple[dict[str, Any], DeliveryTarget]:
         sender_owner_id = _owner(sender_owner_id)
         if kind not in MESSAGE_KINDS:
@@ -447,13 +487,26 @@ class SharedNotifyStore:
             raise ValueError("message hop limit exceeded")
         metadata = _bounded_dict(metadata or {})
         target = self.resolve_target(owner_id=sender_owner_id, handle=target_handle)
-        sender_kind = "human"
+        # Authentication proves tenancy. Human organizational authority comes
+        # from the verified account session, while AI/model/service endpoints
+        # always retain their own non-human authority even when they share the
+        # same account token. This prevents an AI endpoint from inheriting its
+        # operator's admin role merely because it runs inside AICoder.
+        sender_kind = "client"
+        sender_role = AuthorityRole.CLIENT_MEMBER.value
         if sender_endpoint_id:
             with self._tx() as conn:
-                sender = conn.execute("SELECT owner_id,kind FROM endpoints WHERE endpoint_id=? AND enabled=1", (sender_endpoint_id,)).fetchone()
+                sender = conn.execute("SELECT owner_id,kind,authority_role FROM endpoints WHERE endpoint_id=? AND enabled=1", (sender_endpoint_id,)).fetchone()
                 if sender is None or sender["owner_id"] != sender_owner_id:
                     raise PermissionError("sender endpoint does not belong to authenticated account")
                 sender_kind = str(sender["kind"])
+                sender_role = str(sender["authority_role"] or default_role_for_kind(sender_kind).value)
+        if sender_kind in {"human", "client"} and actor_authority_role:
+            actor = parse_authority_role(actor_authority_role)
+            if actor not in HUMAN_AUTHORITY_ROLES:
+                raise PermissionError("client/human actor requires verified human authority")
+            sender_role = actor.value
+        authorize_message(sender_role, kind, delegated_task=False)
         is_ai_sender = sender_kind in {"ai", "agent", "model", "service"}
         if kind == "task" and not target.accept_tasks:
             raise PermissionError("target is not accepting tasks")
@@ -502,6 +555,176 @@ class SharedNotifyStore:
             "created_at": row["created_at"], "expires_at": row["expires_at"],
             "delivered_at": row["delivered_at"], "acknowledged_at": row["acknowledged_at"],
         }
+
+    def create_conversation(
+        self, *, owner_id: str, created_by_endpoint_id: str, title: str,
+        member_handles: list[str], kind: str = "group",
+    ) -> dict[str, Any]:
+        owner_id = _owner(owner_id)
+        title = str(title or "").strip()[:120]
+        kind = str(kind or "group").strip().lower()
+        if kind not in {"group", "direct"}:
+            raise ValueError("unsupported conversation kind")
+        if not created_by_endpoint_id:
+            raise ValueError("created_by_endpoint_id is required")
+        with self._tx() as conn:
+            creator = conn.execute(
+                "SELECT * FROM endpoints WHERE endpoint_id=? AND owner_id=? AND enabled=1",
+                (created_by_endpoint_id, owner_id),
+            ).fetchone()
+        if creator is None:
+            raise PermissionError("conversation creator endpoint is not owned by authenticated account")
+
+        endpoint_ids = [created_by_endpoint_id]
+        seen = {created_by_endpoint_id}
+        for handle in list(member_handles or [])[:31]:
+            target = self.resolve_target(owner_id=owner_id, handle=handle)
+            if target.endpoint_id not in seen:
+                seen.add(target.endpoint_id)
+                endpoint_ids.append(target.endpoint_id)
+        if len(endpoint_ids) < 2:
+            raise ValueError("conversation requires at least two participants")
+        if kind == "direct" and len(endpoint_ids) != 2:
+            raise ValueError("direct conversation requires exactly two participants")
+        if kind == "direct":
+            # Direct chat identity is the participant pair. Re-opening a contact
+            # must resume the existing thread instead of creating endless rooms.
+            wanted = set(endpoint_ids)
+            with self._tx() as conn:
+                candidates = conn.execute(
+                    "SELECT conversation_id FROM conversations WHERE owner_id=? AND kind='direct' AND enabled=1 ORDER BY updated_at DESC",
+                    (owner_id,),
+                ).fetchall()
+                for candidate in candidates:
+                    members = conn.execute(
+                        "SELECT endpoint_id FROM conversation_members WHERE conversation_id=?",
+                        (candidate["conversation_id"],),
+                    ).fetchall()
+                    if {row["endpoint_id"] for row in members} == wanted:
+                        return self.get_conversation(owner_id=owner_id, conversation_id=candidate["conversation_id"])
+
+        now = _now()
+        conversation_id = "conv_" + secrets.token_urlsafe(15).replace("-", "_")
+        thread_id = "thr_" + secrets.token_urlsafe(15).replace("-", "_")
+        with self._tx(immediate=True) as conn:
+            conn.execute(
+                "INSERT INTO conversations(conversation_id,owner_id,title,kind,thread_id,created_by_endpoint_id,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)",
+                (conversation_id, owner_id, title, kind, thread_id, created_by_endpoint_id, now, now),
+            )
+            for endpoint_id in endpoint_ids:
+                role = "owner" if endpoint_id == created_by_endpoint_id else "member"
+                conn.execute(
+                    "INSERT INTO conversation_members(conversation_id,endpoint_id,role,joined_at) VALUES(?,?,?,?)",
+                    (conversation_id, endpoint_id, role, now),
+                )
+        return self.get_conversation(owner_id=owner_id, conversation_id=conversation_id)
+
+    def get_conversation(self, *, owner_id: str, conversation_id: str) -> dict[str, Any]:
+        owner_id = _owner(owner_id)
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM conversations WHERE conversation_id=? AND owner_id=? AND enabled=1",
+                (conversation_id, owner_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("conversation not found")
+            members = conn.execute(
+                """SELECT e.endpoint_id,e.handle,e.kind,e.label,cm.role,p.availability,p.activity,p.last_seen,p.ttl_seconds
+                   FROM conversation_members cm
+                   JOIN endpoints e ON e.endpoint_id=cm.endpoint_id AND e.enabled=1
+                   JOIN presence p ON p.endpoint_id=e.endpoint_id
+                   WHERE cm.conversation_id=? ORDER BY cm.joined_at,e.handle COLLATE NOCASE""",
+                (conversation_id,),
+            ).fetchall()
+        return {
+            "conversation_id": row["conversation_id"], "title": row["title"], "kind": row["kind"],
+            "thread_id": row["thread_id"], "created_by_endpoint_id": row["created_by_endpoint_id"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "members": [
+                {
+                    "endpoint_id": m["endpoint_id"], "handle": "@" + m["handle"], "kind": m["kind"],
+                    "label": m["label"], "role": m["role"],
+                    "online": int(m["last_seen"] or 0) + int(m["ttl_seconds"] or 0) > _now(),
+                    "availability": m["availability"], "activity": m["activity"],
+                } for m in members
+            ],
+        }
+
+    def list_conversations(self, *, owner_id: str, endpoint_id: str = "") -> list[dict[str, Any]]:
+        owner_id = _owner(owner_id)
+        with self._tx() as conn:
+            if endpoint_id:
+                rows = conn.execute(
+                    """SELECT c.conversation_id FROM conversations c
+                       JOIN conversation_members cm ON cm.conversation_id=c.conversation_id
+                       WHERE c.owner_id=? AND c.enabled=1 AND cm.endpoint_id=? ORDER BY c.updated_at DESC""",
+                    (owner_id, endpoint_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT conversation_id FROM conversations WHERE owner_id=? AND enabled=1 ORDER BY updated_at DESC",
+                    (owner_id,),
+                ).fetchall()
+        return [self.get_conversation(owner_id=owner_id, conversation_id=row["conversation_id"]) for row in rows]
+
+    def send_conversation(
+        self, *, owner_id: str, conversation_id: str, sender_endpoint_id: str,
+        kind: str, body: str, title: str = "", metadata: dict[str, Any] | None = None,
+        ttl_seconds: int = 86400, actor_authority_role: str = "",
+    ) -> dict[str, Any]:
+        owner_id = _owner(owner_id)
+        conversation = self.get_conversation(owner_id=owner_id, conversation_id=conversation_id)
+        kind = str(kind or "human_chat").strip().lower()
+        if kind == "task":
+            raise PermissionError("group/direct conversation messages are advisory; executable tasks require explicit task delivery/delegation")
+        member_ids = {row["endpoint_id"] for row in conversation["members"]}
+        if sender_endpoint_id not in member_ids:
+            raise PermissionError("sender is not a member of this conversation")
+        recipients = [row for row in conversation["members"] if row["endpoint_id"] != sender_endpoint_id]
+        if not recipients:
+            raise ValueError("conversation has no recipients")
+        logical_id = "grp_" + secrets.token_urlsafe(15).replace("-", "_")
+        shared_meta = dict(metadata or {})
+        shared_meta["conversation_id"] = conversation_id
+        shared_meta["logical_message_id"] = logical_id
+        delivered: list[dict[str, Any]] = []
+        for recipient in recipients:
+            message, _target = self.send(
+                sender_owner_id=owner_id, sender_endpoint_id=sender_endpoint_id,
+                target_handle=recipient["handle"], kind=kind, title=title, body=body,
+                thread_id=conversation["thread_id"], correlation_id=logical_id,
+                ttl_seconds=ttl_seconds, metadata=shared_meta,
+                dedup_key=f"conversation:{conversation_id}:{logical_id}:{recipient['endpoint_id']}",
+                actor_authority_role=actor_authority_role,
+            )
+            delivered.append(message)
+        with self._tx(immediate=True) as conn:
+            conn.execute("UPDATE conversations SET updated_at=? WHERE conversation_id=?", (_now(), conversation_id))
+        return {"conversation": conversation, "logical_message_id": logical_id, "deliveries": delivered}
+
+    def conversation_history(self, *, owner_id: str, conversation_id: str, limit: int = 200) -> list[dict[str, Any]]:
+        owner_id = _owner(owner_id)
+        conversation = self.get_conversation(owner_id=owner_id, conversation_id=conversation_id)
+        limit = max(1, min(int(limit or 200), 500))
+        with self._tx() as conn:
+            rows = conn.execute(
+                """SELECT m.*, e.handle AS sender_handle, e.kind AS sender_kind
+                   FROM messages m LEFT JOIN endpoints e ON e.endpoint_id=m.sender_endpoint_id
+                   WHERE m.thread_id=? ORDER BY m.created_at ASC LIMIT ?""",
+                (conversation["thread_id"], limit * 32),
+            ).fetchall()
+        unique: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            public = self._message_public(row)
+            logical = str(public.get("correlation_id") or public["message_id"])
+            if logical in unique:
+                unique[logical]["delivery_count"] += 1
+                continue
+            public["sender_handle"] = ("@" + row["sender_handle"]) if row["sender_handle"] else ""
+            public["sender_kind"] = row["sender_kind"] or ""
+            public["delivery_count"] = 1
+            unique[logical] = public
+        return list(unique.values())[-limit:]
 
     def mark_local_delivery(self, *, message_id: str, acknowledged: bool = False) -> dict[str, Any]:
         now = _now()

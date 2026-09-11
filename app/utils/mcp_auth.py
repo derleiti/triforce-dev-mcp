@@ -428,26 +428,29 @@ def _validate_jwt(token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _jwt_authority(payload: Dict[str, Any]) -> tuple[str, int, str]:
+    """Resolve current organizational authority for an AILinux JWT.
+
+    Subscription/product roles are intentionally ignored. For known human
+    accounts we consult current server-side account state so stale JWT claims do
+    not silently retain WordPress-derived administrative access.
+    """
+    user_id = str(payload.get("email") or payload.get("sub") or "").strip().lower()
+    try:
+        from ..routes.client_auth import USER_REGISTRY, resolve_user_authority
+        role, level, source = resolve_user_authority(
+            user_id, USER_REGISTRY.get(user_id, {}),
+            payload_role=str(payload.get("authority_role") or ""),
+        )
+        return role.value, int(level), source
+    except Exception:
+        return "human_member", 20, "fallback"
+
+
 def _jwt_has_full_mcp_access(payload: Dict[str, Any]) -> bool:
-    """Grant full MCP access only to explicitly administrative JWT identities."""
-    role = str(payload.get("role") or "").strip().lower()
-    if role == "admin":
-        return True
-
-    user = str(payload.get("email") or payload.get("sub") or "").strip().lower()
-    if not user:
-        return False
-
-    admin_email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
-    if admin_email and secrets.compare_digest(user, admin_email):
-        return True
-
-    admin_ids = {
-        value.strip().lower()
-        for value in (os.environ.get("ADMIN_USER_IDS") or "").split(",")
-        if value.strip()
-    }
-    return user in admin_ids
+    """Full MCP is reserved for current human owner/admin authority."""
+    authority_role, _level, _source = _jwt_authority(payload)
+    return authority_role in {"human_owner", "human_admin"}
 
 
 PUBLIC_GUEST_MCP_PATHS = {
@@ -553,7 +556,11 @@ async def require_mcp_auth(request: Request) -> str:
             user = jwt_payload.get("email") or jwt_payload.get("sub") or "jwt_user"
             request.state.mcp_auth_user = user
             request.state.mcp_auth_method = "jwt"
-            request.state.mcp_auth_full_access = _jwt_has_full_mcp_access(jwt_payload)
+            authority_role, authority_level, authority_source = _jwt_authority(jwt_payload)
+            request.state.mcp_authority_role = authority_role
+            request.state.mcp_authority_level = authority_level
+            request.state.mcp_authority_source = authority_source
+            request.state.mcp_auth_full_access = authority_role in {"human_owner", "human_admin"}
             request.state.mcp_auth_client_id = jwt_payload.get("client_id")
             logger.debug(
                 "AUTH_OK | IP: %s | Method: jwt | User: %s | FullAccess: %s",

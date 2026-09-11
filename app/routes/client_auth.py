@@ -13,7 +13,7 @@ Stand: 2025-12-13
 from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import secrets
@@ -21,6 +21,14 @@ import jwt
 import logging
 import urllib.request
 import urllib.error
+
+from ..services.shared_authority import (
+    AuthorityRole,
+    HUMAN_AUTHORITY_ROLES,
+    authority_from_wordpress,
+    authority_level,
+    parse_authority_role,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -216,12 +224,14 @@ def permissions_for_tier(tier: str) -> Tuple[ClientRole, List[str], List[str]]:
 
 
 def create_jwt_token(
-    client_id: str, 
-    role: str, 
+    client_id: str,
+    role: str,
     email: str = None,
     entitlements: Optional[Dict[str, Any]] = None,
     name: Optional[str] = None,
-    expires_hours: int = JWT_EXPIRY_HOURS
+    expires_hours: int = JWT_EXPIRY_HOURS,
+    authority_role: str = "",
+    authority_level_value: int = 0,
 ) -> str:
     """JWT Token erstellen - enthält Email für Tier-Lookup"""
     client_roles = {item.value for item in ClientRole}
@@ -241,6 +251,9 @@ def create_jwt_token(
         payload["sub"] = email  # Standard JWT subject claim
     if name:
         payload["name"] = name
+    if authority_role:
+        payload["authority_role"] = str(authority_role)
+        payload["authority_level"] = int(authority_level_value or 0)
     # Do not embed entitlements in JWT. Token is auth only; license state is fetched live.
     
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -270,6 +283,71 @@ def decode_authorization_header(authorization: Optional[str]) -> dict:
     return decode_jwt_token(token)
 
 
+def resolve_user_authority(email: str, user: Optional[Dict[str, Any]] = None, *, payload_role: str = "") -> tuple[AuthorityRole, int, str]:
+    """Resolve organizational authority independently from subscription tier.
+
+    ADMIN_EMAIL is the root owner. WordPress-derived roles are trusted only when
+    they were recently validated through the server-to-server auth bridge. A
+    signed JWT claim is a fallback for non-registry sessions, not a source for
+    privilege escalation.
+    """
+    email = str(email or "").strip().lower()
+    user = user if isinstance(user, dict) else {}
+    admin_email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
+    if admin_email and email and secrets.compare_digest(email, admin_email):
+        role = AuthorityRole.HUMAN_OWNER
+        return role, authority_level(role), "primary_owner"
+
+    admin_ids = {
+        value.strip().lower() for value in (os.environ.get("ADMIN_USER_IDS") or "").split(",") if value.strip()
+    }
+    if email and email in admin_ids:
+        role = AuthorityRole.HUMAN_ADMIN
+        return role, authority_level(role), "server_admin_list"
+
+    explicit = str(user.get("authority_role") or "").strip().lower()
+    wp_roles = user.get("wordpress_roles") or []
+    wp_can_admin = bool(user.get("wordpress_can_admin", False))
+    verified_at = str(user.get("wordpress_authority_verified_at") or "").strip()
+    wp_fresh = False
+    if verified_at:
+        try:
+            checked = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+            if checked.tzinfo is None:
+                checked = checked.replace(tzinfo=timezone.utc)
+            max_age = max(300, min(int(os.environ.get("WP_AUTHORITY_MAX_AGE_SECONDS", "28800")), 86400))
+            wp_fresh = (datetime.now(timezone.utc) - checked.astimezone(timezone.utc)).total_seconds() <= max_age
+        except Exception:
+            wp_fresh = False
+
+    if wp_fresh:
+        role = authority_from_wordpress(
+            wp_roles=wp_roles, can_admin=wp_can_admin, explicit_role=explicit, is_owner=False,
+        )
+        return role, authority_level(role), "wordpress"
+
+    # Server-managed non-WP role assignments may be used for lower-risk human
+    # roles, but stale WordPress admin/security roles fail closed to member.
+    if explicit:
+        try:
+            candidate = parse_authority_role(explicit)
+        except PermissionError:
+            candidate = AuthorityRole.HUMAN_MEMBER
+        if candidate in HUMAN_AUTHORITY_ROLES and authority_level(candidate) <= authority_level(AuthorityRole.HUMAN_OPERATOR):
+            return candidate, authority_level(candidate), "server_registry"
+
+    if payload_role:
+        try:
+            candidate = parse_authority_role(payload_role)
+        except PermissionError:
+            candidate = AuthorityRole.HUMAN_MEMBER
+        if candidate in HUMAN_AUTHORITY_ROLES and authority_level(candidate) <= authority_level(AuthorityRole.HUMAN_MEMBER):
+            return candidate, authority_level(candidate), "signed_token_fallback"
+
+    role = AuthorityRole.HUMAN_MEMBER
+    return role, authority_level(role), "default"
+
+
 def build_verified_session(payload: dict) -> Dict[str, Any]:
     """Build the public auth session shape used by ai-coder and Copa."""
     email = (payload.get("email") or payload.get("sub") or "").lower()
@@ -283,6 +361,9 @@ def build_verified_session(payload: dict) -> Dict[str, Any]:
     entitlements = get_user_entitlements(user)
 
     client_id = payload.get("client_id")
+    authority_role, authority_level_value, authority_source = resolve_user_authority(
+        email, user, payload_role=str(payload.get("authority_role") or "")
+    )
     return {
         "valid": True,
         "user_id": email or client_id,
@@ -290,6 +371,10 @@ def build_verified_session(payload: dict) -> Dict[str, Any]:
         "client_id": client_id,
         "tier": tier,
         "role": tier,
+        "authority_role": authority_role.value,
+        "authority_level": authority_level_value,
+        "authority_source": authority_source,
+        "mcp_admin": authority_role in {AuthorityRole.HUMAN_OWNER, AuthorityRole.HUMAN_ADMIN},
         "name": payload.get("name") or user.get("name"),
         "nova_entitlements": entitlements,
         "entitlements": entitlements,
@@ -480,6 +565,10 @@ class UserLoginResponse(BaseModel):
     expires_in: int = JWT_EXPIRY_HOURS * 3600
     tier: str
     account_role: str
+    authority_role: str = AuthorityRole.HUMAN_MEMBER.value
+    authority_level: int = 20
+    authority_source: str = "default"
+    mcp_admin: bool = False
     client_id: str  # Server-assigned per login
     email: str
     name: Optional[str] = None
@@ -556,6 +645,7 @@ def issue_user_login_response(email: str, user: dict) -> UserLoginResponse:
     tier = normalize_tier(user.get("tier"))
     entitlements = get_user_entitlements(user)
     role, allowed, blocked = permissions_for_tier(tier)
+    authority_role, authority_level_value, authority_source = resolve_user_authority(email, user)
 
     token = create_jwt_token(
         client_id,
@@ -563,6 +653,8 @@ def issue_user_login_response(email: str, user: dict) -> UserLoginResponse:
         email=email,
         entitlements=entitlements,
         name=user.get("name"),
+        authority_role=authority_role.value,
+        authority_level_value=authority_level_value,
     )
 
     CLIENT_REGISTRY[client_id] = {
@@ -586,6 +678,10 @@ def issue_user_login_response(email: str, user: dict) -> UserLoginResponse:
         token=token,
         tier=tier,
         account_role=role.value,
+        authority_role=authority_role.value,
+        authority_level=authority_level_value,
+        authority_source=authority_source,
+        mcp_admin=authority_role in {AuthorityRole.HUMAN_OWNER, AuthorityRole.HUMAN_ADMIN},
         client_id=client_id,
         email=email,
         name=user.get("name"),
@@ -670,6 +766,20 @@ async def google_login(request: GoogleLoginRequest):
         user["updated_at"] = datetime.now().isoformat()
         save_user_to_file(email, user)
 
+    # Refresh organizational authority even when a legacy local password hash
+    # authenticated the account. Failure to reach WordPress does not break login,
+    # but stale high authority will fail closed in resolve_user_authority().
+    if wp_user is None:
+        wp_user = verify_wordpress_login(email, request.password)
+        if wp_user:
+            user["auth_provider"] = "wordpress"
+            user["wordpress_roles"] = list(wp_user.get("wordpress_roles") or [])
+            user["wordpress_can_admin"] = bool(wp_user.get("wordpress_can_admin", False))
+            user["authority_role"] = str(wp_user.get("authority_role") or "")
+            user["wordpress_authority_verified_at"] = datetime.now(timezone.utc).isoformat()
+            save_user_to_file(email, user)
+            USER_REGISTRY[email] = user
+
     response = issue_user_login_response(email, user)
     logger.info("Google user logged in: %s (%s) -> %s", email, response.tier, response.client_id)
     return response
@@ -684,6 +794,7 @@ async def user_login(request: UserLoginRequest):
     """
     email = request.email.lower().strip()
     user = USER_REGISTRY.get(email)
+    wp_user = None
 
     logger.info(
         "COPA_LOGIN_DEBUG start email=%s local_user=%s has_hash=%s tier=%s ents=%s",
@@ -729,6 +840,10 @@ async def user_login(request: UserLoginRequest):
                 "nova_entitlements": wp_entitlements,
                 "entitlements": wp_entitlements,
                 "auth_provider": "wordpress",
+                "wordpress_roles": list(wp_user.get("wordpress_roles") or []),
+                "wordpress_can_admin": bool(wp_user.get("wordpress_can_admin", False)),
+                "authority_role": str(wp_user.get("authority_role") or ""),
+                "wordpress_authority_verified_at": datetime.now(timezone.utc).isoformat(),
             }
             save_user_to_file(email, user)
             USER_REGISTRY[email] = user
@@ -757,6 +872,10 @@ async def user_login(request: UserLoginRequest):
             )
             user["nova_entitlements"] = wp_entitlements
             user["entitlements"] = wp_entitlements
+            user["wordpress_roles"] = list(wp_user.get("wordpress_roles") or [])
+            user["wordpress_can_admin"] = bool(wp_user.get("wordpress_can_admin", False))
+            user["authority_role"] = str(wp_user.get("authority_role") or "")
+            user["wordpress_authority_verified_at"] = datetime.now(timezone.utc).isoformat()
             save_user_to_file(email, user)
             USER_REGISTRY[email] = user
 
@@ -788,7 +907,13 @@ async def refresh_auth(authorization: str = Header(None)):
         role = normalize_tier(user.get("tier") or role)
     name = user.get("name") if user else payload.get("name")
 
-    token = create_jwt_token(client_id, role, email=email, name=name)
+    authority_role, authority_level_value, _ = resolve_user_authority(
+        email or "", user, payload_role=str(payload.get("authority_role") or "")
+    )
+    token = create_jwt_token(
+        client_id, role, email=email, name=name,
+        authority_role=authority_role.value, authority_level_value=authority_level_value,
+    )
     if client_id in ACTIVE_SESSIONS:
         ACTIVE_SESSIONS[client_id]["last_seen"] = datetime.now().isoformat()
     return {

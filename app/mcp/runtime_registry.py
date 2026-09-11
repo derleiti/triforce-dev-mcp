@@ -285,11 +285,25 @@ class RuntimeToolRegistry:
         if auth_method == "basic" and user in ("zombie", "admin"):
             return "internal_full"
 
-        # Tier-based access
-        tier_lower = (tier or "free").lower()
-        if tier_lower in ("unlimited", "admin"):
+        # Organizational authority is distinct from subscription tier.
+        authority_role = str((request_meta or {}).get("authority_role") or "").strip().lower()
+        authority_level = int((request_meta or {}).get("authority_level") or 0)
+        if authority_role in {"human_owner", "human_admin"} and authority_level >= 90:
             return "internal_full"
-        if tier_lower in ("pro", "paid", "subscriber"):
+        if authority_role == "human_security_admin" and authority_level >= 80:
+            return "security_admin"
+        if authority_role in {"human_manager", "human_operator"} and authority_level >= 60:
+            return "operator"
+        if authority_role == "human_developer" and authority_level >= 50:
+            return "developer"
+        if authority_role == "human_contributor" and authority_level >= 30:
+            return "authenticated"
+        if authority_role in {"human_member", "human_viewer", "client_member"}:
+            return "restricted"
+
+        # Paid tiers unlock product features, never organizational authority.
+        tier_lower = (tier or "free").lower()
+        if tier_lower in ("pro", "paid", "subscriber", "enterprise", "unlimited", "admin"):
             return "authenticated"
 
         # Fallback: source_ip is now injected from FastAPI request.
@@ -308,9 +322,13 @@ class RuntimeToolRegistry:
         if classification in {"read_safe", "preview_safe"}:
             return {"decision": "allow", "reason": "safe tool class", "suggested_mode": None}
         if classification == "write_scoped":
+            if client_profile in {"developer", "operator", "security_admin"}:
+                return {"decision": "allow", "reason": f"{client_profile} authority permits scoped writes", "suggested_mode": None}
             return {"decision": "preview_only", "reason": "profile does not allow direct write execution", "suggested_mode": "preview"}
         if classification in {"write_privileged", "exec_privileged"}:
-            return {"decision": "blocked", "reason": "privileged tool class requires internal_full profile", "suggested_mode": "preview" if entry.supports_preview else None}
+            # Operator/security roles may inspect/preview privileged actions, but
+            # only human admin/owner authority reaches internal_full execution.
+            return {"decision": "blocked", "reason": "privileged tool class requires human admin/owner authority", "suggested_mode": "preview" if entry.supports_preview else None}
         return {"decision": "blocked", "reason": "tool policy fallback block", "suggested_mode": None}
 
     def build_policy_response(self, entry: RuntimeToolEntry, *, client_profile: str, policy: Dict[str, Any], arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

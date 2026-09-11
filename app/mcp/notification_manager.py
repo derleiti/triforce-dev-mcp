@@ -1685,6 +1685,7 @@ async def _deliver_shared_notify_from_mcp(params: Dict[str, Any], request) -> Di
         ttl_seconds=int(params.get("ttl_seconds") or 86400),
         metadata=params.get("metadata") if isinstance(params.get("metadata"), dict) else {},
         dedup_key=str(params.get("dedup_key") or ""),
+        actor_authority_role=str(getattr(getattr(request, "state", None), "mcp_authority_role", "") or ""),
     )
     delivery: Dict[str, Any] = {"mode": "mailbox", "target": target.handle}
     if target.online and target.transport == "local-ai" and target.target:

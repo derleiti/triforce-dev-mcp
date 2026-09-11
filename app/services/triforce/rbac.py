@@ -130,8 +130,8 @@ LLM_ROLES: Dict[str, Role] = {
     "mistral": Role.REVIEWER,
     "codex": Role.REVIEWER,
 
-    # Admin role
-    "nova": Role.ADMIN,
+    # Named AI assistants are coordinators, never implicit administrators.
+    "nova": Role.LEAD,
 }
 
 
