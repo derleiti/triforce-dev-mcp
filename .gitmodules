@@ -1,8 +1,0 @@
-[submodule "client-deploy/ailinux-client"]
-	path = client-deploy/ailinux-client
-	url = https://github.com/derleiti/ailinux-client.git
-	branch = main
-[submodule "client-deploy/aiwindows-client"]
-	path = client-deploy/aiwindows-client
-	url = https://github.com/derleiti/aiwindows-client.git
-	branch = main

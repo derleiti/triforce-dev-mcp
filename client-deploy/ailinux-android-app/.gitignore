@@ -1,8 +1,0 @@
-.buildozer/
-bin/
-__pycache__/
-*.pyc
-.gradle/
-build/
-*.apk
-*.aab
