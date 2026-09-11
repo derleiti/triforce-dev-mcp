@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 import socket
 import psutil
 
-from ..services.server_federation import federation, NodeRole
+from ..services.server_federation import federation, NodeRole, FEDERATION_NODES
 
 router = APIRouter(prefix="/federation", tags=["Federation"])
 
@@ -15,6 +15,32 @@ router = APIRouter(prefix="/federation", tags=["Federation"])
 _hostname = socket.gethostname()
 LOCAL_NODE_ID = "backup" if "backup" in _hostname.lower() else \
                 "zombie-pc" if "zombie" in _hostname.lower() else "hetzner"
+
+
+def _local_ipv4_addresses() -> set[str]:
+    """Return addresses owned by this host, used to identify the local TCP proxy hop."""
+    addresses = {"127.0.0.1"}
+    for entries in psutil.net_if_addrs().values():
+        for entry in entries:
+            if entry.family == socket.AF_INET:
+                addresses.add(entry.address)
+    return addresses
+
+
+def _federation_auth_client_ip(peer_id: str, observed_ip: Optional[str]) -> Optional[str]:
+    """Recover a peer's WG identity only when the TCP hop is demonstrably local.
+
+    systemd-socket-proxyd cannot preserve the original source address.  The
+    federation listener is bound to the WireGuard address and forwards to the
+    private backend, so FastAPI sees an address owned by this host.  In that
+    narrowly defined case, use the peer's canonical WireGuard IP for the
+    vault's existing allowed_ips check.  Remote/non-local hops are never
+    rewritten. PSK signature and node token validation still run first.
+    """
+    if not observed_ip or observed_ip not in _local_ipv4_addresses():
+        return observed_ip
+    peer = FEDERATION_NODES.get(peer_id, {})
+    return peer.get("vpn_ip") or observed_ip
 
 
 class ContributorRegisterRequest(BaseModel):
@@ -264,7 +290,7 @@ async def federation_websocket(websocket: WebSocket):
                 _authlog.warning(f"Nicht registrierter Node abgewiesen: {peer_id} von {_client_ip}")
                 await websocket.close(code=4003, reason="Node not registered")
                 return
-            if not (peer_token and vault.verify_token(peer_id, peer_token, _client_ip)):
+            if not (peer_token and vault.verify_token(peer_id, peer_token, _federation_auth_client_ip(peer_id, _client_ip))):
                 _authlog.warning(f"Token-Pruefung fehlgeschlagen, Peer abgewiesen: {peer_id} von {_client_ip}")
                 await websocket.close(code=4003, reason="Invalid or missing node token")
                 return
