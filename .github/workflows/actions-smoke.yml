@@ -1,0 +1,9 @@
+name: Actions Smoke
+on:
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke
+        run: echo ACTIONS_SMOKE_OK
