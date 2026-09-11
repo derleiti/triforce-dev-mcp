@@ -1,8 +1,65 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 
-from app.services.aicoder_runner import AICoderRunner, parse_ndjson, prepare_instance_home
+from app.services.aicoder_runner import AICoderRunner, parse_ndjson, prepare_instance_home, resolve_aicoder_launch
+
+
+def test_resolve_aicoder_launch_source_uses_checkout_virtualenv(tmp_path: Path):
+    root = tmp_path / "ai-coder"
+    python = root / ".venv" / "bin" / "python"
+    cli = root / "aicoder" / "cli.py"
+    python.parent.mkdir(parents=True)
+    cli.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    cli.write_text("def main(): return 0\n")
+
+    command, source_root = resolve_aicoder_launch(runner_mode="source", source_root=root)
+
+    assert command == [str(python.resolve()), "-m", "aicoder.cli"]
+    assert source_root == root.resolve()
+
+
+def test_resolve_aicoder_launch_rejects_incomplete_source_checkout(tmp_path: Path):
+    root = tmp_path / "ai-coder"
+    root.mkdir()
+    try:
+        resolve_aicoder_launch(runner_mode="source", source_root=root)
+    except FileNotFoundError as exc:
+        assert ".venv/bin/python" in str(exc)
+    else:
+        raise AssertionError("incomplete source checkout must be rejected")
+
+
+def test_runner_source_mode_uses_source_pythonpath_and_keeps_workspace_cwd(tmp_path: Path):
+    root = tmp_path / "ai-coder"
+    python = root / ".venv" / "bin" / "python"
+    cli = root / "aicoder" / "cli.py"
+    python.parent.mkdir(parents=True)
+    cli.parent.mkdir(parents=True)
+    # A tiny Python shim lets the test observe cwd/PYTHONPATH while accepting
+    # the production '-m aicoder.cli agent ...' argument shape.
+    python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os\n"
+        "print(json.dumps({'type':'result','status':'completed','response':os.getcwd() + '|' + os.environ.get('PYTHONPATH',''),'model':'m','error':''}))\n"
+    )
+    python.chmod(0o755)
+    cli.write_text("def main(): return 0\n")
+    workspace = tmp_path / "ws"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    home.mkdir()
+
+    result = asyncio.run(AICoderRunner(runner_mode="source", source_root=root).run(
+        profile_id="pilot", prompt="test", workspace=workspace, home=home, timeout=5,
+    ))
+
+    assert result.status == "success"
+    cwd, pythonpath = result.response.split("|", 1)
+    assert cwd == str(workspace.resolve())
+    assert pythonpath.split(os.pathsep)[0] == str(root.resolve())
 
 
 def test_parse_ndjson_keeps_structured_events_and_diagnostics():

@@ -323,6 +323,40 @@ def _inject_nova_env(env: Dict[str, str]) -> Dict[str, str]:
     return env
 
 
+def _sync_builtin_aicoder_profile_prompts(profile_root: str | Path = "/var/tristar/agents/profiles") -> list[str]:
+    """Keep built-in AICoder profile prompts on the canonical TriForce policy.
+
+    Profiles explicitly marked ``system_prompt_source=custom`` are never touched.
+    Existing built-in profiles without a source marker are legacy TriForce-owned
+    state and are migrated atomically.
+    """
+    root = Path(profile_root)
+    updated: list[str] = []
+    if not root.is_dir():
+        return updated
+    for agent_id in ("claude-mcp", "codex-mcp", "gemini-mcp", "opencode-mcp"):
+        path = root / f"{agent_id}.json"
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("system_prompt_source") == "custom":
+                continue
+            canonical = build_agent_system_prompt(agent_id)
+            if data.get("system_prompt") == canonical and data.get("system_prompt_source") == "triforce":
+                continue
+            data["system_prompt"] = canonical
+            data["system_prompt_source"] = "triforce"
+            data["system_prompt_version"] = 2
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            os.replace(tmp, path)
+            updated.append(agent_id)
+        except Exception as exc:
+            logger.warning("Failed to sync AICoder profile prompt %s: %s", agent_id, exc)
+    return updated
+
+
 class AgentController:
     """
     Controller für CLI-Agenten.
@@ -352,6 +386,9 @@ class AgentController:
         # Lade gespeicherte Konfigurationen. Known legacy built-in prompts are
         # migrated in-memory to the shared core + role overlay and persisted.
         await self._load_configs()
+        synced_profiles = _sync_builtin_aicoder_profile_prompts()
+        if synced_profiles:
+            logger.info("Synced canonical AICoder profile prompts: %s", ", ".join(synced_profiles))
 
         # Registriere Default-Agenten wenn keine vorhanden
         if not self.agents:
@@ -829,8 +866,11 @@ class AgentController:
         if instance.config.runtime == "aicoder" or instance.config.agent_type == AgentType.AICODER:
             try:
                 instance.status = AgentStatus.RUNNING
-                async with self._aicoder_run_lock(agent_id):
-                    result = await run_profile(agent_id, message, timeout_override=timeout)
+                from .idle_worker import lease_coordinator
+                workspace = str(instance.config.working_dir or "/home/zombie/triforce")
+                async with lease_coordinator.foreground(str(Path(workspace).resolve())):
+                    async with self._aicoder_run_lock(agent_id):
+                        result = await run_profile(agent_id, message, timeout_override=timeout)
                 try:
                     notification = await record_aicoder_run(result)
                 except Exception as notify_exc:

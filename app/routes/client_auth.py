@@ -841,6 +841,8 @@ async def client_handshake(authorization: str = Header(None)):
             "chat": True,
             "models": True,
             "mcp": True,
+            "shared_notify": True,
+            "presence": True,
             "ocr": bool(session.get("nova_entitlements", {}).get("copa_ocr")),
         },
         "endpoints": {
@@ -848,6 +850,7 @@ async def client_handshake(authorization: str = Header(None)):
             "chat": "/v1/client/chat",
             "models": "/v1/client/models",
             "mcp": "/v1/mcp",
+            "shared_notify": "/v1/notify-network",
             "ocr_mistral": "/v1/client/ocr/mistral",
             "ocr_status": "/v1/client/ocr/status",
         },

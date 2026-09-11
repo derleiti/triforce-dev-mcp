@@ -100,6 +100,7 @@ from .routes.federation import router as federation_router
 from .routes.nova_chat_agent import router as nova_chat_agent_router
 from .routes.mistral_agents import router as mistral_agents_router
 from .routes.remote_coding_agent import router as remote_coding_agent_router
+from .routes.shared_notify import router as shared_notify_router
 from .routes.nova_frontend import public_router as nova_frontend_public_router
 from .routes.nova_frontend import router as nova_frontend_router
 from .routes.nova_playground import router as nova_playground_router
@@ -259,6 +260,9 @@ async def lifespan(app: FastAPI):
         from .mcp.notification_manager import start_pollers
         start_pollers()
         logger.info("Notification Manager pollers requested")
+        from .services.tristar.idle_worker import start_idle_worker
+        start_idle_worker()
+        logger.info("TriStar idle worker startup evaluated")
     except Exception:
         logger.warning("Notification Manager start skipped")
 
@@ -465,6 +469,7 @@ def create_app() -> FastAPI:
     app.include_router(nova_chat_agent_router, prefix="/v1", tags=["Nova Chat Agent"])
     app.include_router(mistral_agents_router, prefix="/v1", tags=["Mistral Agents"])
     app.include_router(remote_coding_agent_router, prefix="/v1", tags=["Remote Coding Preview"])
+    app.include_router(shared_notify_router, prefix="/v1", tags=["Shared Notify"])
     app.include_router(nova_frontend_public_router, prefix="/v1", tags=["Nova Frontend Public"])
     app.include_router(nova_frontend_router, prefix="/v1", tags=["Nova Frontend"])
     app.include_router(nova_playground_router, prefix="/v1", tags=["Nova Playground"])

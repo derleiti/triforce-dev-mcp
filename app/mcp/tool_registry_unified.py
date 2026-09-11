@@ -49,6 +49,7 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "notify_read": "observability",
     "notify_clear": "observability",
     "notify_status": "observability",
+    "idle_assign": "agents",
     "mcp_analytics": "observability",
     "mcp_telemetry": "observability",
     "logs": "observability",

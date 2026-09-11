@@ -994,7 +994,7 @@ async def _dispatch_event(event: Dict) -> None:
 
     # Skip dispatch for internal/noise events
     SKIP_TAGS = {"agent-spawn", "scheduler", "auto", "log-monitor", "init",
-                 "triforce", "warning", "worker-result", "error", "agent-runtime"}
+                 "triforce", "warning", "worker-result", "error", "agent-runtime", "ai-rpc"}
     if tags and any(t in SKIP_TAGS for t in tags):
         return
 
@@ -1492,6 +1492,134 @@ async def stop_pollers():
 
 # -- MCP Tool Handlers --
 
+# -- Unified AI recipient dispatch -------------------------------------------------
+# notify_send remains a notification primitive. When ``target`` is supplied it can
+# additionally invoke a configured TriStar/AICoder agent or any model selector that
+# AICoder can route (API/account/local). Model invocations run with NO tools enabled,
+# so notify RPC cannot become an accidental code/system execution path.
+_AI_NOTIFY_RECENT: Dict[str, float] = {}
+_AI_NOTIFY_WINDOW_SECONDS = 30
+
+
+def _notify_prompt(title: str, body: str) -> str:
+    return (
+        "[TriForce notify RPC]\n"
+        "Treat this as a message from another authenticated system participant. "
+        "Do not recursively notify the same target. Do not perform code, filesystem, "
+        "shell, service, package, deployment, or account mutations. Respond to the "
+        "message only.\n\n"
+        f"TITLE: {title}\nMESSAGE:\n{body}"
+    )
+
+
+async def _run_notify_model(*, target: str, model: str, prompt: str, timeout: int, kind: str) -> Dict[str, Any]:
+    """Invoke one AICoder-routable model as a side-effect-free text RPC."""
+    from app.services.aicoder_runner import AICoderRunner, apply_profile_state, prepare_instance_home
+
+    bounded_timeout = max(10, min(int(timeout), 300))
+    safe_id = "notify-" + hashlib.sha256(f"{target}:{model}".encode()).hexdigest()[:16]
+    home = prepare_instance_home(safe_id)
+    workspace = Path(os.environ.get("TRIFORCE_NOTIFY_WORKSPACE", "/var/tristar/agents/notify-workspace"))
+    workspace.mkdir(parents=True, exist_ok=True)
+    # Hard execution boundary: notify is communication, never an implicit task runner.
+    apply_profile_state(home, {
+        "model": model,
+        "workspace": str(workspace),
+        "enabled_tools": [],
+        "approval_mode": "never",
+        "team_mode": "off",
+        "tool_mode": "off",
+        "timeout": bounded_timeout,
+    })
+    result = await AICoderRunner().run(
+        profile_id=safe_id,
+        prompt=prompt,
+        model=model,
+        workspace=workspace,
+        home=home,
+        timeout=bounded_timeout,
+        team_mode="off",
+        system_prompt="",
+    )
+    return {"invoked": True, "kind": kind, "target": target, "model": model, "result": result.to_dict()}
+
+
+async def _invoke_notify_target(target: str, *, title: str, body: str, timeout: int = 120) -> Dict[str, Any]:
+    target = str(target or "").strip()
+    if not target:
+        return {"invoked": False}
+
+    key = hashlib.sha256(f"{target}\0{title}\0{body}".encode("utf-8", errors="replace")).hexdigest()
+    now = time.monotonic()
+    stale = [k for k, ts in _AI_NOTIFY_RECENT.items() if now - ts > _AI_NOTIFY_WINDOW_SECONDS]
+    for item in stale:
+        _AI_NOTIFY_RECENT.pop(item, None)
+    if key in _AI_NOTIFY_RECENT:
+        return {"invoked": False, "status": "deduplicated", "target": target}
+    _AI_NOTIFY_RECENT[key] = now
+
+    prompt = _notify_prompt(title, body)
+
+    # Configured AICoder profiles are addressed by agent:/aicoder: or their plain ID,
+    # but notify still invokes only the profile's MODEL with tools hard-disabled.
+    candidate_agent = ""
+    if target.startswith("agent:") or target.startswith("aicoder:"):
+        candidate_agent = target.split(":", 1)[1].strip()
+        if not candidate_agent:
+            return {"invoked": False, "status": "error", "target": target, "error": "empty agent id"}
+    else:
+        try:
+            from app.services.tristar.agent_controller import agent_controller
+            configured = {str(a.get("agent_id") or "") for a in await agent_controller.list_agents()}
+        except Exception:
+            configured = set()
+        if target in configured:
+            candidate_agent = target
+
+    if candidate_agent:
+        try:
+            from app.services.aicoder_runner import load_profile
+            profile = load_profile(candidate_agent)
+            model = str(profile.get("model") or "").strip()
+        except Exception as exc:
+            return {"invoked": False, "status": "error", "target": target,
+                    "error": f"notify target profile unavailable: {exc}"}
+        if not model:
+            return {"invoked": False, "status": "error", "target": target,
+                    "error": "notify target profile has no model"}
+        return await _run_notify_model(target=target, model=model, prompt=prompt, timeout=timeout, kind="agent-model")
+
+    # Generic model addressing. account:* is already an AICoder selector;
+    # model:/api: are convenience namespaces and otherwise preserve the selector.
+    model = target
+    if target.startswith("model:") or target.startswith("api:"):
+        model = target.split(":", 1)[1].strip()
+    if not model:
+        return {"invoked": False, "status": "error", "target": target, "error": "empty model selector"}
+    return await _run_notify_model(target=target, model=model, prompt=prompt, timeout=timeout, kind="model")
+
+
+async def list_notify_targets() -> Dict[str, Any]:
+    """Return currently configured agent recipients plus model selector syntax."""
+    agents: List[Dict[str, Any]] = []
+    try:
+        from app.services.tristar.agent_controller import agent_controller
+        for row in await agent_controller.list_agents():
+            agents.append({
+                "target": f"agent:{row.get('agent_id')}",
+                "agent_id": row.get("agent_id"),
+                "type": row.get("agent_type"),
+                "status": row.get("status"),
+            })
+    except Exception as exc:
+        logger.warning("notify target discovery failed: %s", exc)
+    return {
+        "agents": agents,
+        "model_selector_syntax": ["account:<provider>/<model>", "model:<aicoder-model-id>", "api:<aicoder-model-id>"],
+        "note": "Model selectors are resolved by AICoder at invocation time; unavailable/auth-failed routes fail closed.",
+    }
+
+
 async def handle_notify_list(params: Dict[str, Any]) -> Dict:
     try:
         result = get_notifications(
@@ -1528,7 +1656,125 @@ async def handle_notify_clear(params: Dict[str, Any]) -> Dict:
         return {"error": str(e)}
 
 
-async def handle_notify_send(params: Dict[str, Any]) -> Dict:
+def _shared_notify_owner_from_request(request) -> str:
+    if request is None:
+        raise PermissionError("Shared Notify @handles require an authenticated AILinux JWT")
+    state = getattr(request, "state", None)
+    if state is None or getattr(state, "mcp_auth_method", None) != "jwt":
+        raise PermissionError("Shared Notify @handles require an authenticated AILinux JWT")
+    owner = str(getattr(state, "mcp_auth_user", "") or "").strip().lower()
+    if not owner or owner in {"public_guest", "oauth_client", "internal"}:
+        raise PermissionError("AILinux account identity unavailable")
+    return owner
+
+
+async def _deliver_shared_notify_from_mcp(params: Dict[str, Any], request) -> Dict[str, Any]:
+    from app.services.shared_notify import get_shared_notify_store
+    owner = _shared_notify_owner_from_request(request)
+    target_handle = str(params.get("target") or "").strip()
+    message, target = get_shared_notify_store().send(
+        sender_owner_id=owner,
+        target_handle=target_handle,
+        kind=str(params.get("kind") or "human_chat"),
+        title=str(params.get("title") or ""),
+        body=str(params.get("body") or ""),
+        sender_endpoint_id=str(params.get("sender_endpoint_id") or ""),
+        thread_id=str(params.get("thread_id") or ""),
+        correlation_id=str(params.get("correlation_id") or ""),
+        hop_count=int(params.get("hop_count") or 0),
+        ttl_seconds=int(params.get("ttl_seconds") or 86400),
+        metadata=params.get("metadata") if isinstance(params.get("metadata"), dict) else {},
+        dedup_key=str(params.get("dedup_key") or ""),
+    )
+    delivery: Dict[str, Any] = {"mode": "mailbox", "target": target.handle}
+    if target.online and target.transport == "local-ai" and target.target:
+        result = await _invoke_notify_target(
+            target.target,
+            title=str(params.get("title") or f"Shared Notify {params.get('kind') or 'message'}"),
+            body=str(params.get("body") or ""),
+            timeout=int(params.get("timeout", 120) or 120),
+        )
+        delivery = {"mode": "local-ai", "target": target.handle, "result": result}
+        if result.get("invoked"):
+            message = get_shared_notify_store().mark_local_delivery(
+                message_id=message["message_id"],
+                acknowledged=str((result.get("result") or {}).get("status") or "") == "success",
+            )
+    return {"shared_notify": True, "message": message, "delivery": delivery}
+
+
+async def handle_notify_register(params: Dict[str, Any], request=None) -> Dict[str, Any]:
+    try:
+        from app.services.shared_notify import get_shared_notify_store
+        owner = _shared_notify_owner_from_request(request)
+        endpoint = get_shared_notify_store().register_endpoint(
+            owner_id=owner, device_id=str(params.get("device_id") or ""),
+            requested_handle=str(params.get("handle") or ""),
+            endpoint_id=str(params.get("endpoint_id") or ""), kind=str(params.get("kind") or "client"),
+            label=str(params.get("label") or ""), capabilities=params.get("capabilities") or [],
+            visibility=str(params.get("visibility") or "account"),
+            transport=str(params.get("transport") or "mailbox"), target=str(params.get("target_model") or ""),
+            ttl_seconds=int(params.get("ttl_seconds") or 120),
+        )
+        return {"success": True, "endpoint": endpoint}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+async def handle_notify_directory(params: Dict[str, Any], request=None) -> Dict[str, Any]:
+    try:
+        from app.services.shared_notify import get_shared_notify_store
+        owner = _shared_notify_owner_from_request(request)
+        rows = get_shared_notify_store().directory(
+            owner_id=owner, include_offline=bool(params.get("include_offline", True))
+        )
+        return {"success": True, "endpoints": rows}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+async def handle_notify_presence(params: Dict[str, Any], request=None) -> Dict[str, Any]:
+    try:
+        from app.services.shared_notify import get_shared_notify_store
+        owner = _shared_notify_owner_from_request(request)
+        allowed = {"availability", "activity", "status_text", "accept_human_chat", "accept_ai_chat",
+                   "accept_tasks", "current_task_id", "task_started_at", "eta_seconds", "ttl_seconds"}
+        updates = {key: value for key, value in params.items() if key in allowed and value is not None}
+        endpoint = get_shared_notify_store().set_presence(
+            owner_id=owner, endpoint_id=str(params.get("endpoint_id") or ""), **updates
+        )
+        return {"success": True, "endpoint": endpoint}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+async def handle_notify_inbox(params: Dict[str, Any], request=None) -> Dict[str, Any]:
+    try:
+        from app.services.shared_notify import get_shared_notify_store
+        owner = _shared_notify_owner_from_request(request)
+        rows = get_shared_notify_store().inbox(
+            owner_id=owner, endpoint_id=str(params.get("endpoint_id") or ""),
+            limit=int(params.get("limit") or 50), mark_delivered=True,
+        )
+        return {"success": True, "messages": rows}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+async def handle_notify_ack(params: Dict[str, Any], request=None) -> Dict[str, Any]:
+    try:
+        from app.services.shared_notify import get_shared_notify_store
+        owner = _shared_notify_owner_from_request(request)
+        message = get_shared_notify_store().ack(
+            owner_id=owner, endpoint_id=str(params.get("endpoint_id") or ""),
+            message_id=str(params.get("message_id") or ""),
+        )
+        return {"success": True, "message": message}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+async def handle_notify_send(params: Dict[str, Any], request=None) -> Dict:
     try:
         # --- Input validation ---
         VALID_SOURCES = {SRC_SYSTEM, SRC_AGENT, SRC_FORUM, SRC_MAIL, SRC_MCP, SRC_MANUAL, SRC_WORDPRESS}
@@ -1557,6 +1803,9 @@ async def handle_notify_send(params: Dict[str, Any]) -> Dict:
         if not isinstance(tags, list):
             tags = [str(tags)] if tags else []
         tags = [str(t).strip()[:50] for t in tags[:20]]
+        target = str(params.get("target", "")).strip()
+        if target and "ai-rpc" not in tags:
+            tags.append("ai-rpc")
 
         metadata = params.get("metadata", {})
         if not isinstance(metadata, dict):
@@ -1577,9 +1826,53 @@ async def handle_notify_send(params: Dict[str, Any]) -> Dict:
         )
         if entry is None:
             return {"success": True, "action": "deduplicated"}
-        return {"success": True, "notification": entry}
+
+        delivery = None
+        if target:
+            if target.startswith("@"):
+                delivery = await _deliver_shared_notify_from_mcp(
+                    {**params, "title": title, "body": body, "target": target, "metadata": metadata}, request
+                )
+            else:
+                delivery = await _invoke_notify_target(
+                    target, title=title, body=body, timeout=int(params.get("timeout", 120) or 120)
+                )
+        response = {"success": True, "notification": entry}
+        if delivery is not None:
+            response["delivery"] = delivery
+        return response
     except Exception as e:
         return {"error": str(e)}
+
+
+async def handle_notify_targets(params: Dict[str, Any]) -> Dict:
+    return await list_notify_targets()
+
+
+async def handle_idle_assign(params: Dict[str, Any]) -> Dict:
+    try:
+        from app.services.tristar.idle_worker import assign_operator_work
+        item = assign_operator_work(
+            assignment=str(params.get("assignment") or ""),
+            work_type=str(params.get("work_type") or "bug-hunt"),
+            profile_id=str(params.get("profile_id") or ""),
+        )
+        return {"success": True, "queued": item}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+async def handle_idle_status(params: Dict[str, Any]) -> Dict:
+    from app.services.tristar.idle_worker import _load_state, lease_coordinator
+    state = _load_state()
+    findings = list(state.get("findings") or [])
+    return {
+        "status": "ok",
+        "leases": lease_coordinator.stats(),
+        "queued_assignments": len(list(state.get("operator_queue") or [])),
+        "open_findings": sum(1 for row in findings if row.get("status") == "open"),
+        "recent_findings": [{k: row.get(k) for k in ("dedup_key", "title", "work_type", "profile_id", "status", "created_at")} for row in findings[-20:]],
+    }
 
 
 async def handle_notify_status(params: Dict[str, Any]) -> Dict:
@@ -1603,6 +1896,7 @@ NOTIFY_TOOL_HANDLERS = {
     "notify_read": handle_notify_read,
     "notify_clear": handle_notify_clear,
     "notify_send": handle_notify_send,
+    "idle_assign": handle_idle_assign,
     "notify_status": handle_notify_status,
 }
 NOTIFY_TOOL_NAMES = list(NOTIFY_TOOL_HANDLERS.keys())

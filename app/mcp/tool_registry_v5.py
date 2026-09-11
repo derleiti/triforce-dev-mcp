@@ -1504,6 +1504,25 @@ V5_TOOLS += [
             "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags"},
             "action_url": {"type": "string", "description": "Link zur Quelle"},
             "auto_resolve": {"type": "boolean", "description": "Sofort als erledigt markieren"},
+            "target": {"type": "string", "description": "Optional target: global Shared Notify @handle, agent:<id>, aicoder:<profile>, account:<provider>/<model>, model:<id>, api:<id>. @handles require AILinux JWT auth."},
+            "kind": {"type": "string", "enum": ["human_chat", "task", "review", "coordination", "ai_optimization", "brainstorm", "handoff"], "default": "human_chat"},
+            "sender_endpoint_id": {"type": "string", "description": "Optional stable Shared Notify sender endpoint. Ownership is server-verified."},
+            "thread_id": {"type": "string"},
+            "correlation_id": {"type": "string"},
+            "hop_count": {"type": "integer", "minimum": 0, "maximum": 8, "default": 0},
+            "ttl_seconds": {"type": "integer", "minimum": 30, "maximum": 604800, "default": 86400},
+            "metadata": {"type": "object"},
+            "dedup_key": {"type": "string"},
+            "timeout": {"type": "integer", "minimum": 10, "maximum": 300, "description": "Optional synchronous AI call timeout in seconds (default 120)"},
+        }},
+    },
+    {
+        "name": "idle_assign",
+        "description": "Queue a bounded read-only idle-analysis assignment. Operator assignments take priority over self-selected catalogue work.",
+        "inputSchema": {"type": "object", "required": ["assignment"], "properties": {
+            "assignment": {"type": "string", "description": "Exact analysis assignment; idle workers cannot implement changes"},
+            "work_type": {"type": "string", "enum": ["bug-hunt", "test-gap", "security-review", "concurrency-review", "dead-code", "docs-drift"], "default": "bug-hunt"},
+            "profile_id": {"type": "string", "description": "Optional configured AICoder agent profile"}
         }},
     },
     {

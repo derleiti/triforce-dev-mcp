@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 DEFAULT_AICODER = "/usr/bin/aicoder"
+DEFAULT_AICODER_SOURCE_ROOT = Path("/home/zombie/ai-coder")
+DEFAULT_AICODER_RUNNER_MODE = "installed"
 DEFAULT_INSTANCE_ROOT = Path("/var/tristar/agents/instances")
 PROVIDER_HOME_DIRS = (".codex", ".claude", ".vibe", ".gemini", ".antigravity")
 PROVIDER_HOME_FILES = (".claude.json",)
@@ -137,6 +139,62 @@ def prepare_instance_home(
     return home
 
 
+def resolve_aicoder_launch(
+    *,
+    executable: str | None = None,
+    runner_mode: str | None = None,
+    source_root: str | Path | None = None,
+) -> tuple[list[str], Path | None]:
+    """Resolve the AICoder process prefix without changing the agent workspace.
+
+    ``installed`` launches the packaged binary. ``source`` launches the checkout's
+    virtualenv interpreter with ``python -m aicoder.cli``; the caller adds the
+    source root to PYTHONPATH so the current checkout is used even though the
+    subprocess cwd is the agent's project workspace.
+    """
+    # An explicitly supplied executable is an explicit launch choice and must not
+    # be shadowed by a process-wide source-mode environment. This preserves the
+    # constructor contract for tests, tools and callers that intentionally inject
+    # a packaged/custom executable, while normal service calls still inherit the
+    # configured runner mode.
+    mode = str(
+        runner_mode
+        or ("installed" if executable is not None else None)
+        or os.environ.get("AICODER_RUNNER_MODE")
+        or DEFAULT_AICODER_RUNNER_MODE
+    ).strip().lower()
+
+    if mode == "source":
+        root = Path(
+            source_root
+            or os.environ.get("AICODER_SOURCE_ROOT")
+            or DEFAULT_AICODER_SOURCE_ROOT
+        ).expanduser().resolve(strict=False)
+        python = root / ".venv" / "bin" / "python"
+        cli = root / "aicoder" / "cli.py"
+        if not root.is_dir():
+            raise FileNotFoundError(f"AICoder source root not found: {root}")
+        if not python.is_file():
+            raise FileNotFoundError(f"AICoder source virtualenv python not found: {python}")
+        if not cli.is_file():
+            raise FileNotFoundError(f"AICoder source CLI not found: {cli}")
+        return [str(python), "-m", "aicoder.cli"], root
+
+    if mode == "installed":
+        target = Path(
+            executable
+            or os.environ.get("AICODER_EXECUTABLE")
+            or DEFAULT_AICODER
+        ).expanduser().resolve(strict=False)
+        if not target.is_file():
+            raise FileNotFoundError(f"AICoder executable not found: {target}")
+        return [str(target)], None
+
+    raise ValueError(
+        f"unsupported AICoder runner mode: {mode!r}; expected 'installed' or 'source'"
+    )
+
+
 def parse_ndjson(lines: Iterable[str]) -> tuple[list[dict[str, Any]], list[str]]:
     events: list[dict[str, Any]] = []
     raw: list[str] = []
@@ -157,8 +215,16 @@ def parse_ndjson(lines: Iterable[str]) -> tuple[list[dict[str, Any]], list[str]]
 
 
 class AICoderRunner:
-    def __init__(self, executable: str = DEFAULT_AICODER):
+    def __init__(
+        self,
+        executable: str | None = None,
+        *,
+        runner_mode: str | None = None,
+        source_root: str | Path | None = None,
+    ):
         self.executable = executable
+        self.runner_mode = runner_mode
+        self.source_root = source_root
 
     async def _terminate_process_group(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:
@@ -198,8 +264,12 @@ class AICoderRunner:
             raise ValueError(f"AICoder workspace does not exist: {workspace}")
         if not home.is_dir():
             raise ValueError(f"AICoder instance HOME does not exist: {home}")
-        if not Path(self.executable).is_file():
-            raise FileNotFoundError(self.executable)
+
+        launch_prefix, active_source_root = resolve_aicoder_launch(
+            executable=self.executable,
+            runner_mode=self.runner_mode,
+            source_root=self.source_root,
+        )
 
         effective_prompt = prompt
         if system_prompt.strip():
@@ -210,7 +280,7 @@ class AICoderRunner:
                 f"{prompt}"
             )
 
-        command = [self.executable, "agent", effective_prompt, "--json-events"]
+        command = [*launch_prefix, "agent", effective_prompt, "--json-events"]
         if model:
             command += ["--model", model]
         if team_mode:
@@ -220,6 +290,11 @@ class AICoderRunner:
         env.update(extra_env or {})
         env["HOME"] = str(home)
         env["XDG_CONFIG_HOME"] = str(home / ".config")
+        if active_source_root is not None:
+            existing_pythonpath = str(env.get("PYTHONPATH") or "").strip()
+            env["PYTHONPATH"] = os.pathsep.join(
+                part for part in (str(active_source_root), existing_pythonpath) if part
+            )
         if str(model or "").startswith("account:claude/"):
             for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
                 env.pop(name, None)
@@ -315,6 +390,7 @@ def apply_profile_state(home: str | Path, profile: dict[str, Any]) -> None:
         "workspace": "workspace_root",
         "timeout": "request_timeout",
         "team_mode": "team_runtime_mode",
+        "tool_mode": "tool_mode",
     }
     for source_key, state_key in mapping.items():
         if source_key in profile and profile[source_key] is not None:

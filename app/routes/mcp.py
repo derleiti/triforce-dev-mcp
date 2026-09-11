@@ -2584,6 +2584,12 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     tool_map.update(TELEGRAM_AGENT_HANDLERS)
     tool_map.update(SWARM_HANDLERS)
     tool_map.update(MCP_HANDLERS)
+    # Shared Notify @handles need the authenticated FastAPI request identity.
+    # The legacy v4 adapter calls handlers with params only, so keep the existing
+    # notify_send tool on the request-aware canonical dispatch path.
+    if tool_name == "notify_send":
+        from ..mcp.notification_manager import handle_notify_send as _notify_send_request_aware
+        tool_map["notify_send"] = _notify_send_request_aware
 
     handler = tool_map.get(tool_name)
     # Compatibility fallback

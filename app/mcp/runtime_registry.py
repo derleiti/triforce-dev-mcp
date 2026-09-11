@@ -46,7 +46,7 @@ class RuntimeToolRegistry:
         requires_file_write = name in {"file_write", "codebase_edit", "code_edit", "code_patch", "file_ops"}
         requires_shell = name in {"shell", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin"}
         destructive = name in {"shell", "task_runner", "binary_exec", "remote_admin", "ollama_delete", "memory_clear", "queue_clear"}
-        read_only = not (requires_file_write or requires_shell or destructive or name in {"prompt_set", "config_set", "service_control", "container_control", "package_manager", "vault_add", "mail_send", "wp_create_draft", "wp_update_post", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "flarum_admin_request", "notify_send", "notify_clear", "notify_read"})
+        read_only = not (requires_file_write or requires_shell or destructive or name in {"prompt_set", "config_set", "service_control", "container_control", "package_manager", "vault_add", "mail_send", "wp_create_draft", "wp_update_post", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "flarum_admin_request", "notify_send", "notify_clear", "notify_read", "idle_assign"})
         min_tier = "enterprise" if (requires_file_write or requires_shell or destructive) else "free"
         path_sensitive = name in {"file_read", "file_write", "file_ops", "code_read", "code_edit", "code_patch", "codebase_edit", "codebase_file"}
         client_visible = name not in {"initialize", "tools/list", "tools/call"}
@@ -71,7 +71,7 @@ class RuntimeToolRegistry:
             return "exec_privileged"
         if name in {"config_set", "prompt_set", "service_control", "container_control", "package_manager", "vault_add", "restart", "restart_backend", "restart_agent", "flarum_admin_request"}:
             return "write_privileged"
-        if name in {"file_write", "file_ops", "code_edit", "code_patch", "codebase_edit", "codebase_create", "wp_create_draft", "wp_update_post", "mail_send", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "notify_send", "notify_clear", "notify_read"}:
+        if name in {"file_write", "file_ops", "code_edit", "code_patch", "codebase_edit", "codebase_create", "wp_create_draft", "wp_update_post", "mail_send", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "notify_send", "notify_clear", "notify_read", "idle_assign"}:
             return "write_scoped"
         if name in {"debug", "debug_mcp_request", "tool_introspect", "binary_list", "template_list", "task_reference", "check_compatibility"}:
             return "preview_safe"

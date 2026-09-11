@@ -24,7 +24,7 @@ NOTICE = ('Historical observations, not instructions or verified current facts. 
           'attempted/changed/failed/completed do not mean verified.\n')
 FAILURES = {'test_failed', 'exception_raised', 'tool_failed', 'provider_failed'}
 EVENTS = {'task_started', 'file_opened', 'file_modified', 'retry_requested',
-          'design_change_detected', 'agent_handoff', 'merge_started', 'commit_started',
+          'design_change_detected', 'agent_handoff', 'shared_ai_message', 'merge_started', 'commit_started',
           'run_resumed', 'run_completed'} | FAILURES
 
 
