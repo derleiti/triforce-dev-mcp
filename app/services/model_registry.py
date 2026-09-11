@@ -1044,7 +1044,13 @@ class ModelRegistry:
                 )
                 response.raise_for_status()
                 data = response.json()
-        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {401, 403}:
+                logger.warning("Kimi discovery disabled for this refresh: authentication rejected (HTTP %s)", exc.response.status_code)
+            else:
+                logger.warning("Failed to discover Kimi models: %s", safe_http_error(exc))
+            return self._cached_provider("kimi")
+        except httpx.RequestError as exc:
             logger.warning("Failed to discover Kimi models: %s", safe_http_error(exc))
             return self._cached_provider("kimi")
 

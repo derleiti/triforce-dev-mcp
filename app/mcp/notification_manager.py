@@ -1404,6 +1404,8 @@ async def _poll_wordpress():
 
 _poller_tasks: List[asyncio.Task] = []
 _poller_status: Dict[str, str] = {}
+_poller_lock_owner: str | None = None
+_poller_lock_redis = None
 
 
 def start_pollers():
@@ -1419,7 +1421,7 @@ async def _start_pollers_with_lock():
     expires. Keep retrying instead of permanently disabling all pollers for the
     lifetime of the new backend process.
     """
-    global _poller_tasks
+    global _poller_tasks, _poller_lock_owner, _poller_lock_redis
     r = await _get_redis()
     if r is None:
         logger.warning("Pollers: Redis unavailable, starting without lock (risk of duplicates)")
@@ -1429,6 +1431,7 @@ async def _start_pollers_with_lock():
     lock_key = "notify:poller_lock"
     owner = f"{os.getpid()}:{uuid.uuid4().hex}"
 
+    lock_wait_logged = False
     while True:
         try:
             locked = await r.set(lock_key, owner, nx=True, ex=120)
@@ -1440,8 +1443,15 @@ async def _start_pollers_with_lock():
                 continue
             continue
         if locked:
+            _poller_lock_owner = owner
+            _poller_lock_redis = r
             break
-        logger.info("Pollers: leader lock still held; retrying in 15s")
+        if not lock_wait_logged:
+            ttl = await r.ttl(lock_key)
+            logger.info("Pollers: existing leader lock detected (ttl=%ss); waiting for takeover", ttl)
+            lock_wait_logged = True
+        else:
+            logger.debug("Pollers: leader lock still held; retrying in 15s")
         await asyncio.sleep(15)
 
     logger.info("Pollers: acquired leader lock, starting pollers")
@@ -1455,11 +1465,15 @@ async def _start_pollers_with_lock():
             current_owner = await r.get(lock_key)
             if current_owner != owner:
                 logger.warning("Pollers: leader lock lost; stopping local pollers")
+                _poller_lock_owner = None
+                _poller_lock_redis = None
                 await stop_pollers()
                 return
             await r.expire(lock_key, 120)
         except Exception as e:
             logger.warning(f"Pollers: failed to refresh leader lock: {e}; stopping pollers")
+            _poller_lock_owner = None
+            _poller_lock_redis = None
             await stop_pollers()
             return
 
@@ -1481,12 +1495,32 @@ def _launch_pollers():
 
 
 async def stop_pollers():
+    global _poller_lock_owner, _poller_lock_redis
     for t in _poller_tasks:
         t.cancel()
     for t in _poller_tasks:
-        try: await t
-        except asyncio.CancelledError: pass
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
     _poller_tasks.clear()
+
+    # Release only our own Redis lease. This avoids forcing the next backend
+    # process to wait for the 120s TTL after an orderly systemd restart.
+    owner, r = _poller_lock_owner, _poller_lock_redis
+    _poller_lock_owner = None
+    _poller_lock_redis = None
+    if owner and r is not None:
+        try:
+            await r.eval(
+                "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                "return redis.call('del', KEYS[1]) else return 0 end",
+                1,
+                "notify:poller_lock",
+                owner,
+            )
+        except Exception as exc:
+            logger.debug("Pollers: leader lock release skipped: %s", exc)
     logger.info("All pollers stopped")
 
 

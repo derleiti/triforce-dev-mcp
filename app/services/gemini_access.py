@@ -1319,6 +1319,7 @@ GEMINI_ACCESS_HANDLERS = {
 }
 
 
-# Backward-compatible singleton used by mesh/group-chat services.
-gemini_access_point = GeminiAccessPoint()
-gemini_service = gemini_access_point
+# Backward-compatible aliases used by mesh/group-chat services.
+# Reuse the canonical singleton above so SDK/client initialization happens once.
+gemini_access_point = gemini_access
+gemini_service = gemini_access

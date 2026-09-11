@@ -325,6 +325,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    # Stop Notification Manager and release its Redis leader lease before exit.
+    try:
+        from .mcp.notification_manager import stop_pollers
+        await stop_pollers()
+    except Exception:
+        pass
+
     # Stop System Log Collector
     if _HAS_SYSTEM_LOG_COLLECTOR:
         try:

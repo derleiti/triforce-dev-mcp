@@ -267,8 +267,7 @@ class FederationPeer:
         async for message in self.websocket:
             try:
                 data = json.loads(message)
-                logger.info(f"Raw WS message: {str(data)[:200]}")
-                
+
                 payload = verify_signed_request(data)
                 if payload is None:
                     logger.warning(f"Invalid/unsigned message from {self.node_id} rejected")
@@ -281,6 +280,10 @@ class FederationPeer:
                     continue
                 
                 msg_type = payload.get("type")
+                if msg_type in (MessageType.HEARTBEAT, MessageType.HEARTBEAT_ACK):
+                    logger.debug("Federation heartbeat from %s: %s", self.node_id, msg_type)
+                elif msg_type:
+                    logger.info("Federation message from %s: %s", self.node_id, msg_type)
                 if msg_type:
                     await self._handle_message(msg_type, payload)
                 

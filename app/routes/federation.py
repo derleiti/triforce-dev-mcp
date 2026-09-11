@@ -319,7 +319,11 @@ async def federation_websocket(websocket: WebSocket):
         # Message loop
         while True:
             raw_msg = await websocket.receive_json()
-            logger.info(f"WS Route received from {peer_id}: {str(raw_msg)[:150]}")
+            raw_type = (raw_msg.get("data") or {}).get("type") if isinstance(raw_msg, dict) else None
+            if raw_type in {"heartbeat", "heartbeat_ack"}:
+                logger.debug("WS heartbeat received from %s: %s", peer_id, raw_type)
+            else:
+                logger.info("WS route received from %s: %s", peer_id, raw_type or "unknown")
             
             # Signatur und Identitaet bleiben nach dem HELLO fuer jede
             # Nachricht verpflichtend. Sonst waere der Handshake sicher,

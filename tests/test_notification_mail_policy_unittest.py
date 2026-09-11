@@ -70,8 +70,17 @@ async def test_poller_leader_retries_after_stale_restart_lock(monkeypatch):
         async def get(self, key):
             return "different-owner"
 
+        async def ttl(self, key):
+            return 90
+
         async def expire(self, key, ttl):
             return True
+
+        async def eval(self, script, numkeys, key, owner):
+            if self.owner == owner:
+                self.owner = None
+                return 1
+            return 0
 
     fake_redis = FakeRedis()
     launched = []

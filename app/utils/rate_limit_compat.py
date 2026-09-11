@@ -8,6 +8,10 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 logger = logging.getLogger("app.rate_limit")
+# pyrate-limiter logs every bucket construction at INFO; route declarations create
+# several buckets during import. Keep normal startup logs focused on actionable events.
+logging.getLogger("pyrate_limiter").setLevel(logging.WARNING)
+logging.getLogger("pyrate_limiter.limiter").setLevel(logging.WARNING)
 
 try:
     from fastapi_limiter import FastAPILimiter as _UpstreamFastAPILimiter
@@ -30,7 +34,7 @@ _compat_notice_logged = False
 def _log_compat_once(message: str) -> None:
     global _compat_notice_logged
     if not _compat_notice_logged:
-        logger.warning(message)
+        logger.info(message)
         _compat_notice_logged = True
 
 
