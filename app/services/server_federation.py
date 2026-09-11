@@ -138,7 +138,7 @@ class ServerFederation:
             "hetzner": {
                 "url": "https://api.ailinux.me",
                 "vpn_ip": "10.10.0.1",
-                "port": 9000,
+                "port": 9100,
                 "role": "hub"
             },
             "backup": {
@@ -336,7 +336,7 @@ FEDERATION_NODES = {
     "hetzner": {
         "url": "https://api.ailinux.me",
         "vpn_ip": "10.10.0.1",
-        "port": 9000,
+        "port": 9100,
         "role": "hub"
     },
     "backup": {
