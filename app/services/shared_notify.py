@@ -32,8 +32,8 @@ ACTIVITIES = {
     "idle", "open_for_human_chat", "open_for_ai_chat", "working", "working_hard",
     "researching", "coding", "reviewing", "thinking", "waiting_for_operator", "waiting_for_agent",
 }
-ENDPOINT_KINDS = {"human", "ai", "client", "agent", "model", "service"}
-MESSAGE_KINDS = {"human_chat", "request", "task", "review", "coordination", "ai_optimization", "brainstorm", "handoff"}
+ENDPOINT_KINDS = {"human", "ai", "client", "agent", "model", "service", "mcp"}
+MESSAGE_KINDS = {"human_chat", "request", "task", "review", "coordination", "ai_optimization", "brainstorm", "handoff", "mcp_rpc_request", "mcp_rpc_result", "mcp_rpc_error", "mcp_share_announce"}
 VISIBILITIES = {"account", "public", "private"}
 _HANDLE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
 _ENDPOINT_RE = re.compile(r"^ep_[a-zA-Z0-9_-]{12,64}$")

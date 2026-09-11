@@ -67,24 +67,26 @@ ADVISORY_MESSAGE_KINDS: Final[frozenset[str]] = frozenset({
     "human_chat", "request", "review", "coordination", "ai_optimization",
     "brainstorm", "handoff",
 })
+MCP_REQUEST_MESSAGE_KINDS: Final[frozenset[str]] = frozenset({"mcp_rpc_request"})
+MCP_SERVICE_MESSAGE_KINDS: Final[frozenset[str]] = frozenset({"mcp_rpc_result", "mcp_rpc_error", "mcp_share_announce"})
 
 # Safe default send matrix. Receiving still depends on presence gates.
 ROLE_MESSAGE_KINDS: Final[dict[AuthorityRole, frozenset[str]]] = {
-    AuthorityRole.HUMAN_OWNER: ADVISORY_MESSAGE_KINDS | {"task"},
-    AuthorityRole.HUMAN_ADMIN: ADVISORY_MESSAGE_KINDS | {"task"},
-    AuthorityRole.HUMAN_SECURITY_ADMIN: ADVISORY_MESSAGE_KINDS | {"task"},
-    AuthorityRole.HUMAN_MANAGER: ADVISORY_MESSAGE_KINDS | {"task"},
-    AuthorityRole.HUMAN_OPERATOR: ADVISORY_MESSAGE_KINDS | {"task"},
-    AuthorityRole.HUMAN_DEVELOPER: ADVISORY_MESSAGE_KINDS,
-    AuthorityRole.HUMAN_CONTRIBUTOR: ADVISORY_MESSAGE_KINDS,
-    AuthorityRole.HUMAN_MEMBER: ADVISORY_MESSAGE_KINDS,
+    AuthorityRole.HUMAN_OWNER: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS | {"task"},
+    AuthorityRole.HUMAN_ADMIN: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS | {"task"},
+    AuthorityRole.HUMAN_SECURITY_ADMIN: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS | {"task"},
+    AuthorityRole.HUMAN_MANAGER: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS | {"task"},
+    AuthorityRole.HUMAN_OPERATOR: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS | {"task"},
+    AuthorityRole.HUMAN_DEVELOPER: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS,
+    AuthorityRole.HUMAN_CONTRIBUTOR: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS,
+    AuthorityRole.HUMAN_MEMBER: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS,
     AuthorityRole.HUMAN_VIEWER: frozenset({"human_chat", "request"}),
     AuthorityRole.AI_COORDINATOR: ADVISORY_MESSAGE_KINDS,
     AuthorityRole.AI_WORKER: ADVISORY_MESSAGE_KINDS,
     AuthorityRole.AI_REVIEWER: ADVISORY_MESSAGE_KINDS,
     AuthorityRole.AI_OBSERVER: frozenset({"request", "review", "coordination", "ai_optimization", "brainstorm"}),
-    AuthorityRole.CLIENT_MEMBER: ADVISORY_MESSAGE_KINDS,
-    AuthorityRole.SERVICE: frozenset({"request", "coordination", "handoff"}),
+    AuthorityRole.CLIENT_MEMBER: ADVISORY_MESSAGE_KINDS | MCP_REQUEST_MESSAGE_KINDS,
+    AuthorityRole.SERVICE: frozenset({"request", "coordination", "handoff"}) | MCP_SERVICE_MESSAGE_KINDS,
 }
 
 # These capabilities must never be granted by an AI-authored message or an AI
@@ -171,7 +173,7 @@ def default_role_for_kind(kind: str) -> AuthorityRole:
         return AuthorityRole.HUMAN_MEMBER
     if kind in {"ai", "agent", "model"}:
         return AuthorityRole.AI_OBSERVER
-    if kind == "service":
+    if kind in {"service", "mcp"}:
         return AuthorityRole.SERVICE
     return AuthorityRole.CLIENT_MEMBER
 
