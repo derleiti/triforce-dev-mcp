@@ -118,7 +118,7 @@ class OverviewPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        title = QLabel("TriForce 2.85 Beta 1")
+        title = QLabel("TriForce 2.85 Beta 2")
         title.setFont(QFont(title.font().family(), 20, 600))
         layout.addWidget(title)
         self.version = QLabel(f"Backend-Code: {VERSION}")

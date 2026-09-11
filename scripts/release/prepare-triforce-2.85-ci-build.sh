@@ -10,7 +10,7 @@ GUI_OUT="${GUI_OUT:-$RUNNER_TEMP/triforce-2.85-nuitka}"
 rm -rf "$BACKEND_RUNTIME" "$GUI_VENV" "$GUI_OUT"
 "$PYTHON_BIN" -m venv "$BACKEND_RUNTIME"
 "$BACKEND_RUNTIME/bin/python" -m pip install --upgrade pip
-"$BACKEND_RUNTIME/bin/pip" install -r "$ROOT/requirements-lock-2.85-beta1.txt"
+"$BACKEND_RUNTIME/bin/pip" install -r "$ROOT/requirements-lock-2.85-beta2.txt"
 "$BACKEND_RUNTIME/bin/pip" check
 PYTHONPATH="$ROOT" "$BACKEND_RUNTIME/bin/python" - <<'PY'
 from google import genai

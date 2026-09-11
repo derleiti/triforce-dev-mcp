@@ -35,7 +35,7 @@ def test_production_code_no_longer_imports_legacy_google_sdk():
 def test_requirements_use_supported_google_genai_sdk():
     root = Path(__file__).parents[1]
     requirements = (root / "requirements.txt").read_text()
-    lock = (root / "requirements-lock-2.85-beta1.txt").read_text()
+    lock = (root / "requirements-lock-2.85-beta2.txt").read_text()
     assert "google-genai==2.18.1" in requirements
     assert "google-generativeai" not in requirements
     assert "google-genai==2.18.1" in lock

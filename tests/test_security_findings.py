@@ -665,7 +665,7 @@ def test_no_unused_python_jose_or_ecdsa_dependency():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     requirements = (root / "requirements.txt").read_text(encoding="utf-8").lower()
-    lock = (root / "requirements-lock-2.85-beta1.txt").read_text(encoding="utf-8").lower()
+    lock = (root / "requirements-lock-2.85-beta2.txt").read_text(encoding="utf-8").lower()
     assert "python-jose" not in requirements
     assert "python-jose==" not in lock
     assert "ecdsa==" not in lock

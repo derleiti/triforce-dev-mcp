@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 BLUEPRINT = ROOT / "docker" / "blueprint"
 COMPOSE = BLUEPRINT / "docker-compose.yml"
 STACK = BLUEPRINT / "maintenance" / "stack.sh"
-BUILDER = ROOT / "scripts" / "release" / "build-triforce-2.85-beta1.sh"
+BUILDER = ROOT / "scripts" / "release" / "build-triforce-2.85-beta2.sh"
 HELPER = ROOT / "packaging" / "triforce-admin-helper.py"
 ADMIN = ROOT / "app" / "mcp" / "structured_admin.py"
 

@@ -11,13 +11,13 @@ def test_packaged_service_uses_isolated_runtime_and_var_log():
 
 
 def test_redis_is_optional_not_recommended_install():
-    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
     assert "Suggests: redis-server" in text
     assert "Recommends: redis-server" not in text
 
 
 def test_no_online_pip_in_postinst_template():
-    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
     postinst = text.split('cat > "$pkg/DEBIAN/postinst"', 1)[1].split("EOF", 2)[1]
     assert "pip install" not in postinst
 
@@ -27,7 +27,7 @@ def test_fresh_package_disables_optional_public_mcp_ws_listener():
 
 
 def test_control_package_declares_native_qt_platform_dependencies_and_prunes_unused_plugins():
-    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
     for package in ("libgl1", "libx11-6", "libxcb-cursor0", "libxkbcommon-x11-0", "libwayland-client0"):
         assert package in text
     assert "plugins/egldeviceintegrations" in text
@@ -43,7 +43,7 @@ def test_start_wrapper_treats_administrative_sigterm_as_clean_shutdown():
 
 
 def test_remove_disables_service_and_only_cleans_generated_program_cache():
-    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
     assert "/bin/systemctl disable triforce.service" in text
     assert "find /opt/triforce -type f -name '*.pyc' -delete" in text
     assert "find /opt/triforce -depth -type d -empty -delete" in text
@@ -51,7 +51,7 @@ def test_remove_disables_service_and_only_cleans_generated_program_cache():
 
 
 def test_release_builder_normalizes_python_interpreter():
-    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
     assert 'ln -s /usr/bin/python3.14 "$pkg/opt/triforce/runtime/bin/python3.14"' in text
     assert 'Depends: python3.14, systemd' in text
 
@@ -96,13 +96,13 @@ def test_release_actions_contract():
 
 
 def test_release_prunes_non_ascii_runtime_aliases():
-    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
     assert 'LC_ALL=C' in text
     assert r'*[!\ -~]*' in text
 
 
 def test_release_checksums_use_portable_relative_filenames():
-    text = (ROOT / "scripts/release/build-triforce-2.85-beta1.sh").read_text()
+    text = (ROOT / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
     assert '(cd "$OUT" && sha256sum "$(basename "$BACKEND_DEB")" "$(basename "$CONTROL_DEB")" > SHA256SUMS)' in text
     assert 'sha256sum "$BACKEND_DEB" "$CONTROL_DEB" > "$OUT/SHA256SUMS"' not in text
 

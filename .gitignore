@@ -243,7 +243,7 @@ data/n8n/crash.journal
 !tests/test_settings_store.py
 !tests/test_setup_tasks.py
 !tests/test_admin_helper_contract.py
-!tests/test_packaging_beta1.py
+!tests/test_packaging_beta2.py
 !tests/test_federation_optional.py
 !tests/test_settings_route_persistence.py
 !tests/test_mcp_auth_default.py
