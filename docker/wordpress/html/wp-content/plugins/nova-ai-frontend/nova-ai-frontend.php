@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nova AI Frontend
  * Description: AILinux AI Playground & Downloads — Chat, Vision, Media Generation + Admin Dashboard
- * Version: 6.6.0
+ * Version: 6.8.0
  * Author: zombie@ailinux
  * Text Domain: nova-ai-frontend
  */
@@ -10,10 +10,10 @@
 defined('ABSPATH') || exit;
 
 // FIX 2026-04-11: Credentials aus wp-config.php laden (Fallbacks für Abwärtskompatibilität)
-if ( ! defined( 'NOVA_AI_BACKEND' ) )       define('NOVA_AI_BACKEND',      'http://172.18.0.1:9000');
+if ( ! defined( 'NOVA_AI_BACKEND' ) )       define('NOVA_AI_BACKEND',      'https://api.ailinux.me');
 if ( ! defined( 'NOVA_AI_LOCAL_BACKEND' ) )  define('NOVA_AI_LOCAL_BACKEND', 'http://localhost:9000');
 if ( ! defined( 'NOVA_AI_INTERNAL_KEY' ) )   define('NOVA_AI_INTERNAL_KEY',  getenv('NOVA_AI_INTERNAL_KEY') ?: '');
-define('NOVA_AI_VERSION', '6.6.0');
+define('NOVA_AI_VERSION', '6.8.0');
 define('NOVA_AI_PLUGIN_URL',  plugin_dir_url(__FILE__));
 define('NOVA_AI_PLUGIN_DIR',  plugin_dir_path(__FILE__));
 
@@ -158,14 +158,33 @@ function nova_get_backend_setting(string $key, string $fallback = ''): string {
     return nova_normalize_backend_url($value, $fallback);
 }
 
+function nova_backend_is_reachable(string $base): bool {
+    $base = rtrim(trim($base), '/');
+    if ($base === '') { return false; }
+    $cache_key = 'nova_backend_ok_' . md5($base);
+    $cached = get_transient($cache_key);
+    if ($cached === '1') { return true; }
+    if ($cached === '0') { return false; }
+    $resp = wp_remote_get($base . '/health', ['timeout' => 2, 'headers' => ['Accept' => 'application/json']]);
+    $ok = !is_wp_error($resp) && wp_remote_retrieve_response_code($resp) >= 200 && wp_remote_retrieve_response_code($resp) < 300;
+    set_transient($cache_key, $ok ? '1' : '0', $ok ? 120 : 30);
+    return $ok;
+}
+
 function nova_get_backend_base(): string {
+    $public = NOVA_AI_BACKEND;
+    $internal = '';
     if (function_exists('ailinux_triforce_api_base')) {
-        return nova_normalize_backend_url(ailinux_triforce_api_base(true), NOVA_AI_BACKEND);
+        $public = nova_normalize_backend_url(ailinux_triforce_api_base(false), NOVA_AI_BACKEND);
+        $internal = nova_normalize_backend_url(ailinux_triforce_setting('api_endpoint_internal', ''), '');
+    } else {
+        $settings = get_option('nova_ai_settings', []);
+        $public = nova_normalize_backend_url($settings['api_endpoint'] ?? '', NOVA_AI_BACKEND);
+        $internal = nova_normalize_backend_url($settings['api_endpoint_internal'] ?? '', '');
     }
-    $settings = get_option('nova_ai_settings', []);
-    $internal = $settings['api_endpoint_internal'] ?? '';
-    $primary = $settings['api_endpoint'] ?? '';
-    return nova_normalize_backend_url($internal ?: $primary, NOVA_AI_BACKEND);
+    if ($internal !== '' && nova_backend_is_reachable($internal)) { return rtrim($internal, '/'); }
+    if ($public !== '' && nova_backend_is_reachable($public)) { return rtrim($public, '/'); }
+    return rtrim($public ?: NOVA_AI_BACKEND, '/');
 }
 
 function nova_get_display_backend_base(): string {
@@ -437,7 +456,40 @@ function nova_proxy_models(WP_REST_Request $r): WP_REST_Response {
     }
     return new WP_REST_Response(['models' => $models, 'count' => count($models)], 200);
 }
-function nova_proxy_chat(WP_REST_Request $r): WP_REST_Response    { return nova_proxy('/v1/chat',  'POST', $r->get_json_params()); }
+function nova_proxy_chat(WP_REST_Request $r): WP_REST_Response {
+    $params = $r->get_json_params();
+    $messages = is_array($params['messages'] ?? null) ? $params['messages'] : [];
+    $last_user = '';
+    $history = [];
+    $context_parts = [];
+    foreach ($messages as $msg) {
+        if (!is_array($msg)) { continue; }
+        $role = sanitize_text_field((string)($msg['role'] ?? ''));
+        $content = sanitize_textarea_field((string)($msg['content'] ?? ''));
+        if ($role === 'system' && $content !== '') { $context_parts[] = "USER INSTRUCTION:
+" . $content; continue; }
+        if (!in_array($role, ['user','assistant'], true) || $content === '') { continue; }
+        $history[] = ['role'=>$role, 'content'=>$content];
+        if ($role === 'user') { $last_user = $content; }
+    }
+    if ($last_user === '') { return new WP_REST_Response(['error'=>'message required'], 400); }
+    if ($history && end($history)['role'] === 'user') { array_pop($history); }
+    $resp = nova_proxy('/v1/nova/playground', 'POST', [
+        'message'=>$last_user,
+        'model'=>sanitize_text_field((string)($params['model'] ?? '')),
+        'history'=>array_slice($history, -12),
+        'context'=>implode("
+
+", $context_parts),
+        'mode'=>'auto', 'lang'=>'de', 'tools'=>['web_search','crawl_url'], 'max_results'=>4,
+    ]);
+    $data = $resp->get_data();
+    if ($resp->get_status() < 400 && is_array($data)) {
+        $data['content'] = $data['answer'] ?? ($data['content'] ?? '');
+        $resp->set_data($data);
+    }
+    return $resp;
+}
 function nova_proxy_vision(WP_REST_Request $r): WP_REST_Response  {
     $params = $r->get_json_params();
     // Normalize: JS might send 'query' or 'prompt'
@@ -669,31 +721,27 @@ function nova_proxy_video_status(WP_REST_Request $r): WP_REST_Response {
 function nova_proxy_article_chat(WP_REST_Request $r): WP_REST_Response {
     $params  = $r->get_json_params();
     $context = sanitize_textarea_field($params['context'] ?? '');
-    $model   = sanitize_text_field($params['model'] ?? 'groq/meta-llama/llama-4-scout-17b-16e-instruct');
+    $model   = sanitize_text_field($params['model'] ?? '');
     $message = sanitize_textarea_field($params['message'] ?? '');
-    $history = $params['history'] ?? [];
-    $messages = [['role'=>'system','content'=>
-        "You are a helpful AI assistant that helps users understand and discuss articles and other content.\n\n".
-        "ARTICLE CONTEXT:\n".$context."\n\n".
-        "Answer questions based on this context."]];
-    foreach ((array)$history as $h) {
-        if (isset($h['role'],$h['content']))
-            $messages[] = ['role'=>sanitize_text_field($h['role']),'content'=>sanitize_textarea_field($h['content'])];
+    $history = [];
+    foreach ((array)($params['history'] ?? []) as $h) {
+        if (!is_array($h) || !isset($h['role'],$h['content'])) { continue; }
+        $role = sanitize_text_field($h['role']);
+        if (!in_array($role, ['user','assistant'], true)) { continue; }
+        $history[] = ['role'=>$role, 'content'=>sanitize_textarea_field($h['content'])];
     }
-    $messages[] = ['role'=>'user','content'=>$message];
-    $body = json_encode(['model'=>$model,'messages'=>$messages,'stream'=>false,'max_tokens'=>800]);
-    $settings2    = get_option('nova_ai_settings', []);
-    $internal_key = $settings2['internal_key'] ?? '';
-    $resp = wp_remote_post(nova_get_backend_base().'/v1/chat', [
-        'body'    => $body,
-        'headers' => [
-            'Content-Type'   => 'application/json',
-            'X-Internal-Key' => $internal_key,
-        ],
-        'timeout' => 30,
+    if ($message === '') { return new WP_REST_Response(['error'=>'message required'], 400); }
+    $resp = nova_proxy('/v1/nova/playground', 'POST', [
+        'message'=>$message, 'model'=>$model, 'history'=>array_slice($history, -12),
+        'context'=>$context, 'mode'=>'auto', 'lang'=>'de',
+        'tools'=>['web_search','crawl_url'], 'max_results'=>4,
     ]);
-    if (is_wp_error($resp)) return new WP_REST_Response(['error'=>$resp->get_error_message()],502);
-    return new WP_REST_Response(json_decode(wp_remote_retrieve_body($resp), true), wp_remote_retrieve_response_code($resp));
+    $data = $resp->get_data();
+    if ($resp->get_status() < 400 && is_array($data)) {
+        $data['content'] = $data['answer'] ?? ($data['content'] ?? '');
+        $resp->set_data($data);
+    }
+    return $resp;
 }
 
 
@@ -1002,6 +1050,7 @@ function nova_render_admin_page(): void {
     <h3 style="margin-top:0">📋 Available Shortcodes</h3>
     <table class="widefat">
     <tr><td><code>[ailinux_ai_playground]</code></td><td>AI Chat + Vision + Media</td><td><button class="button button-small nova-copy" data-copy="[ailinux_ai_playground]">📋</button></td></tr>
+    <tr><td><code>[ailinux_try_demo]</code></td><td>Guided Nova + TriForce onboarding</td><td><button class="button button-small nova-copy" data-copy="[ailinux_try_demo]">📋</button></td></tr>
     <tr><td><code>[ailinux_downloads]</code></td><td>Download Browser</td><td><button class="button button-small nova-copy" data-copy="[ailinux_downloads]">📋</button></td></tr>
     </table>
 </div>
@@ -1275,6 +1324,57 @@ add_shortcode('ailinux_ai_playground', function ($atts): string {
       </div>
     </div>
   </div>
+</div>
+    <?php return ob_get_clean();
+ });
+
+/* ── Shortcode: Try AILinux guided demo ───────────────────────────────────── */
+add_shortcode('ailinux_try_demo', function ($atts): string {
+    $atts = shortcode_atts([
+        'account_url' => 'https://ailinux.me/account',
+    ], $atts, 'ailinux_try_demo');
+    $account_url = esc_url($atts['account_url']);
+    $playground = do_shortcode('[ailinux_ai_playground label="TRY AILINUX" title="Meet Nova" desc="Real AI, real web tools, real TriForce activity. The guided tour becomes a free playground when you finish."]');
+    ob_start(); ?>
+<div class="nova-guided-demo" data-nova-guided-demo data-account-url="<?= esc_attr($account_url) ?>">
+  <section class="nova-guided-tour" aria-label="Try AILinux guided tour">
+    <div class="nova-guided-topline">
+      <div>
+        <div class="nova-hero-label">TRY AILINUX</div>
+        <h2 class="nova-guided-title">Real AI. Real tools. No account required.</h2>
+        <p class="nova-guided-subtitle">Take a short guided tour of Nova and TriForce, then keep using the same chat freely.</p>
+      </div>
+      <div class="nova-guided-progress" aria-live="polite"><span data-demo-progress>1 / 5</span></div>
+    </div>
+    <div class="nova-guided-step" data-demo-step-card>
+      <div class="nova-guided-step-kicker" data-demo-kicker>STEP 1</div>
+      <h3 data-demo-title>Talk to Nova</h3>
+      <p data-demo-description>Start with a normal model response. Nothing simulated.</p>
+      <div class="nova-guided-actions">
+        <button type="button" class="nova-action-btn" data-demo-run>Try this step</button>
+        <button type="button" class="nova-small-btn" data-demo-skip>Skip</button>
+        <button type="button" class="nova-small-btn" data-demo-restart>Restart tour</button>
+      </div>
+      <div class="nova-guided-status" data-demo-status>Ready.</div>
+    </div>
+    <div class="nova-guided-activity">
+      <div class="nova-output-label">Live activity</div>
+      <div class="nova-guided-activity-list" data-demo-activity aria-live="polite">
+        <span class="nova-guided-muted">Verified backend activity will appear here.</span>
+      </div>
+    </div>
+    <div class="nova-guided-stack" data-demo-stack hidden>
+      <strong>What just happened</strong>
+      <div class="nova-guided-stack-flow"><span>Browser</span><b>→</b><span>WordPress</span><b>→</b><span>TriForce</span><b>→</b><span>Model + Tools</span></div>
+      <p>The entries above come from the backend response. Nova does not claim a tool ran unless TriForce reports it.</p>
+    </div>
+    <div class="nova-guided-complete" data-demo-complete hidden>
+      <h3>Tour complete — keep going.</h3>
+      <p>This is still the same live playground. Continue chatting, or create an AILinux account when you want persistent access and clients.</p>
+      <a class="nova-action-btn nova-guided-account" data-demo-account href="<?= esc_attr($account_url) ?>">Create / open account</a>
+    </div>
+  </section>
+  <?= $playground ?>
 </div>
     <?php return ob_get_clean();
 });

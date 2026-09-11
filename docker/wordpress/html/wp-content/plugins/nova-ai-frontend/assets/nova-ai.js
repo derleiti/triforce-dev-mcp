@@ -303,9 +303,13 @@
           appendMsg('assistant', '⚠️ Error: ' + (data.message||data.error||data.detail||JSON.stringify(data)), true);
           messages.pop();
         } else {
-          const reply = data.content || data.response || data.message || data.text || JSON.stringify(data);
+          let reply = data.content || data.response || data.message || data.text || JSON.stringify(data);
+          if (Array.isArray(data.sources) && data.sources.length) {
+            reply += '\n\n**Sources**\n' + data.sources.map(s => '- [' + (s.title || s.url || 'Source') + '](' + s.url + ')').join('\n');
+          }
           messages.push({ role: 'assistant', content: reply });
           appendMsg('assistant', reply);
+          container.dispatchEvent(new CustomEvent('nova:chat-result', { bubbles:true, detail:data }));
           if (messages.length > 80) messages = messages.slice(-80);
         }
       } catch(e) { typingEl.remove(); appendMsg('assistant', '⚠️ Connection error: '+e.message, true); messages.pop(); }
@@ -957,6 +961,154 @@
   }
 
 
+  // ── Try AILinux Guided Demo ───────────────────────────────────────────────
+  function initGuidedDemo(root) {
+    const shell = root.querySelector('.nova-ai-shell');
+    if (!shell) return;
+    const prompt = shell.querySelector('.nova-chat-prompt');
+    const send = shell.querySelector('.nova-chat-send');
+    const progress = root.querySelector('[data-demo-progress]');
+    const kicker = root.querySelector('[data-demo-kicker]');
+    const title = root.querySelector('[data-demo-title]');
+    const description = root.querySelector('[data-demo-description]');
+    const run = root.querySelector('[data-demo-run]');
+    const skip = root.querySelector('[data-demo-skip]');
+    const restart = root.querySelector('[data-demo-restart]');
+    const status = root.querySelector('[data-demo-status]');
+    const activityList = root.querySelector('[data-demo-activity]');
+    const stack = root.querySelector('[data-demo-stack]');
+    const complete = root.querySelector('[data-demo-complete]');
+    const stepCard = root.querySelector('[data-demo-step-card]');
+    const account = root.querySelector('[data-demo-account]');
+    const storageKey = 'ailinux_try_demo_v1';
+
+    const steps = [
+      {
+        title:'Talk to Nova',
+        description:'Start with a normal model response. Nothing simulated.',
+        action:'Ask Nova',
+        prompt:'Explain in one sentence what TriForce does for an AILinux user.',
+        validate:data => !!data?.answer && (data.activity||[]).some(a => a.type==='model' && a.status==='completed')
+      },
+      {
+        title:'Research the web',
+        description:'Ask Nova to research something current. This step completes only when TriForce reports a real web_search.',
+        action:'Run web research',
+        prompt:'Search the web for the latest public AILinux information on ailinux.me and show the sources.',
+        validate:data => (data.activity||[]).some(a => a.name==='web_search' && a.status==='completed' && Number(a.result_count||0)>0)
+      },
+      {
+        title:'Read a website',
+        description:'Give Nova a URL. TriForce fetches the public page and Nova answers from what it actually read.',
+        action:'Read ailinux.me',
+        prompt:'Read https://ailinux.me/ and tell me in two sentences what a new user should try first.',
+        validate:data => (data.activity||[]).some(a => a.name==='crawl_url' && a.status==='completed')
+      },
+      {
+        title:'Understand the stack',
+        description:'Inspect the verified activity trail from the previous steps and see how Browser → WordPress → TriForce → model/tools fits together.',
+        action:'Show the stack',
+        local:true
+      },
+      {
+        title:'Continue with AILinux',
+        description:'The guided layer now gets out of your way. Keep using this same live playground, or open an account for persistent access and clients.',
+        action:'Finish tour',
+        local:true
+      }
+    ];
+
+    let state = { step:0, completed:[false,false,false,false,false], activity:[] };
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey)||'null');
+      if (saved && Number.isInteger(saved.step) && Array.isArray(saved.completed)) {
+        state = { step:Math.max(0,Math.min(5,saved.step)), completed:saved.completed.slice(0,5), activity:Array.isArray(saved.activity)?saved.activity.slice(-12):[] };
+        while (state.completed.length < 5) state.completed.push(false);
+      }
+    } catch(_e) {}
+
+    function emit(name, detail={}) {
+      root.dispatchEvent(new CustomEvent('nova:demo-event', { bubbles:true, detail:Object.assign({name},detail) }));
+    }
+    function save() { try { sessionStorage.setItem(storageKey, JSON.stringify(state)); } catch(_e) {} }
+    function renderActivity() {
+      if (!activityList) return;
+      if (!state.activity.length) {
+        activityList.innerHTML = '<span class="nova-guided-muted">Verified backend activity will appear here.</span>';
+        return;
+      }
+      activityList.innerHTML = '';
+      state.activity.slice(-8).forEach(a => {
+        const row=document.createElement('div'); row.className='nova-guided-activity-row';
+        const name=document.createElement('strong'); name.textContent=a.name||a.type||'activity';
+        const meta=document.createElement('span');
+        if (a.name==='web_search') meta.textContent=(a.result_count||0)+' sources';
+        else if (a.name==='crawl_url') meta.textContent=a.url||'page fetched';
+        else meta.textContent=a.status||'completed';
+        row.append(name,meta); activityList.appendChild(row);
+      });
+    }
+    function render() {
+      const done = state.step >= steps.length;
+      if (stepCard) stepCard.hidden = done;
+      if (complete) complete.hidden = !done;
+      if (progress) progress.textContent = done ? '5 / 5 ✓' : (state.step+1)+' / 5';
+      if (!done) {
+        const step=steps[state.step];
+        if (kicker) kicker.textContent='STEP '+(state.step+1);
+        if (title) title.textContent=step.title;
+        if (description) description.textContent=step.description;
+        if (run) run.textContent=step.action;
+        if (status) status.textContent='Ready.';
+        if (stack) stack.hidden = state.step < 3;
+      } else if (stack) stack.hidden=false;
+      renderActivity();
+    }
+    function advance(reason) {
+      if (state.step >= steps.length) return;
+      const idx=state.step;
+      state.completed[idx]=true;
+      state.step=Math.min(steps.length,state.step+1);
+      save(); render(); emit(idx===0?'first_answer':idx===1?'research_completed':idx===2?'website_read':idx===4?'tutorial_completed':'tutorial_step_completed',{step:idx+1,reason});
+    }
+    function runStep() {
+      if (state.step >= steps.length) return;
+      const step=steps[state.step];
+      if (step.local) {
+        if (state.step===3 && stack) stack.hidden=false;
+        advance('local_explanation');
+        return;
+      }
+      if (!prompt || !send) return;
+      prompt.value=step.prompt;
+      prompt.dispatchEvent(new Event('input',{bubbles:true}));
+      if (status) status.textContent='Running on the live backend…';
+      send.click();
+    }
+
+    root.addEventListener('nova:chat-result', e => {
+      const data=e.detail||{};
+      const incoming=Array.isArray(data.activity)?data.activity:[];
+      if (incoming.length) {
+        state.activity=state.activity.concat(incoming.map(a => Object.assign({},a))).slice(-12);
+        save(); renderActivity();
+      }
+      if (state.step < 3) {
+        if (steps[state.step].validate(data)) advance('verified_backend_activity');
+        else if (status) status.textContent='Response received, but this step needs the matching verified tool activity. Try the suggested action.';
+      }
+    });
+    run?.addEventListener('click',runStep);
+    skip?.addEventListener('click',() => advance('skipped'));
+    restart?.addEventListener('click',() => {
+      state={step:0,completed:[false,false,false,false,false],activity:[]}; save(); render(); emit('demo_restarted');
+    });
+    account?.addEventListener('click',() => emit('signup_clicked',{url:account.href}));
+    if (state.step===0 && !sessionStorage.getItem(storageKey)) emit('demo_started');
+    render();
+  }
+
+
   function initShell(container) {
     buildThemePicker(container);
     initTabs(container, '.nova-tab', '.nova-panel');
@@ -1143,8 +1295,11 @@
           if (output) { output.textContent = '❌ ' + err; output.style.color = 'var(--error-color,#ef4444)'; }
           return;
         }
-        const text = data?.content || data?.text ||
+        let text = data?.content || data?.text ||
                      data?.choices?.[0]?.message?.content || '';
+        if (Array.isArray(data?.sources) && data.sources.length) {
+          text += '\n\n**Sources**\n' + data.sources.map(s => '- [' + (s.title || s.url || 'Source') + '](' + s.url + ')').join('\n');
+        }
         addMessage('assistant', text);
         if (output) output.textContent = '';
       } catch(e) {
@@ -1163,6 +1318,7 @@
     setInterval(refreshNonce, 10 * 60 * 1000);
     initTheme();
     document.querySelectorAll('.nova-ai-shell').forEach(initShell);
+    document.querySelectorAll('[data-nova-guided-demo]').forEach(initGuidedDemo);
     document.querySelectorAll('.nova-downloads-shell').forEach(initDownloadsShell);
     initDiscuss();
     // Modelle sofort beim Page-Load im Hintergrund vorladen (nicht erst beim Panel-Öffnen)

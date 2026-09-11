@@ -22,9 +22,19 @@ function ailinux_triforce_defaults(): array {
     ];
 }
 function ailinux_triforce_settings(): array {
+    $defaults = ailinux_triforce_defaults();
     $stored = get_option(AILINUX_TRIFORCE_OPTION, []);
     if (!is_array($stored)) { $stored = []; }
-    return array_replace(ailinux_triforce_defaults(), $stored);
+    $settings = array_replace($defaults, $stored);
+    foreach (['api_endpoint', 'mcp_endpoint', 'login_url'] as $key) {
+        if (trim((string)($settings[$key] ?? '')) === '') {
+            $settings[$key] = (string)($defaults[$key] ?? '');
+        }
+    }
+    if (trim((string)($settings['mcp_endpoint'] ?? '')) === '') {
+        $settings['mcp_endpoint'] = $settings['api_endpoint'] ?: 'https://api.ailinux.me';
+    }
+    return $settings;
 }
 function ailinux_triforce_setting(string $key, string $default = ''): string {
     $settings = ailinux_triforce_settings();

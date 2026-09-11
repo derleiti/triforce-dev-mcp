@@ -466,3 +466,29 @@
 .nova-action-btn,.nova-send-btn{background:linear-gradient(135deg,#2563eb,var(--nova-accent));box-shadow:0 8px 20px rgba(37,99,235,.15)}
 .nova-action-btn:hover,.nova-send-btn:hover{background:linear-gradient(135deg,var(--nova-accent),var(--nova-accent2));color:#07111a}
 .nova-input,.nova-select,.nova-textarea,.nova-prompt{background:linear-gradient(180deg,var(--nova-input-bg),color-mix(in srgb,var(--nova-input-bg) 88%,#000));}
+
+/* ── Try AILinux guided demo v1 ───────────────────────────────────────────── */
+.nova-guided-demo{max-width:var(--nova-max-width);margin:24px auto}
+.nova-guided-demo>.nova-ai-shell{margin-top:14px}
+.nova-guided-tour{background:linear-gradient(145deg,var(--nova-bg2),color-mix(in srgb,var(--nova-bg3) 84%,#06121d));border:1px solid var(--nova-border);border-radius:var(--nova-radius);padding:clamp(16px,2.5vw,28px);color:var(--nova-text);box-shadow:var(--nova-shadow)}
+.nova-guided-topline{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+.nova-guided-title{font-size:clamp(22px,3vw,34px);margin:5px 0 6px;color:var(--nova-text)}
+.nova-guided-subtitle{margin:0;color:var(--nova-text2);max-width:760px;line-height:1.55}
+.nova-guided-progress{white-space:nowrap;border:1px solid var(--nova-border);border-radius:999px;padding:7px 11px;color:var(--nova-accent);font:700 12px/1 var(--nova-font-mono);background:var(--nova-bg)}
+.nova-guided-step,.nova-guided-activity,.nova-guided-stack,.nova-guided-complete{margin-top:16px;border:1px solid var(--nova-border);border-radius:var(--nova-radius-sm);background:color-mix(in srgb,var(--nova-bg) 76%,transparent);padding:16px}
+.nova-guided-step-kicker{font:700 11px/1.2 var(--nova-font-mono);letter-spacing:.1em;color:var(--nova-accent2)}
+.nova-guided-step h3,.nova-guided-complete h3{margin:6px 0;color:var(--nova-text)}
+.nova-guided-step p,.nova-guided-stack p,.nova-guided-complete p{color:var(--nova-text2);line-height:1.55}
+.nova-guided-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+.nova-guided-actions .nova-action-btn{width:auto;margin:0}
+.nova-guided-status{font-size:12px;color:var(--nova-text2);margin-top:10px}
+.nova-guided-activity-list{display:grid;gap:7px;margin-top:8px}
+.nova-guided-activity-row{display:flex;justify-content:space-between;gap:14px;padding:8px 10px;border-radius:8px;background:var(--nova-bg2);font-size:12px}
+.nova-guided-activity-row strong{font-family:var(--nova-font-mono);color:var(--nova-accent)}
+.nova-guided-activity-row span{color:var(--nova-text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nova-guided-muted{font-size:12px;color:var(--nova-text2)}
+.nova-guided-stack-flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.nova-guided-stack-flow span{border:1px solid var(--nova-border);background:var(--nova-bg2);border-radius:8px;padding:7px 9px;font:600 12px var(--nova-font-mono)}
+.nova-guided-stack-flow b{color:var(--nova-accent2)}
+.nova-guided-account{display:inline-flex!important;width:auto!important;text-decoration:none;margin-top:6px}
+@media(max-width:600px){.nova-guided-topline{flex-direction:column}.nova-guided-progress{align-self:flex-start}.nova-guided-activity-row{flex-direction:column;gap:4px}.nova-guided-activity-row span{white-space:normal}}
