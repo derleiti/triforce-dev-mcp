@@ -570,7 +570,7 @@ V5_TOOLS: List[Dict[str, Any]] = [
     # =========================================================================
     {
         "name": "agents",
-        "description": "List all CLI agents (claude-mcp, codex-mcp, gemini-mcp, opencode-mcp) with status, last activity, and stats.",
+        "description": "List all standard agents (claude-mcp, codex-mcp, gemini-mcp, mistral-mcp, opencode-mcp) with status, last activity, and stats.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -612,7 +612,7 @@ V5_TOOLS: List[Dict[str, Any]] = [
             "properties": {
                 "agent_id": {
                     "type": "string",
-                    "enum": ["claude-mcp", "codex-mcp", "gemini-mcp", "opencode-mcp"],
+                    "enum": ["claude-mcp", "codex-mcp", "gemini-mcp", "mistral-mcp", "opencode-mcp"],
                     "description": "Agent to start",
                 },
             },
@@ -627,7 +627,7 @@ V5_TOOLS: List[Dict[str, Any]] = [
             "properties": {
                 "agent_id": {
                     "type": "string",
-                    "enum": ["claude-mcp", "codex-mcp", "gemini-mcp", "opencode-mcp"],
+                    "enum": ["claude-mcp", "codex-mcp", "gemini-mcp", "mistral-mcp", "opencode-mcp"],
                     "description": "Agent to stop",
                 },
             },

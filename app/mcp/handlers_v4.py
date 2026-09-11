@@ -78,6 +78,7 @@ class HandlerRegistry:
         self._register_browser_handlers()
         self._register_memory_handlers()
         self._register_agent_handlers()
+        self._register_agent_chat_handlers()
         self._register_code_handlers()
         self._register_doc_handlers()
         self._register_flarum_handlers()
@@ -455,6 +456,21 @@ class HandlerRegistry:
         except Exception as e:
             logger.warning(f"Agent handlers registration failed: {e}")
     
+    def _register_agent_chat_handlers(self):
+        """Register encrypted Agent Chat log tools in the consolidated runtime."""
+        try:
+            from app.mcp.handlers_agent_chat import AGENT_CHAT_TOOLS, handle_agent_chat_tool
+            for tool in AGENT_CHAT_TOOLS:
+                name = str(tool.get("name") or "")
+                if not name:
+                    continue
+                async def handler(params, _name=name):
+                    return await handle_agent_chat_tool(_name, params)
+                self.register(name, handler)
+            logger.info("Agent chat handlers registered: %s", len(AGENT_CHAT_TOOLS))
+        except Exception as exc:
+            logger.warning("Agent chat handlers registration failed: %s", exc)
+
     def _register_code_handlers(self):
         """Code: code_read, code_search, code_edit, code_tree, code_patch"""
         try:

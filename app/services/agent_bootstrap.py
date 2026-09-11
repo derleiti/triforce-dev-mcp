@@ -40,6 +40,7 @@ BOOTSTRAP_ORDER = [
     "gemini-mcp",   # Lead - koordiniert andere
     "claude-mcp",   # Worker - Code
     "codex-mcp",    # Worker - Code-Spezialist
+    "mistral-mcp",  # Worker - Mistral reasoning/coding via AICoder
     "opencode-mcp", # Worker - Alternative
 ]
 
@@ -682,12 +683,23 @@ class AgentBootstrapService:
                     result["error"] = f"Binary not found: {binary}"
                     return result
 
-            # Agent ist verfügbar - markiere als initialized
-            # CLI Tools werden on-demand gestartet, nicht persistent
+            # Native AICoder profiles do not need a persistent subprocess, but
+            # they do need their isolated HOME/profile prepared once. Marking
+            # them READY makes agents() reflect actual callability after boot.
+            if str(agent_info.get("runtime") or "") == "aicoder":
+                prepared = await agent_controller.start_agent(agent_id)
+                if prepared.get("status") not in {"ready", "already_running"}:
+                    result["status"] = "error"
+                    result["error"] = prepared.get("error") or "AICoder profile preparation failed"
+                    return result
+                result["status"] = "initialized"
+                result["runtime_status"] = "ready"
+                result["note"] = "AICoder profile ready for on-demand calls"
+            else:
+                result["status"] = "initialized"
+                result["note"] = "CLI agent ready for on-demand calls"
             self._initialized_agents.add(agent_id)
-            result["status"] = "initialized"
             result["init_pushed"] = True
-            result["note"] = "CLI agent ready for on-demand calls"
             
             self._init_results[agent_id] = result
             logger.info(f"Agent {agent_id} marked as ready (on-demand mode)")

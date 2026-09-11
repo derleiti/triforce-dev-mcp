@@ -202,6 +202,7 @@ DEFAULT_AGENTS: List[Dict[str, Any]] = [
         "description": "Claude Code CLI im autonomen Modus mit --dangerously-skip-permissions",
         # Wrapper fügt hinzu: --dangerously-skip-permissions -p --output-format text
         "command": [f"{TRIFORCE_BIN}/claude-triforce"],
+        "runtime": "aicoder",
         "env": {
             "PATH": f"{TRIFORCE_BIN}:{CLI_BIN}:/usr/local/bin:/usr/bin:/bin",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -215,6 +216,7 @@ DEFAULT_AGENTS: List[Dict[str, Any]] = [
         "description": "Codex CLI im Full-Auto Modus ohne Sandbox",
         # Wrapper fügt bereits hinzu: exec --full-auto --dangerously...
         "command": [f"{TRIFORCE_BIN}/codex-triforce"],
+        "runtime": "aicoder",
         "env": {
             "PATH": f"{TRIFORCE_BIN}:{CLI_BIN}:/usr/local/bin:/usr/bin:/bin",
             "CODEX_DISABLE_TELEMETRY": "1",
@@ -227,6 +229,7 @@ DEFAULT_AGENTS: List[Dict[str, Any]] = [
         "description": "Antigravity CLI (agy) im autonomen Print-Modus",
         # gemini-mcp bleibt als API-/Workflow-ID rückwärtskompatibel.
         "command": [f"{TRIFORCE_BIN}/agy-triforce"],
+        "runtime": "aicoder",
         "env": {
             "PATH": f"{TRIFORCE_BIN}:{CLI_BIN}:/usr/local/bin:/usr/bin:/bin",
             "GEMINI_DISABLE_TELEMETRY": "1",
@@ -239,10 +242,20 @@ DEFAULT_AGENTS: List[Dict[str, Any]] = [
         "description": "OpenCode CLI im Auto-Modus",
         # Wrapper fügt bereits hinzu: run --auto
         "command": [f"{TRIFORCE_BIN}/opencode-triforce"],
+        "runtime": "aicoder",
         "env": {
             "PATH": f"{TRIFORCE_BIN}:{CLI_BIN}:/usr/local/bin:/usr/bin:/bin",
             "OPENCODE_DISABLE_TELEMETRY": "1",
         },
+    },
+    {
+        "agent_id": "mistral-mcp",
+        "agent_type": "aicoder",
+        "name": "Mistral AICoder Agent",
+        "description": "Mistral coding/reasoning agent through the native AICoder runtime",
+        "command": ["/usr/bin/aicoder"],
+        "runtime": "aicoder",
+        "env": {},
     },
 ]
 
@@ -334,7 +347,7 @@ def _sync_builtin_aicoder_profile_prompts(profile_root: str | Path = "/var/trist
     updated: list[str] = []
     if not root.is_dir():
         return updated
-    for agent_id in ("claude-mcp", "codex-mcp", "gemini-mcp", "opencode-mcp"):
+    for agent_id in ("claude-mcp", "codex-mcp", "gemini-mcp", "mistral-mcp", "opencode-mcp"):
         path = root / f"{agent_id}.json"
         if not path.is_file():
             continue
@@ -355,6 +368,48 @@ def _sync_builtin_aicoder_profile_prompts(profile_root: str | Path = "/var/trist
         except Exception as exc:
             logger.warning("Failed to sync AICoder profile prompt %s: %s", agent_id, exc)
     return updated
+
+
+BUILTIN_AICODER_PROFILE_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "claude-mcp": {"model": "account:claude/sonnet", "approval_mode": "autopilot"},
+    "codex-mcp": {"model": "account:chatgpt/gpt-5.6-terra", "approval_mode": "autopilot"},
+    "gemini-mcp": {"model": "account:gemini/gemini-3.8-flash-high", "approval_mode": "autopilot"},
+    "opencode-mcp": {"model": "mistral/codestral-latest", "approval_mode": "autopilot"},
+    "mistral-mcp": {"model": "mistral/mistral-medium-latest", "approval_mode": "autopilot"},
+}
+
+
+def _ensure_builtin_aicoder_profiles(
+    profile_root: str | Path = "/var/tristar/agents/profiles",
+    *,
+    workspace: str = "/home/zombie/triforce",
+) -> list[str]:
+    """Create missing built-in AICoder profiles without overwriting operator choices."""
+    root = Path(profile_root)
+    root.mkdir(parents=True, exist_ok=True)
+    created: list[str] = []
+    for agent_id, defaults in BUILTIN_AICODER_PROFILE_DEFAULTS.items():
+        path = root / f"{agent_id}.json"
+        if path.exists():
+            continue
+        payload = {
+            "id": agent_id,
+            "target": "local",
+            "model": defaults["model"],
+            "workspace": workspace,
+            "team_mode": "off",
+            "approval_mode": defaults["approval_mode"],
+            "system_prompt": build_agent_system_prompt(agent_id),
+            "system_prompt_source": "triforce",
+            "system_prompt_version": 2,
+            "timeout": 180,
+        }
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        created.append(agent_id)
+    return created
 
 
 class AgentController:
@@ -383,18 +438,21 @@ class AgentController:
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        # Lade gespeicherte Konfigurationen. Known legacy built-in prompts are
-        # migrated in-memory to the shared core + role overlay and persisted.
+        # Load persisted state, then reconcile system-owned defaults. This is
+        # intentionally idempotent: custom agents survive, while newly shipped
+        # standard agents and AICoder runtime migrations appear automatically.
         await self._load_configs()
-        synced_profiles = _sync_builtin_aicoder_profile_prompts()
+        reconciled = self._reconcile_default_agents()
+        profile_root = self.data_dir / "profiles"
+        created_profiles = _ensure_builtin_aicoder_profiles(profile_root)
+        synced_profiles = _sync_builtin_aicoder_profile_prompts(profile_root)
+        if reconciled:
+            logger.info("Reconciled default agents: %s", ", ".join(reconciled))
+        if created_profiles:
+            logger.info("Created built-in AICoder profiles: %s", ", ".join(created_profiles))
         if synced_profiles:
             logger.info("Synced canonical AICoder profile prompts: %s", ", ".join(synced_profiles))
-
-        # Registriere Default-Agenten wenn keine vorhanden
-        if not self.agents:
-            await self._register_default_agents()
-        else:
-            await self._save_configs()
+        await self._save_configs()
 
         # Starte Health Monitor
         self._monitor_task = asyncio.create_task(self._health_monitor())
@@ -424,11 +482,37 @@ class AgentController:
                 name=agent_data["name"],
                 command=agent_data["command"],
                 env=agent_data.get("env", {}),
+                runtime=agent_data.get("runtime", "aicoder"),
             )
             self.agents[config.agent_id] = AgentInstance(config=config)
 
         await self._save_configs()
         logger.info(f"Registered {len(DEFAULT_AGENTS)} default agents")
+
+    def _reconcile_default_agents(self) -> list[str]:
+        """Ensure built-ins exist and use the native AICoder runtime."""
+        changed: list[str] = []
+        for agent_data in DEFAULT_AGENTS:
+            agent_id = agent_data["agent_id"]
+            instance = self.agents.get(agent_id)
+            if instance is None:
+                config = AgentConfig(
+                    agent_id=agent_id,
+                    agent_type=AgentType(agent_data["agent_type"]),
+                    name=agent_data["name"],
+                    command=list(agent_data["command"]),
+                    env=dict(agent_data.get("env", {})),
+                    runtime="aicoder",
+                )
+                self.agents[agent_id] = AgentInstance(config=config)
+                changed.append(agent_id)
+                continue
+            if instance.config.runtime != "aicoder":
+                instance.config.runtime = "aicoder"
+                changed.append(agent_id)
+            for key, value in agent_data.get("env", {}).items():
+                instance.config.env.setdefault(key, value)
+        return changed
 
     async def _load_configs(self):
         """Lädt Agent-Konfigurationen"""

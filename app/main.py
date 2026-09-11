@@ -243,7 +243,7 @@ async def lifespan(app: FastAPI):
     # Auto-Bootstrap CLI Agents (wenn konfiguriert)
     try:
         from .services.agent_bootstrap import bootstrap_service
-        auto_bootstrap = os.environ.get("AUTO_BOOTSTRAP_AGENTS", "false").lower() == "true"
+        auto_bootstrap = os.environ.get("AUTO_BOOTSTRAP_AGENTS", "true").lower() == "true"
         if auto_bootstrap:
             # import logging (centralized)
             logger.info("Auto-bootstrapping CLI Agents...")
@@ -252,7 +252,7 @@ async def lifespan(app: FastAPI):
             asyncio.create_task(_delayed_bootstrap())
         else:
             # import logging (centralized)
-            logger.info("Agent Bootstrap available (AUTO_BOOTSTRAP_AGENTS=true to enable)")
+            logger.info("Agent Bootstrap disabled by AUTO_BOOTSTRAP_AGENTS=false")
     except Exception as e:
         # import logging (centralized)
         logger.warning(f"Failed to setup Agent Bootstrap: {e}")
