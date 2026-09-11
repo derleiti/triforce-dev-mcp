@@ -8,7 +8,7 @@
       "role": "master",
       "vpn_ip": "10.10.0.1",
       "public_ip": "138.201.50.230",
-      "port": 9000,
+      "port": 9100,
       "mcp_port": 9001,
       "specs": {
         "cpu": "Intel Ultra 7 265",
@@ -26,7 +26,7 @@
       "role": "hub",
       "vpn_ip": "10.10.0.3",
       "public_ip": "5.104.107.103",
-      "port": 9000,
+      "port": 9100,
       "mcp_port": 9001,
       "specs": {
         "cpu": "Cloud vCPU",
@@ -45,7 +45,7 @@
       "role": "hub",
       "vpn_ip": "10.10.0.2",
       "public_ip": null,
-      "port": 9000,
+      "port": 9100,
       "mcp_port": 9001,
       "specs": {
         "cpu": "AMD Ryzen 7 7700X",

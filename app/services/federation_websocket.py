@@ -66,7 +66,22 @@ WS_RECONNECT_MAX_DELAY = max(
     int(os.getenv("FEDERATION_WS_RECONNECT_MAX", "300")),
 )
 WS_HEARTBEAT_INTERVAL = 10  # Sekunden
-WS_PORT = 9001  # Separater Port für Federation WS
+WS_PORT = 9001  # Legacy standalone WS server port; FastAPI federation uses backend_port.
+DEFAULT_BACKEND_PORT = 9100
+
+
+def _peer_backend_port(config: dict) -> int:
+    """Return the peer FastAPI port used by /v1/federation/ws.
+
+    New configs expose backend_port explicitly.  Fall back to port for older
+    deployments and finally to the canonical TriForce backend default.
+    """
+    raw = config.get("backend_port", config.get("port", DEFAULT_BACKEND_PORT))
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        port = DEFAULT_BACKEND_PORT
+    return port if 1 <= port <= 65535 else DEFAULT_BACKEND_PORT
 
 
 # =============================================================================
@@ -375,7 +390,8 @@ class FederationLoadBalancer:
         # Connect to peers
         for node_id, config in FEDERATION_NODES.items():
             if node_id != self.node_id:
-                ws_url = f"ws://{config['vpn_ip']}:{config['port']}/v1/federation/ws"
+                peer_port = _peer_backend_port(config)
+                ws_url = f"ws://{config['vpn_ip']}:{peer_port}/v1/federation/ws"
                 peer = FederationPeer(node_id, ws_url)
                 peer.on_message("task_submit", self._handle_incoming_task)
                 peer.on_message("task_result", self._handle_task_result)

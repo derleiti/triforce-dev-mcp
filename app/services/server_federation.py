@@ -138,19 +138,19 @@ class ServerFederation:
             "hetzner": {
                 "url": "https://api.ailinux.me",
                 "vpn_ip": "10.10.0.1",
-                "port": 9000,
+                "port": 9100,
                 "role": "hub"
             },
             "backup": {
                 "url": "http://10.10.0.3:9000",
                 "vpn_ip": "10.10.0.3",
-                "port": 9000,
+                "port": 9100,
                 "role": "node"
             },
             "zombie-pc": {
                 "url": "http://10.10.0.2:9000",
                 "vpn_ip": "10.10.0.2",
-                "port": 9000,
+                "port": 9100,
                 "role": "node"
             }
         }
@@ -336,19 +336,19 @@ FEDERATION_NODES = {
     "hetzner": {
         "url": "https://api.ailinux.me",
         "vpn_ip": "10.10.0.1",
-        "port": 9000,
+        "port": 9100,
         "role": "hub"
     },
     "backup": {
         "url": "http://10.10.0.3:9000",
         "vpn_ip": "10.10.0.3",
-        "port": 9000,
+        "port": 9100,
         "role": "node"
     },
     "zombie-pc": {
         "url": "http://10.10.0.2:9000",
         "vpn_ip": "10.10.0.2",
-        "port": 9000,
+        "port": 9100,
         "role": "node"
     }
 }
