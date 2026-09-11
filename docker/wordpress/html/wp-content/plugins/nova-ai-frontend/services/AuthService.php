@@ -364,16 +364,66 @@ HTML;
      * [ailinux_google_login] - top-level Google broker entry.
      */
     public function render_google_login_button($atts): string {
-        if (self::is_logged_in()) {
-            return '';
-        }
-        $atts = shortcode_atts(['redirect' => home_url('/')], $atts, 'ailinux_google_login');
+        $atts = shortcode_atts([
+            'redirect' => home_url('/'),
+            'prompt'   => '0',
+        ], $atts, 'ailinux_google_login');
+
         $redirect = $this->resolve_redirect_url((string) $atts['redirect']);
         $url = add_query_arg([
-            'google' => '1',
+            'google'   => '1',
             'redirect' => $redirect,
         ], 'https://login.ailinux.me/');
-        return '<a class="ail-btn ail-google-login" data-no-swup href="' . esc_url($url) . '" aria-label="Continue with Google"><span class="ail-google-g" aria-hidden="true">G</span> Continue with Google</a>';
+
+        $prompt_enabled = in_array(strtolower(trim((string) $atts['prompt'])), ['1', 'true', 'yes', 'on'], true);
+        $entry_id = wp_unique_id('ail-google-entry-');
+        $status_url = rest_url('nova-ai/v1/auth/status');
+
+        $button = '<a class="ail-btn ail-google-login" data-no-swup href="' . esc_url($url) . '" aria-label="Continue with Google"><span class="ail-google-g" aria-hidden="true">G</span> Continue with Google</a>';
+
+        $prompt = '';
+        if ($prompt_enabled) {
+            $prompt = '<div class="ail-google-broker-prompt" data-google-prompt hidden role="dialog" aria-modal="true" aria-label="Sign in to AILinux">'
+                . '<div class="ail-google-broker-card">'
+                . '<button type="button" class="ail-google-broker-close" data-google-prompt-close aria-label="Close">&times;</button>'
+                . '<div class="ail-google-broker-brand"><span class="ail-google-g" aria-hidden="true">G</span><strong>Sign in to AILinux</strong></div>'
+                . '<p>Use your Google account to connect AILinux. The secure sign-in continues through <strong>login.ailinux.me</strong>.</p>'
+                . $button
+                . '<small>You will return here automatically after sign-in.</small>'
+                . '</div></div>';
+        }
+
+        $entry_id_json = wp_json_encode($entry_id);
+        $status_url_json = wp_json_encode(esc_url_raw($status_url));
+        $prompt_enabled_json = $prompt_enabled ? 'true' : 'false';
+
+        return '<span id="' . esc_attr($entry_id) . '" class="ail-google-entry" hidden>' . $button . $prompt . '</span>'
+            . '<style>'
+            . '.ail-google-entry{display:inline-flex}.ail-google-entry[hidden]{display:none!important}'
+            . '.ail-google-broker-prompt{position:fixed;inset:0;z-index:999999;display:grid;place-items:center;padding:20px;background:rgba(3,8,18,.72);backdrop-filter:blur(8px)}'
+            . '.ail-google-broker-prompt[hidden]{display:none!important}.ail-google-broker-card{position:relative;width:min(430px,100%);padding:26px;border:1px solid #34455a;border-radius:20px;background:#101720;box-shadow:0 24px 80px rgba(0,0,0,.45);color:#eaf0f6;text-align:left}'
+            . '.ail-google-broker-brand{display:flex;align-items:center;gap:10px;font-size:1.15rem}.ail-google-broker-card p{margin:14px 0 18px;color:#b8c4d1;line-height:1.55}.ail-google-broker-card small{display:block;margin-top:13px;color:#7f8da0}'
+            . '.ail-google-broker-close{position:absolute;top:10px;right:13px;border:0;background:transparent;color:#9eabb9;font-size:28px;line-height:1;cursor:pointer}.ail-google-broker-card .ail-google-login{width:100%}'
+            . '</style>'
+            . '<script>(function(){'
+            . 'var id=' . $entry_id_json . ',root=document.getElementById(id);if(!root)return;'
+            . 'var promptEnabled=' . $prompt_enabled_json . ',box=root.querySelector("[data-google-prompt]"),close=root.querySelector("[data-google-prompt-close]");'
+            . 'function dismiss(){if(box)box.hidden=true;try{sessionStorage.setItem("ailinux_google_prompt_dismissed","1")}catch(e){}}'
+            . 'function revealGuest(){root.hidden=false;if(promptEnabled&&box){var dismissed=false;try{dismissed=sessionStorage.getItem("ailinux_google_prompt_dismissed")==="1"}catch(e){}if(!dismissed)box.hidden=false;}}'
+            . 'function hideEntry(){root.hidden=true;if(box)box.hidden=true;}'
+            . 'function loggedIn(){hideEntry();try{sessionStorage.setItem("ailinux_login_confirmed","1");sessionStorage.removeItem("ailinux_google_prompt_dismissed");}catch(e){}}'
+            . 'function statusCheck(attempt,successReturn){fetch(' . $status_url_json . '+"?t="+Date.now(),{credentials:"same-origin",cache:"no-store",headers:{"Accept":"application/json","Cache-Control":"no-cache"}})'
+            . '.then(function(r){if(!r.ok)throw new Error("auth status");return r.json();})'
+            . '.then(function(s){if(s&&s.wp_logged_in){loggedIn();return;}if(successReturn&&attempt<5){setTimeout(function(){statusCheck(attempt+1,true);},700+attempt*500);return;}revealGuest();})'
+            . '.catch(function(){if(successReturn&&attempt<5){setTimeout(function(){statusCheck(attempt+1,true);},700+attempt*500);}else{revealGuest();}});}'
+            . 'if(close)close.addEventListener("click",dismiss);if(box)box.addEventListener("click",function(e){if(e.target===box)dismiss();});'
+            . 'document.addEventListener("keydown",function(e){if(e.key==="Escape"&&box&&!box.hidden)dismiss();});'
+            . 'var params=new URLSearchParams(window.location.search),successReturn=params.get("ailinux_login")==="success";'
+            . 'var confirmed=false;try{confirmed=sessionStorage.getItem("ailinux_login_confirmed")==="1";}catch(e){}'
+            . 'if(successReturn){hideEntry();try{sessionStorage.setItem("ailinux_login_confirmed","1");}catch(e){}if(history&&history.replaceState){params.delete("ailinux_login");var q=params.toString();history.replaceState({},document.title,window.location.pathname+(q?"?"+q:"")+window.location.hash);}setTimeout(function(){statusCheck(0,true);},900);}'
+            . 'else if(confirmed){hideEntry();statusCheck(0,false);}'
+            . 'else{statusCheck(0,false);}'
+            . '})();</script>';
     }
 
     /**
@@ -1246,6 +1296,7 @@ HTML;
         wp_set_auth_cookie($user_id, true, is_ssl());
 
         $safe = (strpos($redirect, home_url()) === 0) ? $redirect : home_url('/');
+        $safe = add_query_arg('ailinux_login', 'success', $safe);
         wp_redirect($safe);
         exit;
     }
