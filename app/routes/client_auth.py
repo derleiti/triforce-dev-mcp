@@ -141,6 +141,7 @@ CANONICAL_ENTITLEMENTS = {
     "copaocr": "copa_ocr",
     "Copa OCR": "copa_ocr",
     "970007": "copa_ocr",
+    "1140151": "copa_ocr",
 }
 
 

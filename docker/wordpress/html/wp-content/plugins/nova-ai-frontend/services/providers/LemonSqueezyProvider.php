@@ -84,6 +84,14 @@ class LemonSqueezyProvider implements PaymentProviderInterface {
         $tier_map = apply_filters('nova_ls_variant_tier_map', []);
         $tier = $tier_map[$variant_id] ?? 'tier1';
 
+        $product_name = (string) (
+            $custom_data['product_name']
+            ?? $first_order_item['product_name']
+            ?? $attrs['product_name']
+            ?? ''
+        );
+        $purchased_at = (string) ($attrs['created_at'] ?? $attrs['updated_at'] ?? '');
+
         $base = [
             'event_name'      => $event_name,
             'user_id'         => $wp_user_id,
@@ -92,6 +100,14 @@ class LemonSqueezyProvider implements PaymentProviderInterface {
             'customer_id'     => sanitize_text_field($customer_id),
             'tier'            => $tier,
             'extra'           => [],
+            'purchase'        => [
+                'id'           => sanitize_text_field((string) ($event['data']['id'] ?? '')),
+                'item_name'    => sanitize_text_field($product_name),
+                'product_id'   => sanitize_text_field($product_id),
+                'variant_id'   => sanitize_text_field($variant_id),
+                'purchased_at' => sanitize_text_field($purchased_at),
+                'source'       => 'lemonsqueezy',
+            ],
             'action'          => 'none',
         ];
 
@@ -112,15 +128,21 @@ class LemonSqueezyProvider implements PaymentProviderInterface {
                 // a paid status when one is present, so unpaid orders never unlock Copa.
                 $status = strtolower((string) ($attrs['status'] ?? ''));
                 if ($product_id && (!$status || $status === 'paid')) {
+                    $entitlement = $this->entitlement_for_product($product_id);
                     $base['action'] = 'purchase';
-                    $base['extra']  = [$this->entitlement_for_product($product_id)];
+                    $base['extra']  = [$entitlement];
+                    $base['purchase']['entitlement'] = $entitlement;
+                    $base['purchase']['status'] = 'paid';
                 }
                 break;
 
             case 'order_refunded':
                 if ($product_id) {
+                    $entitlement = $this->entitlement_for_product($product_id);
                     $base['action'] = 'refund';
-                    $base['extra']  = [$this->entitlement_for_product($product_id)];
+                    $base['extra']  = [$entitlement];
+                    $base['purchase']['entitlement'] = $entitlement;
+                    $base['purchase']['status'] = 'refunded';
                 }
                 break;
         }

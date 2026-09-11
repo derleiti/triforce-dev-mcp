@@ -120,24 +120,11 @@ class AccountSuiteService {
 
     public function api_get_purchases(\WP_REST_Request $r): \WP_REST_Response {
         if (!is_user_logged_in()) return new \WP_REST_Response(['ok'=>false,'error'=>'not_logged_in'], 401);
-        $uid   = get_current_user_id();
-        $cache = get_user_meta($uid,'nova_purchases',true) ?: [];
-        $cid   = get_user_meta($uid,'nova_client_id',true) ?: '';
-        if ($cid) {
-            $s    = get_option('nova_ai_settings',[]);
-            $base = $s['api_endpoint_internal'] ?? $s['api_endpoint'] ?? 'https://api.ailinux.me';
-            $resp = wp_remote_get(rtrim($base,'/').'/v1/tiers/purchases/'.urlencode($cid), ['timeout'=>8]);
-            if (!is_wp_error($resp) && wp_remote_retrieve_response_code($resp)===200) {
-                $data = json_decode(wp_remote_retrieve_body($resp),true) ?? [];
-                $p = $data['purchases'] ?? $cache;
-                update_user_meta($uid,'nova_purchases',$p);
-                return new \WP_REST_Response(['ok'=>true,'purchases'=>$p,'source'=>'live']);
-            }
-        }
+        $uid = get_current_user_id();
+        $purchases = EntitlementsService::get_purchase_history($uid);
         $dl = wp_remote_get(NOVA_AI_BACKEND.'/health', ['timeout'=>6]);
-        $files = (!is_wp_error($dl) && wp_remote_retrieve_response_code($dl)===200)
-            ? (json_decode(wp_remote_retrieve_body($dl),true)['files'] ?? []) : [];
-        return new \WP_REST_Response(['ok'=>true,'purchases'=>$cache,'downloads'=>$files,'source'=>'cached']);
+        $files = (!is_wp_error($dl) && wp_remote_retrieve_response_code($dl)===200) ? (json_decode(wp_remote_retrieve_body($dl),true)['files'] ?? []) : [];
+        return new \WP_REST_Response(['ok'=>true,'purchases'=>$purchases,'downloads'=>$files,'source'=>'wordpress']);
     }
 
     public function api_update_profile(\WP_REST_Request $r): \WP_REST_Response {

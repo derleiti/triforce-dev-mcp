@@ -107,3 +107,43 @@ def test_triforce_extra_is_authoritative_for_purchase_and_refund(tmp_path, monke
     assert refunded["billing"] is False
 
     admin_users.USER_REGISTRY.pop("shop-contract@example.com", None)
+
+
+def test_current_copa_product_id_is_canonicalized() -> None:
+    from app.routes.client_auth import normalize_entitlements
+    assert normalize_entitlements(["1140151"]) == {"copa_ocr": True}
+    assert normalize_entitlements(["970007"]) == {"copa_ocr": True}
+
+
+def test_purchase_history_is_wordpress_local_and_client_id_is_not_enumerated() -> None:
+    account = read(PLUGIN / "services/AccountSuiteService.php")
+    auth = read(PLUGIN / "services/AuthService.php")
+    main = read(PLUGIN / "nova-ai-frontend.php")
+    entitlements = read(PLUGIN / "services/EntitlementsService.php")
+    assert "EntitlementsService::get_purchase_history($uid)" in account
+    assert "/tiers/purchases/" not in account
+    assert "/tiers/purchases/" not in auth
+    assert "/v1/tiers/purchases/" not in main
+    assert "record_purchase_event" in entitlements
+
+
+def test_webhook_records_purchase_history_after_successful_backend_sync() -> None:
+    payments = read(PLUGIN / "services/PaymentsService.php")
+    apply_pos = payments.index("if (!$this->apply_entitlements")
+    record_pos = payments.index("EntitlementsService::record_purchase_event", apply_pos)
+    mark_pos = payments.index("$this->mark_event_processed($event_id);", record_pos)
+    assert apply_pos < record_pos < mark_pos
+
+
+def test_account_purchase_markup_escapes_webhook_content() -> None:
+    js = read(PLUGIN / "assets/account-suite.js")
+    assert "var name=esc(p.item_name" in js
+    assert "var date=esc(p.purchased_at" in js
+    assert "var status=esc(p.status" in js
+
+
+def test_legacy_shop_permalink_redirects_to_canonical_shop() -> None:
+    main = read(PLUGIN / "nova-ai-frontend.php")
+    assert "$path === 'ailinux-shop'" in main
+    assert "home_url('/shop/')" in main
+    assert "wp_safe_redirect" in main

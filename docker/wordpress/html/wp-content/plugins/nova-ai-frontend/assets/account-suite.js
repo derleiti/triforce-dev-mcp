@@ -359,7 +359,7 @@ async function loadDownloads(root){
     const files=d.downloads||[];
     const purchases=d.purchases||[];
     if(purchasesEl&&purchases.length){
-      purchasesEl.innerHTML='<h3 style="margin-bottom:.75rem">Purchases</h3>'+purchases.map(function(p){return'<div class="nas-card" style="margin-bottom:.5rem"><strong>'+(p.item_name||p.name||p.id||'Purchase')+'</strong><div style="font-size:.8rem;color:var(--nas-muted)">'+(p.purchased_at||p.date||'')+'</div></div>'}).join('');
+      purchasesEl.innerHTML='<h3 style="margin-bottom:.75rem">Purchases</h3>'+purchases.map(function(p){var name=esc(p.item_name||p.name||p.id||'Purchase');var date=esc(p.purchased_at||p.date||'');var status=esc(p.status||'');return'<div class="nas-card" style="margin-bottom:.5rem"><strong>'+name+'</strong><div style="font-size:.8rem;color:var(--nas-muted)">'+(date||'License entitlement')+(status?' · '+status:'')+'</div></div>'}).join('');
     }
     if(filesEl){
       if(!files.length){

@@ -42,6 +42,15 @@ if (!defined('NOVA_LS_PRODUCT_ENTITLEMENTS'))  define('NOVA_LS_PRODUCT_ENTITLEME
 require_once NOVA_AI_PLUGIN_DIR . 'includes/autoloader.php';
 if (is_file(NOVA_AI_PLUGIN_DIR . 'config/lemonsqueezy.php')) { require_once NOVA_AI_PLUGIN_DIR . 'config/lemonsqueezy.php'; }
 // 2026-06-01: Minimal shop bootstrap fix.
+// Keep the former shop permalink working after the canonical move to /shop/.
+add_action('template_redirect', static function (): void {
+    $path = trim((string) parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
+    if ($path === 'ailinux-shop') {
+        wp_safe_redirect(home_url('/shop/'), 301);
+        exit;
+    }
+}, 1);
+
 // Restores [ailinux_shop] and shop checkout REST/AJAX hooks without starting the full Core\Plugin stack.
 if (class_exists('\\NovAI\\Core\\ShopShortcode')) {
     \NovAI\Core\ShopShortcode::register();
@@ -779,9 +788,8 @@ function nova_proxy_subscription_cancel(WP_REST_Request $r): WP_REST_Response {
 function nova_proxy_purchases(WP_REST_Request $r): WP_REST_Response {
     $user = wp_get_current_user();
     if (!$user || !$user->ID) return new WP_REST_Response(['error'=>'not logged in'], 401);
-    $client_id = get_user_meta($user->ID, 'nova_client_id', true) ?: '';
-    if (!$client_id) return new WP_REST_Response(['ok'=>true,'purchases'=>[],'client_id'=>'']);
-    return nova_proxy('/v1/tiers/purchases/'.$client_id);
+    $purchases = class_exists('\NovAI\Services\EntitlementsService') ? \NovAI\Services\EntitlementsService::get_purchase_history((int) $user->ID) : [];
+    return new WP_REST_Response(['ok'=>true,'purchases'=>$purchases,'source'=>'wordpress'], 200);
 }
 
 /* ── Admin REST callbacks ───────────────────────────────────────────────────── */

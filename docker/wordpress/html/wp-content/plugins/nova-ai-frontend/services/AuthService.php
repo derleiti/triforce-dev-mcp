@@ -515,13 +515,8 @@ HTML;
 
 
     private function sync_purchases_to_wp(int $wp_user_id, string $client_id): void {
-        if (empty($client_id)) return;
-        $endpoint = !empty($this->api_endpoint_internal) ? $this->api_endpoint_internal : $this->api_endpoint;
-        $resp = wp_remote_get(rtrim($endpoint, '/') . '/tiers/purchases/' . urlencode($client_id), ['timeout' => 5]);
-        if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) return;
-        $body = json_decode(wp_remote_retrieve_body($resp), true);
-        if (!empty($body['purchases']) && is_array($body['purchases'])) {
-            update_user_meta($wp_user_id, 'nova_purchases', $body['purchases']);
+        if (class_exists('\NovAI\Services\EntitlementsService')) {
+            \NovAI\Services\EntitlementsService::get_purchase_history($wp_user_id);
         }
     }
 

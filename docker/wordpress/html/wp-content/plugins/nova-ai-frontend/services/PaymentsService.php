@@ -183,6 +183,10 @@ class PaymentsService {
             return new \WP_REST_Response(['error' => 'Entitlement sync failed'], 503);
         }
 
+        if (in_array(($ents['action'] ?? ''), ['purchase', 'refund'], true)) {
+            EntitlementsService::record_purchase_event($user_id, is_array($ents['purchase'] ?? null) ? $ents['purchase'] : [], $ents['action']);
+        }
+
         $this->mark_event_processed($event_id);
 
         // Track last webhook
