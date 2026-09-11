@@ -28,6 +28,7 @@ def test_federation_websocket_uses_backend_port():
     from app.services.federation_websocket import _peer_backend_port
 
     assert _peer_backend_port({"backend_port": 9100, "port": 9000}) == 9100
+    assert _peer_backend_port({"port": 9000}) == 9000
     assert _peer_backend_port({"port": 9100}) == 9100
     assert _peer_backend_port({"backend_port": "bad"}) == 9100
     assert _peer_backend_port({"backend_port": 70000}) == 9100
