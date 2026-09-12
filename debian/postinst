@@ -14,6 +14,10 @@ RUNNING_MARKER="$MIGRATION_DIR/source-service.was-running"
 ENABLED_MARKER="$MIGRATION_DIR/source-service.was-enabled"
 LOCAL_UNIT=/etc/systemd/system/triforce.service
 SOURCE_MODE_MARKER=/etc/triforce/source-mode.enabled
+LEGACY_PRERM_BROKE_STATE=0
+case "${2:-}" in
+    2.86.0-1|1:2.86.0-1) LEGACY_PRERM_BROKE_STATE=1 ;;
+esac
 
 # Legacy 2.86.0 packages stopped and disabled triforce.service unconditionally
 # from their prerm during upgrades. Restore an operator-selected source unit and
@@ -28,12 +32,13 @@ if [ -f "$RESTORE_MARKER" ] && [ -f "$BACKUP_UNIT" ]; then
     chmod 0644 "$SOURCE_MODE_MARKER"
     systemctl daemon-reload || true
 
-    if [ -f "$ENABLED_MARKER" ]; then
+    if [ -f "$ENABLED_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]; then
         if ! systemctl enable triforce.service >/dev/null 2>&1; then
             echo "WARNING: could not restore enabled state for TriForce source service" >&2
         fi
     fi
-    if [ -f "$RUNNING_MARKER" ] && ! systemctl is-active --quiet triforce.service; then
+    if { [ -f "$RUNNING_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]; } &&
+       ! systemctl is-active --quiet triforce.service; then
         if ! systemctl start triforce.service; then
             echo "WARNING: could not restore running state for TriForce source service" >&2
         fi

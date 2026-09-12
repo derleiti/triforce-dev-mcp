@@ -116,8 +116,8 @@ def test_debian_package_preserves_operator_selected_source_service() -> None:
     assert 'ENABLED_MARKER="$MIGRATION_DIR/source-service.was-enabled"' in preinst
     assert "systemctl is-active --quiet triforce.service" in preinst
     assert "systemctl is-enabled --quiet triforce.service" in preinst
-    assert '[ -f "$RUNNING_MARKER" ] && ! systemctl is-active --quiet triforce.service' in postinst
-    assert '[ -f "$ENABLED_MARKER" ]' in postinst
+    assert '[ -f "$RUNNING_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]' in postinst
+    assert '[ -f "$ENABLED_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]' in postinst
     assert "systemctl start triforce.service" in postinst
     assert "systemctl enable triforce.service" in postinst
     assert postinst.index('install -m 0644 "$BACKUP_UNIT" "$LOCAL_UNIT"') < postinst.index('/usr/lib/triforce/triforce-admin-helper runtime-init')

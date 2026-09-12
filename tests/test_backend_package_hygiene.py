@@ -123,8 +123,18 @@ def test_legacy_upgrade_state_restore_is_strictly_marker_gated():
     postinst = Path("debian/postinst").read_text()
     assert "source-service.was-running" in preinst
     assert "source-service.was-enabled" in preinst
-    assert 'if [ -f "$ENABLED_MARKER" ]; then' in postinst
-    assert 'if [ -f "$RUNNING_MARKER" ] && ! systemctl is-active --quiet triforce.service; then' in postinst
+    assert '[ -f "$ENABLED_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]' in postinst
+    assert '[ -f "$RUNNING_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]' in postinst
+    assert '! systemctl is-active --quiet triforce.service' in postinst
     assert postinst.count("systemctl start triforce.service") == 1
     assert postinst.count("systemctl enable triforce.service") == 1
     assert "systemctl restart triforce.service" not in postinst
+
+
+def test_only_known_broken_legacy_versions_force_source_state_restore():
+    postinst = Path("debian/postinst").read_text()
+    assert '2.86.0-1|1:2.86.0-1) LEGACY_PRERM_BROKE_STATE=1' in postinst
+    assert 'LEGACY_PRERM_BROKE_STATE=0' in postinst
+    assert '[ -f "$ENABLED_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]' in postinst
+    assert '[ -f "$RUNNING_MARKER" ] || [ "$LEGACY_PRERM_BROKE_STATE" -eq 1 ]' in postinst
+    assert "2.85.0~beta2" not in postinst

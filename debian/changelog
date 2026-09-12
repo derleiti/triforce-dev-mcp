@@ -1,3 +1,12 @@
+triforce-backend (1:2.86.2-9) noble; urgency=medium
+
+  * Packaging: recognize the known 2.86.0 legacy prerm that destroys source
+    service running/enabled state before the new package can observe it
+  * Packaging: restore active and enabled source mode only for that exact
+    legacy transition while keeping normal upgrades marker-gated
+
+ -- Markus Leitermann <admin@ailinux.me>  Sun, 13 Sep 2026 00:22:06 +0200
+
 triforce-backend (1:2.86.2-8) noble; urgency=medium
 
   * Packaging: preserve source-service running and enabled state across legacy
