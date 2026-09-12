@@ -20,7 +20,7 @@ Environment=TRIFORCE_DATA_DIR=/var/lib/triforce/data
 Environment=TRIFORCE_VAULT_DIR=/var/lib/triforce/.vault
 Environment=TRIFORCE_SSH_KEY=/var/lib/triforce/.ssh/id_ed25519
 Environment=TRIFORCE_PROJECT_ROOT=/opt/triforce
-Environment=TRIFORCE_CONFIG_DIR=/opt/triforce/config
+Environment=TRIFORCE_CONFIG_DIR=/etc/triforce
 ExecStart=/opt/triforce/scripts/start-triforce.sh
 Restart=on-failure
 RestartSec=10
