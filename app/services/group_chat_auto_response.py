@@ -6,12 +6,8 @@ Automatisch API-basierte Agents in Group Chat Sessions antworten lassen.
 Wird als Background-Task nach group_chat_ask gestartet.
 
 Agents die automatisch antworten:
-- mistral-api → mistral/mistral-large-latest
-- groq-api → groq/llama-3.3-70b-versatile
-- cerebras-api → cerebras/llama-3.3-70b
-- ollama-qwen → ollama/qwen3:8b
-- ollama-kimi → ollama/kimi-k2-thinking:cloud
-- openrouter-api → openrouter/meta-llama/llama-3.3-70b-instruct
+- mistral-api / groq-api / cerebras-api / openrouter-api resolve dynamically from ModelRegistry
+- ollama-qwen / ollama-kimi keep their explicit Ollama Cloud tags
 
 Web-Agents (claude-web, chatgpt-web) antworten via MCP — NICHT hier.
 
@@ -33,15 +29,19 @@ try:
 except Exception:
     _gc_bus = None
 
-# Model mapping for auto-responding API agents
-API_AGENT_MODELS: Dict[str, str] = {
-    "mistral-api": "mistral/mistral-small-latest",
-    "groq-api": "groq/llama-3.1-8b-instant",
-    "cerebras-api": "cerebras/llama3.1-8b",
+# Provider mapping for cloud agents. Concrete model IDs are resolved from the
+# shared ModelRegistry at execution time so this service cannot drift stale.
+API_AGENT_PROVIDERS: Dict[str, str] = {
+    "mistral-api": "mistral",
+    "groq-api": "groq",
+    "cerebras-api": "cerebras",
+    "openrouter-api": "openrouter",
+}
+OLLAMA_AGENT_MODELS: Dict[str, str] = {
     "ollama-qwen": "qwen3-coder:480b-cloud",
     "ollama-kimi": "kimi-k2-thinking:cloud",
-    "openrouter-api": "openrouter/meta-llama/llama-3.3-70b-instruct",
 }
+API_AGENT_MODELS = frozenset((*API_AGENT_PROVIDERS, *OLLAMA_AGENT_MODELS))
 
 # Which agents use Ollama directly (vs cloud API proxy)
 OLLAMA_AGENTS = {"ollama-qwen", "ollama-kimi"}
@@ -160,7 +160,11 @@ async def auto_collect_api_responses(session_id: str) -> Dict[str, Any]:
     tasks = []
 
     async def _query_and_post(agent_id: str):
-        model = API_AGENT_MODELS[agent_id]
+        if agent_id in OLLAMA_AGENT_MODELS:
+            model = OLLAMA_AGENT_MODELS[agent_id]
+        else:
+            from app.services.provider_model_resolver import resolve_provider_model
+            model = await resolve_provider_model(API_AGENT_PROVIDERS[agent_id])
         timeout = PROVIDER_TIMEOUTS.get(agent_id, 60)
         prompt = _build_prompt_for_agent(session, agent_id)
 

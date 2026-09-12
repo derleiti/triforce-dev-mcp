@@ -621,9 +621,9 @@ async def _cloud_mail_fallback(event: Dict) -> bool:
         # Use cloud API — try Groq, Cerebras, OpenRouter
         import httpx, os as _os_cf
         _CF_PROVIDERS = [
-            ("https://api.groq.com/openai/v1/chat/completions", _os_cf.environ.get("GROQ_API_KEY", ""), "llama-3.3-70b-versatile"),
-            ("https://api.cerebras.ai/v1/chat/completions", _os_cf.environ.get("CEREBRAS_API_KEY", ""), "llama-3.3-70b"),
-            ("https://openrouter.ai/api/v1/chat/completions", _os_cf.environ.get("OPENROUTER_API_KEY", ""), "nvidia/nemotron-3-ultra-550b-a55b:free"),
+            ("groq", "https://api.groq.com/openai/v1/chat/completions", _os_cf.environ.get("GROQ_API_KEY", "")),
+            ("cerebras", "https://api.cerebras.ai/v1/chat/completions", _os_cf.environ.get("CEREBRAS_API_KEY", "")),
+            ("openrouter", "https://openrouter.ai/api/v1/chat/completions", _os_cf.environ.get("OPENROUTER_API_KEY", "")),
         ]
         _cf_messages = [
             {"role": "system", "content": (
@@ -635,10 +635,13 @@ async def _cloud_mail_fallback(event: Dict) -> bool:
         ]
         reply_text = ""
         async with httpx.AsyncClient(timeout=30) as client:
-            for url, key, model in _CF_PROVIDERS:
+            from app.services.provider_model_resolver import provider_api_model, resolve_provider_model
+            for provider, url, key in _CF_PROVIDERS:
                 if not key:
                     continue
                 try:
+                    canonical_model = await resolve_provider_model(provider)
+                    model = provider_api_model(canonical_model, provider)
                     r = await client.post(url,
                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                         json={"model": model, "messages": _cf_messages, "max_tokens": 500, "temperature": 0.7})
@@ -713,9 +716,9 @@ async def _direct_mail_reply(event: Dict) -> bool:
         # Generate reply via cloud API — try Groq, Cerebras, OpenRouter in order
         import os as _os_dm
         _PROVIDERS = [
-            ("https://api.groq.com/openai/v1/chat/completions", _os_dm.environ.get("GROQ_API_KEY", ""), "llama-3.3-70b-versatile"),
-            ("https://api.cerebras.ai/v1/chat/completions", _os_dm.environ.get("CEREBRAS_API_KEY", ""), "llama-3.3-70b"),
-            ("https://openrouter.ai/api/v1/chat/completions", _os_dm.environ.get("OPENROUTER_API_KEY", ""), "nvidia/nemotron-3-ultra-550b-a55b:free"),
+            ("groq", "https://api.groq.com/openai/v1/chat/completions", _os_dm.environ.get("GROQ_API_KEY", "")),
+            ("cerebras", "https://api.cerebras.ai/v1/chat/completions", _os_dm.environ.get("CEREBRAS_API_KEY", "")),
+            ("openrouter", "https://openrouter.ai/api/v1/chat/completions", _os_dm.environ.get("OPENROUTER_API_KEY", "")),
         ]
         messages = [
             {"role": "system", "content": (
@@ -730,10 +733,13 @@ async def _direct_mail_reply(event: Dict) -> bool:
         ]
         reply_text = ""
         async with httpx.AsyncClient(timeout=30.0) as client:
-            for url, key, model in _PROVIDERS:
+            from app.services.provider_model_resolver import provider_api_model, resolve_provider_model
+            for provider, url, key in _PROVIDERS:
                 if not key:
                     continue
                 try:
+                    canonical_model = await resolve_provider_model(provider)
+                    model = provider_api_model(canonical_model, provider)
                     resp = await client.post(url,
                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                         json={"model": model, "messages": messages, "max_tokens": 500, "temperature": 0.7})

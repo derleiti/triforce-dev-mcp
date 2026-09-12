@@ -393,8 +393,8 @@ class GroupChatOrchestrator:
         """Call the lead model with fallback chain. Tests/adapters can override.
 
         Reihenfolge konfigurierbar via ENV GROUP_CHAT_LEAD_MODELS
-        (komma-separiert, z.B. "mistral/mistral-medium-3.5,groq/llama-3.3-70b-versatile").
-        Default-Chain: Gemini -> Mistral -> Groq -> Cerebras.
+        (comma-separated canonical model IDs). If unset, models are resolved from
+        the shared live ModelRegistry. Default provider order: Gemini -> Mistral -> Groq -> Cerebras.
         Patched 2026-06-15: Gemini-Quota-Ausfall darf nicht den Lead blockieren.
         """
         from app.services.chat_router import api_proxy
@@ -404,12 +404,13 @@ class GroupChatOrchestrator:
         if env_chain:
             chain = [m.strip() for m in env_chain.split(",") if m.strip()]
         else:
-            chain = [
-                "gemini/gemini-2.5-flash",
-                "mistral/mistral-medium-latest",
-                "groq/llama-3.3-70b-versatile",
-                "cerebras/llama-3.3-70b",
-            ]
+            from app.services.provider_model_resolver import resolve_provider_model
+            chain = []
+            for provider in ("gemini", "mistral", "groq", "cerebras"):
+                try:
+                    chain.append(await resolve_provider_model(provider))
+                except Exception as exc:
+                    logger.warning("No current %s lead model available: %s", provider, exc)
 
         last_err = None
         for model in chain:
@@ -1101,12 +1102,12 @@ Format:
 
 
     # Model mappings for API/Ollama execution
-    API_MODEL_MAP = {
-        "mistral-api": "mistral/mistral-small-latest",
-        "groq-api": "groq/llama-3.1-8b-instant",
-        "cerebras-api": "cerebras/llama3.1-8b",
-        "openrouter-api": "openrouter/mistralai/mistral-small-latest",
-        "gemini-lead": "gemini/gemini-2.0-flash",
+    API_PROVIDER_MAP = {
+        "mistral-api": "mistral",
+        "groq-api": "groq",
+        "cerebras-api": "cerebras",
+        "openrouter-api": "openrouter",
+        "gemini-lead": "gemini",
     }
     OLLAMA_MODEL_MAP = {
         "ollama-kimi": "kimi-k2-thinking:cloud",
@@ -1117,7 +1118,9 @@ Format:
         """Fuehrt Task via Cloud API aus (Mistral, Groq, Cerebras, OpenRouter)."""
         try:
             from app.services.chat_router import api_proxy
-            model = self.API_MODEL_MAP.get(agent_id, "mistral/mistral-small-latest")
+            from app.services.provider_model_resolver import resolve_provider_model
+            provider = self.API_PROVIDER_MAP.get(agent_id, "mistral")
+            model = await resolve_provider_model(provider)
             messages = [{"role": "user", "content": prompt}]
             response = await api_proxy.chat(model=model, messages=messages, temperature=0.3, max_tokens=4096)
             return {"status": "success", "response": response, "model": model}
