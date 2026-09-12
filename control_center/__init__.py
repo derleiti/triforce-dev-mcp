@@ -1,1 +1,1 @@
-"""TriForce 2.85 Control Center."""
+"""TriForce 2.86 Control Center."""

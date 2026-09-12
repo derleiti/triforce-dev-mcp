@@ -79,3 +79,23 @@ def test_setup_page_has_legacy_import_button():
     text = GUI.read_text()
     assert 'task.task_id == "legacy-import"' in text
     assert 'QPushButton("Alte TriForce-Settings übernehmen")' in text
+
+
+def test_service_status_detects_source_and_package_modes():
+    text = GUI.read_text()
+    assert 'def classify_service_mode' in text
+    assert 'FragmentPath,WorkingDirectory,ExecStart' in text
+    assert 'fragment.startswith("/etc/systemd/system/")' in text
+    assert 'fragment.startswith(("/usr/lib/systemd/system/", "/lib/systemd/system/"))' in text
+    assert 'Modus:' in text
+
+
+def test_standalone_gui_bootstraps_source_config_before_backend_imports():
+    text = GUI.read_text()
+    assert 'def _bootstrap_backend_config_path' in text
+    assert '"--property=FragmentPath,WorkingDirectory"' in text
+    assert 'fragment.startswith("/etc/systemd/system/")' in text
+    assert 'working.startswith("/home/")' in text
+    assert 'os.environ["TRIFORCE_CONFIG_FILE"] = str(Path(working) / "config" / "triforce.env")' in text
+    assert 'os.environ.setdefault("TRIFORCE_PROJECT_ROOT", working)' in text
+    assert text.index('_bootstrap_backend_config_path()') < text.index('from app.config import VERSION, get_settings')

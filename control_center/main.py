@@ -25,6 +25,46 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+
+def _bootstrap_backend_config_path() -> None:
+    """Point the standalone GUI at the config used by the active source unit.
+
+    Nuitka standalone modules must not infer a backend checkout from their own
+    compiled ``__file__`` location. Package mode intentionally falls through to
+    the canonical /etc/triforce/triforce.env resolution in settings_store.
+    """
+    if os.environ.get("TRIFORCE_CONFIG_FILE", "").strip():
+        return
+    try:
+        cp = subprocess.run(
+            [
+                "systemctl", "show", "triforce.service", "--no-pager",
+                "--property=FragmentPath,WorkingDirectory",
+            ],
+            text=True,
+            capture_output=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if cp.returncode != 0:
+        return
+    info: dict[str, str] = {}
+    for line in cp.stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            info[key] = value
+    fragment = info.get("FragmentPath", "")
+    working = info.get("WorkingDirectory", "")
+    source_mode = fragment.startswith("/etc/systemd/system/") or working.startswith("/home/")
+    if source_mode and working:
+        os.environ["TRIFORCE_CONFIG_FILE"] = str(Path(working) / "config" / "triforce.env")
+        os.environ.setdefault("TRIFORCE_PROJECT_ROOT", working)
+
+
+_bootstrap_backend_config_path()
+
 from app.config import VERSION, get_settings
 from app.settings_store import (
     MASKED_SECRET_VALUE, SECRET_ENV_KEYS, ConfigConflict, ConfigSnapshot,
@@ -68,13 +108,27 @@ def run_cmd(args: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
 def service_info() -> dict[str, str]:
     rc, out, err = run_cmd([
         "systemctl", "show", "triforce.service", "--no-pager",
-        "--property=LoadState,ActiveState,SubState,UnitFileState,MainPID,ExecMainStatus",
+        "--property=LoadState,ActiveState,SubState,UnitFileState,MainPID,ExecMainStatus,FragmentPath,WorkingDirectory,ExecStart",
     ])
     result = {"error": err.strip()} if rc else {}
     for line in out.splitlines():
         if "=" in line:
             key, value = line.split("=", 1); result[key] = value
+    result["Mode"] = classify_service_mode(result)
     return result
+
+
+def classify_service_mode(info: dict[str, str]) -> str:
+    fragment = info.get("FragmentPath", "")
+    working = info.get("WorkingDirectory", "")
+    exec_start = info.get("ExecStart", "")
+    if fragment.startswith("/etc/systemd/system/") or working.startswith("/home/"):
+        return "source"
+    if fragment.startswith(("/usr/lib/systemd/system/", "/lib/systemd/system/")) or working == "/opt/triforce":
+        return "package"
+    if "/opt/triforce/" in exec_start:
+        return "package"
+    return "unknown"
 
 
 def api_health() -> dict[str, object]:
@@ -118,7 +172,7 @@ class OverviewPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        title = QLabel("TriForce 2.85 Beta 2")
+        title = QLabel("TriForce Control Center")
         title.setFont(QFont(title.font().family(), 20, 600))
         layout.addWidget(title)
         self.version = QLabel(f"Backend-Code: {VERSION}")
@@ -136,7 +190,7 @@ class OverviewPage(QWidget):
     def set_status(self, service: dict, api: dict):
         active = service.get("ActiveState", "unbekannt")
         enabled = service.get("UnitFileState", "unbekannt")
-        self.service.setText(f"Dienst: {active} · Systemstart: {enabled}")
+        self.service.setText(f"Dienst: {active} · Modus: {service.get('Mode','unknown')} · Systemstart: {enabled}")
         if api.get("ok"):
             self.api.setText(f"API: bereit · {api.get('url')}")
         else:
@@ -404,7 +458,7 @@ class ServicesPage(QWidget):
         self.update_status()
 
     def set_status(self, info: dict):
-        self.status.setText(f"triforce.service: {info.get('ActiveState','unbekannt')} / {info.get('SubState','')} · Autostart: {info.get('UnitFileState','unbekannt')}")
+        self.status.setText(f"triforce.service: {info.get('ActiveState','unbekannt')} / {info.get('SubState','')} · Modus: {info.get('Mode','unknown')} · Autostart: {info.get('UnitFileState','unbekannt')}")
         self.boot.blockSignals(True); self.boot.setChecked(info.get("UnitFileState") == "enabled"); self.boot.blockSignals(False)
         self.desktop.blockSignals(True); self.desktop.setChecked(AUTOSTART_FILE.exists()); self.desktop.blockSignals(False)
 
