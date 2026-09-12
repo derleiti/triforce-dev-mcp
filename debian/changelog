@@ -1,3 +1,13 @@
+triforce-backend (1:2.86.2-7) noble; urgency=medium
+
+  * Models: classify Cohere/Cerebras 401/403 discovery failures as invalid
+    credentials instead of advertising fallback models
+  * Models: add provider discovery backoff and provider status reporting
+  * Federation: make WireGuard proxy socket ordering reproducible in source
+    with regression coverage
+
+ -- Markus Leitermann <admin@ailinux.me>  Sun, 13 Sep 2026 00:14:00 +0200
+
 triforce-backend (1:2.86.2-6) noble; urgency=medium
 
   * Preserve the operator-selected source service across package upgrades
