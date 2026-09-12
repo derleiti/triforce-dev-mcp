@@ -24,3 +24,10 @@ def test_control_center_release_is_package_hygiene_aware():
     assert 'touch -h -d "@$SOURCE_DATE_EPOCH"' in text
     assert "dpkg-deb --root-owner-group --build" in text
     assert "dir-or-file-in-opt" in text
+
+
+def test_control_center_release_scrubs_host_config_environment():
+    text = SCRIPT.read_text()
+    assert text.count('env -u TRIFORCE_CONFIG_FILE -u TRIFORCE_PROJECT_ROOT') >= 3
+    assert 'triforce-control-center: embedded-library' in text
+    assert 'triforce-control-center: unstripped-binary-or-object' in text

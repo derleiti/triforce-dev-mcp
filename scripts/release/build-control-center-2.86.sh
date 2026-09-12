@@ -34,11 +34,13 @@ fi
   'pydantic-settings==2.15.0' \
   'nuitka==4.2.1' ordered-set zstandard patchelf
 
-QT_QPA_PLATFORM=offscreen PYTHONPATH="$ROOT" \
+env -u TRIFORCE_CONFIG_FILE -u TRIFORCE_PROJECT_ROOT \
+  QT_QPA_PLATFORM=offscreen PYTHONPATH="$ROOT" \
   "$VENV/bin/python" "$ROOT/control_center/main.py" --smoke-test
 
 rm -rf "$NUITKA_OUT"
-"$VENV/bin/python" -m nuitka \
+env -u TRIFORCE_CONFIG_FILE -u TRIFORCE_PROJECT_ROOT \
+  "$VENV/bin/python" -m nuitka \
   --mode=standalone \
   --enable-plugin=pyqt6 \
   --include-qt-plugins=platforms,imageformats,iconengines,wayland-decoration-client,wayland-graphics-integration-client,wayland-shell-integration \
@@ -48,7 +50,8 @@ rm -rf "$NUITKA_OUT"
   "$ROOT/control_center/main.py"
 
 test -x "$GUI/triforce-control-center"
-QT_QPA_PLATFORM=offscreen "$GUI/triforce-control-center" --smoke-test
+env -u TRIFORCE_CONFIG_FILE -u TRIFORCE_PROJECT_ROOT \
+  QT_QPA_PLATFORM=offscreen "$GUI/triforce-control-center" --smoke-test
 
 mkdir -p \
   "$PKG/DEBIAN" \
@@ -91,9 +94,12 @@ Description: TriForce 2.86 Control Center
 CONTROL
 
 cat > "$PKG/usr/share/lintian/overrides/triforce-control-center" <<'EOF_LINTIAN'
-# The standalone Nuitka application is intentionally installed below /opt.
-triforce-control-center: dir-or-file-in-opt [opt/triforce-control-center/*]
-triforce-control-center: dir-or-file-in-opt [opt/triforce-control-center/]
+# Intentional self-contained Nuitka/PyQt desktop bundle under /opt.
+triforce-control-center: dir-or-file-in-opt
+# The standalone bundle intentionally carries its Python/Qt runtime libraries.
+triforce-control-center: embedded-library
+# Stripping Nuitka/PyQt bundled objects is not performed post-build because it can invalidate the standalone bundle.
+triforce-control-center: unstripped-binary-or-object
 EOF_LINTIAN
 
 STAMP="$(date -u -d "@$SOURCE_DATE_EPOCH" -R)"
