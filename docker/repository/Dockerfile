@@ -18,6 +18,13 @@ RUN dpkg --add-architecture i386 && \
         procps && \
     rm -rf /var/lib/apt/lists/*
 
+# Debian's classic apt-mirror only requests compressed Packages indexes.
+# Some valid APT repositories (for example Mozilla and Google Artifact Registry)
+# publish only the uncompressed Packages file. Teach apt-mirror to request that
+# file as well so process_index() can consume those repositories normally.
+RUN sed -i '/binary-.*Packages\.gz/ i\            add_url_to_download( $url . $_ . "/binary-" . $arch . "/Packages" );' /usr/bin/apt-mirror && \
+    sed -i '/\/$distribution\/Packages\.gz/ i\        add_url_to_download( $uri . "/$distribution/Packages" );' /usr/bin/apt-mirror
+
 # Create directories
 RUN mkdir -p \
     /var/spool/apt-mirror/mirror \

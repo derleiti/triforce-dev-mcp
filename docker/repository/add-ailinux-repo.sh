@@ -117,7 +117,10 @@ collect_existing_source_uris() {
     local file line uri
     local -a files=()
     [[ -f /etc/apt/sources.list ]] && files+=(/etc/apt/sources.list)
-    while IFS= read -r -d '' file; do files+=("$file"); done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
+    while IFS= read -r -d '' file; do
+        [[ "$file" == "$LIST_PATH" ]] && continue
+        files+=("$file")
+    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
 
     for file in "${files[@]}"; do
         case "$file" in

@@ -18,25 +18,32 @@ set nthreads          50
 set limit_rate        100m
 
 # --- MIRRORED REPOS ---
-deb [arch=amd64,i386,arm64] https://archive.ubuntu.com/ubuntu resolute main restricted universe multiverse
-deb [arch=amd64,i386,amr64] https://archive.ubuntu.com/ubuntu resolute-updates main restricted universe multiverse
-deb [arch=amd64,i386,arm64] https://security.ubuntu.com/ubuntu resolute-security main restricted universe multiverse
-deb [arch=amd64,i386.arm64] https://deb.nodesource.com/node_22.x nodistro main
-deb [arch=amd64,i386,arm64] https://dl.google.com/linux/chrome/deb stable main
-deb [arch=amd64,i386,arm64] https://dl.winehq.org/wine-builds/ubuntu resolute main
-deb [arch=amd64,i386,arm64] https://download.docker.com/linux/ubuntu resolute stable
-deb [arch=amd64,i386,arm64] https://ppa.launchpadcontent.net/cappelikan/ppa/ubuntu resolute main
-deb [arch=amd64,i386,arm64] https://ppa.launchpadcontent.net/kisak/kisak-mesa/ubuntu resolute main
-deb [arch=amd64,i386,arm64] https://ppa.launchpadcontent.net/graphics-drivers/ppa/ubuntu resolute main
-deb [arch=amd64,i386,arm64] https://ppa.launchpadcontent.net/libreoffice/ppa/ubuntu resolute main
-deb [arch=amd64,i386,arm64] https://repo.steampowered.com/steam stable steam
-deb [arch=amd64,i386,arm64] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64 /
-deb [arch=amd64,i386,arm64] https://archive.neon.kde.org/stable resolute main
-deb [arch=amd64,i386,arm64] https://hub.unity3d.com/linux/repos/deb/ stable main
-deb [arch=amd64,i386,arm64] https://packages.microsoft.com/repos/code stable main
-deb [arch=amd64,i386,arm64] https://downloads.cursor.com/aptrepo stable main
-deb [arch=amd64,i386,arm64] https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt stable main
-deb [arch=amd64,i386,arn64] https://persistent.oaistatic.com/codex-app-prod/linux/deb  stable main
+deb-amd64 https://archive.ubuntu.com/ubuntu resolute main restricted universe multiverse
+deb-amd64 https://archive.ubuntu.com/ubuntu resolute-updates main restricted universe multiverse
+deb-amd64 https://security.ubuntu.com/ubuntu resolute-security main restricted universe multiverse
+deb [arch=amd64] https://deb.nodesource.com/node_22.x nodistro main
+deb [arch=amd64] https://deb.nodesource.com/node_20.x nodistro main
+deb [arch=amd64] https://dl.google.com/linux/chrome/deb stable main
+deb-amd64 https://dl.winehq.org/wine-builds/ubuntu resolute main
+deb [arch=amd64] https://download.docker.com/linux/ubuntu resolute stable
+deb [arch=amd64] https://ppa.launchpadcontent.net/cappelikan/ppa/ubuntu resolute main
+deb [arch=amd64] https://ppa.launchpadcontent.net/kisak/kisak-mesa/ubuntu resolute main
+deb [arch=amd64] https://ppa.launchpadcontent.net/graphics-drivers/ppa/ubuntu resolute main
+deb [arch=amd64] https://ppa.launchpadcontent.net/libreoffice/ppa/ubuntu resolute main
+deb-amd64 https://repo.steampowered.com/steam stable steam
+deb-i386 https://repo.steampowered.com/steam stable steam
+deb [arch=amd64] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64 /
+deb [arch=amd64] https://archive.neon.kde.org/stable resolute main
+deb [arch=amd64] https://hub.unity3d.com/linux/repos/deb/ stable main
+deb [arch=amd64] https://packages.microsoft.com/repos/code stable main
+deb [arch=amd64] https://downloads.cursor.com/aptrepo stable main
+deb [arch=amd64] https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt stable main
+deb [arch=amd64] https://downloads.claude.ai/claude-desktop/apt/stable stable main
+deb [arch=amd64] https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main
+deb [arch=amd64] https://packages.mozilla.org/apt mozilla main
+deb [arch=amd64] https://repo.radeon.com/rocm/apt/7.2 noble main
+deb [arch=amd64] https://repo.radeon.com/graphics/7.2/ubuntu noble main
+deb [arch=amd64] https://linux.teamviewer.com/deb stable main
 
 # ============================================================================
 # Cleanup old/removed packages
@@ -45,6 +52,7 @@ clean https://archive.ubuntu.com/ubuntu resolute main restricted universe multiv
 clean https://archive.ubuntu.com/ubuntu resolute-updates main restricted universe multiverse
 clean https://security.ubuntu.com/ubuntu resolute-security main restricted universe multiverse
 clean https://deb.nodesource.com/node_22.x nodistro main
+clean https://deb.nodesource.com/node_20.x nodistro main
 clean https://dl.google.com/linux/chrome/deb stable main
 clean https://dl.winehq.org/wine-builds/ubuntu resolute main
 clean https://download.docker.com/linux/ubuntu resolute stable
@@ -59,4 +67,9 @@ clean https://hub.unity3d.com/linux/repos/deb/ stable main
 clean https://packages.microsoft.com/repos/code stable main
 clean https://downloads.cursor.com/aptrepo stable main
 clean https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt stable main
-clean https://persistent.oaistatic.com/codex-app-prod/linux/deb  stable main
+clean https://downloads.claude.ai/claude-desktop/apt/stable stable main
+clean https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main
+clean https://packages.mozilla.org/apt mozilla main
+clean https://repo.radeon.com/rocm/apt/7.2 noble main
+clean https://repo.radeon.com/graphics/7.2/ubuntu noble main
+clean https://linux.teamviewer.com/deb stable main

@@ -938,8 +938,4 @@ main() {
         exit 1
     fi
 }
-{
-# Sign Repos trigger
-./sign-repos.sh
-}
 main "$@"
