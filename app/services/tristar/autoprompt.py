@@ -13,6 +13,8 @@ import yaml
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Any, Optional
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 import logging
 
 logger = logging.getLogger("ailinux.tristar.autoprompt")
@@ -135,7 +137,7 @@ class AutoPromptManager:
 
     def __init__(
         self,
-        base_dir: str = "/var/tristar/autoprompts",
+        base_dir: str | Path = TRISTAR_DIR / "autoprompts",
     ):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)

@@ -28,7 +28,7 @@ import base64
 import json
 from pathlib import Path
 
-from app.paths import LOG_DIR
+from app.paths import LOG_DIR, TRISTAR_DIR
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional, Set, Tuple
 
@@ -86,7 +86,7 @@ MCP_AUTH_PASS = _settings.mcp_oauth_pass or os.getenv("MCP_OAUTH_PASS", "")
 MCP_ALLOW_UNAUTHENTICATED_LOCAL = _settings.mcp_allow_unauthenticated_local
 
 # Token Storage (file-based for multi-worker support)
-_AUTH_DIR = Path("/var/tristar/auth")
+_AUTH_DIR = TRISTAR_DIR / "auth"
 _TOKEN_FILE = _AUTH_DIR / "tokens.json"
 _AUTH_CODES_FILE = _AUTH_DIR / "auth_codes.json"
 _ACTIVE_TOKENS: Set[str] = set()

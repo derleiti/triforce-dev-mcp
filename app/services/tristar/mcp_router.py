@@ -15,6 +15,8 @@ import json
 import asyncio
 import logging
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
@@ -93,7 +95,7 @@ class PromptManager:
     Speichert Prompts in /var/tristar/prompts/ als JSON-Dateien.
     """
 
-    def __init__(self, prompt_dir: str = "/var/tristar/prompts"):
+    def __init__(self, prompt_dir: str | Path = TRISTAR_DIR / "prompts"):
         self.prompt_dir = Path(prompt_dir)
         self.agents_dir = self.prompt_dir / "agents"
         self._agents: Dict[str, AgentConfig] = {}

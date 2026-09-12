@@ -13,6 +13,8 @@ import json
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Dict, List, Any, Optional, Set
 from enum import Enum
 import logging
@@ -64,7 +66,7 @@ class ChainLogger:
 
     def __init__(
         self,
-        log_dir: str = "/var/tristar/logs",
+        log_dir: str | Path = TRISTAR_DIR / "logs",
         buffer_size: int = 1000,
     ):
         self.log_dir = Path(log_dir)

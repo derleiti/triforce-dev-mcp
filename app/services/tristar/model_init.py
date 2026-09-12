@@ -27,6 +27,8 @@ from enum import Enum
 import aiofiles
 import logging
 
+from app.paths import TRISTAR_DIR
+
 logger = logging.getLogger("ailinux.tristar.model_init")
 
 
@@ -438,7 +440,7 @@ class ModelInitService:
     - Health Monitoring
     """
 
-    def __init__(self, data_dir: str = "/var/tristar/models"):
+    def __init__(self, data_dir: str | Path = TRISTAR_DIR / "models"):
         self.data_dir = Path(data_dir)
         self.models: Dict[str, ModelConfig] = {}
         self._lock = asyncio.Lock()

@@ -19,6 +19,8 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Any, Optional
 from enum import Enum
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 import json
 import logging
 
@@ -123,7 +125,7 @@ class ChainEngine:
 
     def __init__(
         self,
-        workspace_base: str = "/var/tristar/projects",
+        workspace_base: str | Path = TRISTAR_DIR / "projects",
         default_lead: str = "gemini",
         default_max_cycles: int = 10,
     ):

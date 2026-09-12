@@ -28,6 +28,8 @@ from collections import defaultdict
 import aiofiles
 import logging
 
+from app.paths import TRISTAR_DIR
+
 logger = logging.getLogger("ailinux.tristar.memory_controller")
 
 # ============================================================================
@@ -256,7 +258,7 @@ class MemoryMCPController:
         self,
         num_shards: int = 12,
         max_entries_per_shard: int = 10000,
-        data_dir: str = "/var/tristar/memory",
+        data_dir: str | Path = TRISTAR_DIR / "memory",
         cleanup_interval: int = 300,  # 5 Minuten
     ):
         self.num_shards = num_shards

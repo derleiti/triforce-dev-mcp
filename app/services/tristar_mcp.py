@@ -35,13 +35,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.paths import LOG_DIR
+from app.paths import LOG_DIR, TRISTAR_DIR
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ailinux.tristar_mcp")
 
 # TriStar directories
-TRISTAR_BASE = Path("/var/tristar")
+TRISTAR_BASE = TRISTAR_DIR
 TRISTAR_PROMPTS = TRISTAR_BASE / "prompts"
 TRISTAR_LOGS = TRISTAR_BASE / "logs"
 TRISTAR_MEMORY = TRISTAR_BASE / "memory"

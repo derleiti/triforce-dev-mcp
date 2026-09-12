@@ -14,6 +14,7 @@ import base64
 import hashlib
 from pathlib import Path
 
+from app.paths import TRISTAR_DIR
 from app.settings_store import resolve_config_path, save_updates
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field, asdict
@@ -22,7 +23,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # Base paths
-TRISTAR_BASE = Path(os.getenv("TRISTAR_BASE", "/var/tristar"))
+TRISTAR_BASE = TRISTAR_DIR
 SETTINGS_FILE = TRISTAR_BASE / "settings" / "global_settings.json"
 SECRETS_FILE = TRISTAR_BASE / "settings" / ".secrets.json"  # Separate file for API keys
 

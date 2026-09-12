@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Dict, List, Any, Optional
 import logging
 import aiofiles
@@ -139,7 +141,7 @@ class ChainMetaManager:
 
     def __init__(
         self,
-        base_dir: str = "/var/tristar",
+        base_dir: str | Path = TRISTAR_DIR,
     ):
         self.base_dir = Path(base_dir)
         self.projects_dir = self.base_dir / "projects"
