@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
 
+from app.paths import TRISTAR_DIR
+
 logger = logging.getLogger("ailinux.support")
 
 # Anthropic API Config
@@ -16,7 +18,7 @@ ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 SUPPORT_MODEL = "claude-opus-4-5-20251101"  # Neuestes & stärkstes
 
 # Support-Prompt laden
-SUPPORT_PROMPT_PATH = Path("/var/tristar/prompts/support-agent.txt")
+SUPPORT_PROMPT_PATH = TRISTAR_DIR / "prompts/support-agent.txt"
 
 
 class SupportService:

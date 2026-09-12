@@ -37,13 +37,15 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 
 logger = logging.getLogger("ailinux.swarm_broadcast")
 
-SWARM_DIR = Path("/var/tristar/swarm")
+SWARM_DIR = TRISTAR_DIR / "swarm"
 SWARM_DIR.mkdir(parents=True, exist_ok=True)
 
 

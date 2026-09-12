@@ -21,6 +21,8 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Any, Dict, List
 
 logger = logging.getLogger("ailinux.mcp.devtools")
@@ -32,7 +34,7 @@ PROJECT_ROOT = Path(
 # Dev tools are intentionally usable for repositories other than TriForce.  The
 # defaults cover the normal local workspaces without exposing arbitrary system
 # paths. Operators can replace/extend them with a colon-separated list.
-_DEFAULT_DEV_ROOTS = (PROJECT_ROOT.parent, Path("/tmp"), Path("/var/tristar/projects"))
+_DEFAULT_DEV_ROOTS = (PROJECT_ROOT.parent, Path("/tmp"), TRISTAR_DIR / "projects")
 _SOURCE_SUFFIXES = {
     ".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java",
     ".js", ".jsx", ".kt", ".kts", ".php", ".py", ".pyi", ".rb", ".rs",

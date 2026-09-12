@@ -28,6 +28,8 @@ import logging
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from collections import OrderedDict
 from functools import lru_cache
 import threading
@@ -35,9 +37,9 @@ import threading
 logger = logging.getLogger(__name__)
 
 # Configuration
-INDEX_DIR = Path("/var/tristar/code_index")
-CACHE_DIR = Path("/var/tristar/code_cache")
-CHECKPOINT_DIR = Path("/var/tristar/checkpoints")
+INDEX_DIR = TRISTAR_DIR / "code_index"
+CACHE_DIR = TRISTAR_DIR / "code_cache"
+CHECKPOINT_DIR = TRISTAR_DIR / "checkpoints"
 INDEX_FILE = INDEX_DIR / "active_files.json"
 
 # Limits

@@ -18,6 +18,8 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Any, Iterable
 
 from .shared_authority import (
@@ -40,7 +42,7 @@ _ENDPOINT_RE = re.compile(r"^ep_[a-zA-Z0-9_-]{12,64}$")
 _RESERVED_HANDLES = {"admin", "root", "system", "support", "broadcast", "all", "everyone"}
 _DEFAULT_TTL = max(30, min(int(os.environ.get("SHARED_NOTIFY_PRESENCE_TTL", "120")), 3600))
 _MAX_HOPS = max(2, min(int(os.environ.get("SHARED_NOTIFY_MAX_HOPS", "8")), 32))
-_DB_PATH = Path(os.environ.get("SHARED_NOTIFY_DB", "/var/tristar/shared-notify/shared_notify.db"))
+_DB_PATH = Path(os.environ.get("SHARED_NOTIFY_DB", str(TRISTAR_DIR / "shared-notify/shared_notify.db")))
 
 
 def _now() -> int:

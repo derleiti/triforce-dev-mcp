@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("ailinux.auto_evolve")
@@ -197,8 +199,8 @@ Antworte im JSON-Format:
 
     def __init__(self, backend_path: str = "/home/zombie/triforce"):
         self.backend_path = Path(backend_path)
-        self.prompts_path = Path("/var/tristar/prompts")
-        self.evolution_log = Path("/var/tristar/logs/evolution")
+        self.prompts_path = TRISTAR_DIR / "prompts"
+        self.evolution_log = TRISTAR_DIR / "logs/evolution"
         self.evolution_log.mkdir(parents=True, exist_ok=True)
 
         # Service imports (lazy)

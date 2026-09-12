@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger("ailinux.group_chat")
@@ -41,7 +43,7 @@ def _configured_group_chat_dir() -> Path:
     explicit_dir = os.getenv("TRISTAR_GROUP_CHAT_DIR")
     if explicit_dir:
         return Path(explicit_dir)
-    return Path(os.getenv("TRISTAR_STATE_DIR", "/var/tristar")) / "group_chat"
+    return TRISTAR_DIR / "group_chat"
 
 
 GROUP_CHAT_DIR = _configured_group_chat_dir()

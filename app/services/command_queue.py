@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 
 logger = logging.getLogger("ailinux.command_queue")
 
@@ -137,20 +140,18 @@ class CommandQueue:
     - Research Distribution
     """
 
-    def __init__(self, max_queue_size: int = 1000, persistence_file: str = "/var/tristar/queue/state.json"):
+    def __init__(self, max_queue_size: int = 1000, persistence_file: str | Path = TRISTAR_DIR / "queue/state.json"):
         self._queue: List[Command] = []  # Priority heap
         self._commands: Dict[str, Command] = {}  # ID -> Command
         self._agents: Dict[str, AgentStatus] = {}
         self._agent_queues: Dict[str, List[Command]] = defaultdict(list)
         self._max_queue_size = max_queue_size
-        self._persistence_file = persistence_file
+        self._persistence_file = str(persistence_file)
         self._lock = asyncio.Lock()
         self._workers: Dict[str, asyncio.Task] = {}
         self._running = False
 
         # Ensure directory exists
-        import os
-        from pathlib import Path
         Path(self._persistence_file).parent.mkdir(parents=True, exist_ok=True)
 
         # Capabilities mapping

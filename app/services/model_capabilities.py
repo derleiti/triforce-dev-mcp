@@ -23,13 +23,15 @@ import os
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+
+from app.paths import TRISTAR_DIR
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 import httpx
 
 logger = logging.getLogger("ailinux.model_capabilities")
 
-STORE_PATH = Path(os.getenv("CAPABILITY_STORE_PATH", "/var/tristar/model_capabilities.json"))
+STORE_PATH = Path(os.getenv("CAPABILITY_STORE_PATH", str(TRISTAR_DIR / "model_capabilities.json")))
 STORE_VERSION = 1
 
 # ── Capability vocabulary ────────────────────────────────────────────────────

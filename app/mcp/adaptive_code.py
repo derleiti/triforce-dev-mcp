@@ -20,9 +20,11 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.paths import TRISTAR_DIR
+
 logger = logging.getLogger(__name__)
 
-INDEX_DIR = Path("/var/tristar/code_index")
+INDEX_DIR = TRISTAR_DIR / "code_index"
 INDEX_FILE = INDEX_DIR / "active_files.json"
 INDEX_TTL = 7200  # 2 hours
 

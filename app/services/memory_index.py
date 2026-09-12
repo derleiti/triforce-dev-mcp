@@ -17,10 +17,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
+from app.paths import TRISTAR_DIR
+
 logger = logging.getLogger("ailinux.memory_index")
 
 # Index-Datei Pfad
-INDEX_PATH = Path("/var/tristar/memory_index.json")
+INDEX_PATH = TRISTAR_DIR / "memory_index.json"
 
 
 @dataclass

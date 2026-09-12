@@ -18,6 +18,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.paths import TRISTAR_DIR
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -282,8 +284,7 @@ async def get_command_status(command_id: str) -> Dict[str, Any]:
             }
 
     # Check persisted files
-    from pathlib import Path
-    queue_file = Path("/var/tristar/queue") / f"{command_id}.json"
+    queue_file = TRISTAR_DIR / "queue" / f"{command_id}.json"
     if queue_file.exists():
         import json
         data = json.loads(queue_file.read_text())

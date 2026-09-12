@@ -22,10 +22,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from app.paths import TRISTAR_DIR
+
 logger = logging.getLogger("ailinux.mesh_coordinator")
 
 # TriForce paths
-TRIFORCE_BASE = Path("/var/tristar")
+TRIFORCE_BASE = TRISTAR_DIR
 QUEUE_DIR = TRIFORCE_BASE / "queue"
 MEMORY_DIR = TRIFORCE_BASE / "memory"
 PROMPTS_DIR = TRIFORCE_BASE / "prompts"
