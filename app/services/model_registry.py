@@ -5,6 +5,7 @@ import logging
 import json
 import re
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
@@ -232,6 +233,8 @@ class ModelRegistry:
         self._refresh_interval: float = 3600.0
         self._sd_discovery_disabled: bool = False
         self._sd_discovery_warned: bool = False
+        self._provider_status: Dict[str, Dict[str, object]] = {}
+        self._provider_retry_until: Dict[str, float] = {}
         # Normalize long-lived aliases (historic spellings) to a single canonical ID
         canonical = "gpt-oss:cloud/120b"
         aliases = [
@@ -272,6 +275,46 @@ class ModelRegistry:
     def _cached_provider(self, provider: str) -> List[ModelInfo]:
         """Keep the last API-verified provider catalog during transient outages."""
         return [m for m in (self._cache or []) if m.provider == provider]
+
+    def _set_provider_status(
+        self,
+        provider: str,
+        status: str,
+        *,
+        error: str | None = None,
+        retry_seconds: float = 0.0,
+    ) -> None:
+        """Track discovery health without exposing credentials or raw response bodies."""
+        previous = self._provider_status.get(provider, {}).get("status")
+        retry_seconds = max(0.0, float(retry_seconds))
+        retry_at = time.time() + retry_seconds if retry_seconds else None
+        self._provider_status[provider] = {
+            "status": status,
+            "error": error,
+            "retry_after": retry_at,
+        }
+        if retry_seconds:
+            self._provider_retry_until[provider] = time.monotonic() + retry_seconds
+        else:
+            self._provider_retry_until.pop(provider, None)
+        if previous != status:
+            if status in {"invalid_credentials", "unavailable"}:
+                logger.warning("Provider %s discovery status: %s", provider, status)
+            else:
+                logger.info("Provider %s discovery status: %s", provider, status)
+
+    def _provider_in_backoff(self, provider: str) -> bool:
+        until = self._provider_retry_until.get(provider)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            self._provider_retry_until.pop(provider, None)
+            return False
+        return True
+
+    def provider_status(self) -> Dict[str, Dict[str, object]]:
+        """Return a copy of current provider discovery health."""
+        return {name: dict(state) for name, state in self._provider_status.items()}
 
     async def _refresh_loop(self) -> None:
         while True:
@@ -449,6 +492,7 @@ class ModelRegistry:
             "total": len(serialized),
             "by_provider": by_provider,
             "categories": categories,
+            "provider_status": self.provider_status(),
         }
 
     async def get_model(self, model_id: str) -> Optional[ModelInfo]:
@@ -926,7 +970,13 @@ class ModelRegistry:
         """Discover models from Cerebras API (OpenAI-compatible, 20x faster than GPU)."""
         settings = self._settings
         if not settings.cerebras_api_key:
+            self._set_provider_status("cerebras", "not_configured")
             return []
+        if self._provider_in_backoff("cerebras"):
+            state = self._provider_status.get("cerebras", {})
+            if state.get("status") == "invalid_credentials":
+                return []
+            return self._cached_provider("cerebras") or self._cerebras_fallback_models()
 
         models: List[ModelInfo] = []
         try:
@@ -938,11 +988,15 @@ class ModelRegistry:
                 response.raise_for_status()
                 data = response.json()
         except httpx.RequestError as exc:
-            logger.warning("Failed to discover Cerebras models: %s", exc)
-            return self._cerebras_fallback_models()
+            self._set_provider_status("cerebras", "unavailable", error=exc.__class__.__name__, retry_seconds=300)
+            return self._cached_provider("cerebras") or self._cerebras_fallback_models()
         except httpx.HTTPStatusError as exc:
-            logger.warning("Cerebras API returned HTTP %s: %s", exc.response.status_code, safe_http_error(exc))
-            return self._cerebras_fallback_models()
+            if exc.response.status_code in {401, 403}:
+                self._set_provider_status("cerebras", "invalid_credentials", error=f"HTTP {exc.response.status_code}", retry_seconds=3600)
+                return []
+            self._set_provider_status("cerebras", "unavailable", error=f"HTTP {exc.response.status_code}", retry_seconds=300)
+            logger.warning("Cerebras discovery failed: %s", safe_http_error(exc))
+            return self._cached_provider("cerebras") or self._cerebras_fallback_models()
 
         for model in data.get("data", []):
             model_id = model.get("id", "")
@@ -959,6 +1013,7 @@ class ModelRegistry:
                 api_method=api_method
             ))
 
+        self._set_provider_status("cerebras", "healthy")
         if models:
             logger.info("Discovered %d Cerebras models from API", len(models))
             return models
@@ -1077,7 +1132,13 @@ class ModelRegistry:
         """Discover models from Cohere API (Best RAG & Embeddings)."""
         settings = self._settings
         if not settings.cohere_api_key:
+            self._set_provider_status("cohere", "not_configured")
             return []
+        if self._provider_in_backoff("cohere"):
+            state = self._provider_status.get("cohere", {})
+            if state.get("status") == "invalid_credentials":
+                return []
+            return self._cached_provider("cohere") or self._cohere_fallback_models()
 
         models: List[ModelInfo] = []
         try:
@@ -1089,11 +1150,15 @@ class ModelRegistry:
                 response.raise_for_status()
                 data = response.json()
         except httpx.RequestError as exc:
-            logger.warning("Failed to discover Cohere models: %s", exc)
-            return self._cohere_fallback_models()
+            self._set_provider_status("cohere", "unavailable", error=exc.__class__.__name__, retry_seconds=300)
+            return self._cached_provider("cohere") or self._cohere_fallback_models()
         except httpx.HTTPStatusError as exc:
-            logger.warning("Cohere API returned HTTP %s: %s", exc.response.status_code, safe_http_error(exc))
-            return self._cohere_fallback_models()
+            if exc.response.status_code in {401, 403}:
+                self._set_provider_status("cohere", "invalid_credentials", error=f"HTTP {exc.response.status_code}", retry_seconds=3600)
+                return []
+            self._set_provider_status("cohere", "unavailable", error=f"HTTP {exc.response.status_code}", retry_seconds=300)
+            logger.warning("Cohere discovery failed: %s", safe_http_error(exc))
+            return self._cached_provider("cohere") or self._cohere_fallback_models()
 
         for model in data.get("models", []):
             model_id = model.get("name", "")
@@ -1127,6 +1192,7 @@ class ModelRegistry:
                 roles=roles
             ))
 
+        self._set_provider_status("cohere", "healthy")
         if models:
             logger.info("Discovered %d Cohere models from API", len(models))
             return models
