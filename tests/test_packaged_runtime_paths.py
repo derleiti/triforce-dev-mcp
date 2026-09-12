@@ -110,10 +110,17 @@ def test_debian_package_preserves_operator_selected_source_service() -> None:
     assert "/home/zombie/triforce/scripts/start-triforce.sh" in preinst
     assert "source-service.backup" in preinst
     assert "restore-source-service" in preinst
-    assert "Restored operator-selected TriForce source service" in postinst
+    assert "Restored operator-selected TriForce source service state" in postinst
     assert "systemctl restart triforce.service" not in postinst
-    assert "systemctl start triforce.service" not in postinst
-    assert "systemctl enable triforce.service" not in postinst
+    assert 'RUNNING_MARKER="$MIGRATION_DIR/source-service.was-running"' in preinst
+    assert 'ENABLED_MARKER="$MIGRATION_DIR/source-service.was-enabled"' in preinst
+    assert "systemctl is-active --quiet triforce.service" in preinst
+    assert "systemctl is-enabled --quiet triforce.service" in preinst
+    assert '[ -f "$RUNNING_MARKER" ] && ! systemctl is-active --quiet triforce.service' in postinst
+    assert '[ -f "$ENABLED_MARKER" ]' in postinst
+    assert "systemctl start triforce.service" in postinst
+    assert "systemctl enable triforce.service" in postinst
+    assert postinst.index('install -m 0644 "$BACKUP_UNIT" "$LOCAL_UNIT"') < postinst.index('/usr/lib/triforce/triforce-admin-helper runtime-init')
     assert "Skipping debhelper systemd autoscripts" in rules
     assert "dh_installsystemd --no-start" not in rules
     assert 'MODE_MARKER="$MODE_MARKER_DIR/source-mode.enabled"' in installer

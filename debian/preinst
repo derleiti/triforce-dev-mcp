@@ -5,6 +5,8 @@ LOCAL_UNIT=/etc/systemd/system/triforce.service
 MIGRATION_DIR=/var/lib/triforce/package-runtime/migration
 BACKUP_UNIT="$MIGRATION_DIR/source-service.backup"
 MARKER="$MIGRATION_DIR/restore-source-service"
+RUNNING_MARKER="$MIGRATION_DIR/source-service.was-running"
+ENABLED_MARKER="$MIGRATION_DIR/source-service.was-enabled"
 
 # Migration from legacy packages that owned /etc/systemd/system/triforce.service.
 # If the operator-selected source checkout is active, dpkg may remove that old
@@ -16,6 +18,15 @@ if [ -f "$LOCAL_UNIT" ]; then
         cp -a "$LOCAL_UNIT" "$BACKUP_UNIT"
         : > "$MARKER"
         chmod 0600 "$MARKER"
+        rm -f "$RUNNING_MARKER" "$ENABLED_MARKER"
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet triforce.service; then
+            : > "$RUNNING_MARKER"
+            chmod 0600 "$RUNNING_MARKER"
+        fi
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet triforce.service; then
+            : > "$ENABLED_MARKER"
+            chmod 0600 "$ENABLED_MARKER"
+        fi
         echo "Preserving operator-selected TriForce source service across package upgrade."
     fi
 fi

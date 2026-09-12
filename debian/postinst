@@ -10,8 +10,38 @@ REQ_HASH="$PACKAGE_STATE/.requirements.sha256"
 MIGRATION_DIR="$PACKAGE_STATE/migration"
 BACKUP_UNIT="$MIGRATION_DIR/source-service.backup"
 RESTORE_MARKER="$MIGRATION_DIR/restore-source-service"
+RUNNING_MARKER="$MIGRATION_DIR/source-service.was-running"
+ENABLED_MARKER="$MIGRATION_DIR/source-service.was-enabled"
 LOCAL_UNIT=/etc/systemd/system/triforce.service
 SOURCE_MODE_MARKER=/etc/triforce/source-mode.enabled
+
+# Legacy 2.86.0 packages stopped and disabled triforce.service unconditionally
+# from their prerm during upgrades. Restore an operator-selected source unit and
+# only the runtime state that was explicitly active/enabled before that prerm.
+# This runs before runtime-init so the helper sees source mode and cannot take
+# ownership of source-managed configuration/state trees during migration.
+if [ -f "$RESTORE_MARKER" ] && [ -f "$BACKUP_UNIT" ]; then
+    install -m 0644 "$BACKUP_UNIT" "$LOCAL_UNIT"
+    [ -d /etc/triforce ] || install -d -m 0755 /etc/triforce
+    printf 'source
+' > "$SOURCE_MODE_MARKER"
+    chmod 0644 "$SOURCE_MODE_MARKER"
+    systemctl daemon-reload || true
+
+    if [ -f "$ENABLED_MARKER" ]; then
+        if ! systemctl enable triforce.service >/dev/null 2>&1; then
+            echo "WARNING: could not restore enabled state for TriForce source service" >&2
+        fi
+    fi
+    if [ -f "$RUNNING_MARKER" ] && ! systemctl is-active --quiet triforce.service; then
+        if ! systemctl start triforce.service; then
+            echo "WARNING: could not restore running state for TriForce source service" >&2
+        fi
+    fi
+
+    rm -f "$RESTORE_MARKER" "$RUNNING_MARKER" "$ENABLED_MARKER"
+    echo "Restored operator-selected TriForce source service state."
+fi
 
 /usr/lib/triforce/triforce-admin-helper runtime-init
 /usr/lib/triforce/triforce-admin-helper config-init
@@ -35,21 +65,9 @@ if [ "$new_hash" != "$old_hash" ] || ! "$VENV/bin/python" -m pip check >/dev/nul
     chmod 0640 "$REQ_HASH"
 fi
 
-# Restore a source-mode unit that a legacy package used to own under /etc.
-# New packages never own or overwrite /etc/systemd/system/triforce.service.
-if [ -f "$RESTORE_MARKER" ] && [ -f "$BACKUP_UNIT" ]; then
-    install -m 0644 "$BACKUP_UNIT" "$LOCAL_UNIT"
-    [ -d /etc/triforce ] || install -d -m 0755 /etc/triforce
-    printf 'source\n' > "$SOURCE_MODE_MARKER"
-    chmod 0644 "$SOURCE_MODE_MARKER"
-    rm -f "$RESTORE_MARKER"
-    echo "Restored operator-selected TriForce source service."
-fi
-
 systemctl daemon-reload || true
 
-# Intentionally do not start, stop, restart, enable, disable, or switch the
-# service here. Package installation updates files only. Runtime mode is an
-# explicit operator decision via scripts/install-service.sh.
+# Normal package upgrades are file-only. The conditional start/enable above is
+# migration repair only and is gated by state captured before a legacy prerm.
 #DEBHELPER#
 exit 0

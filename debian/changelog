@@ -1,3 +1,12 @@
+triforce-backend (1:2.86.2-8) noble; urgency=medium
+
+  * Packaging: preserve source-service running and enabled state across legacy
+    2.86.0 upgrades whose old prerm stopped and disabled the service
+  * Packaging: restore source mode before runtime/config initialization so
+    package migration cannot take ownership of source-managed state
+
+ -- Markus Leitermann <admin@ailinux.me>  Sun, 13 Sep 2026 00:20:00 +0200
+
 triforce-backend (1:2.86.2-7) noble; urgency=medium
 
   * Models: classify Cohere/Cerebras 401/403 discovery failures as invalid

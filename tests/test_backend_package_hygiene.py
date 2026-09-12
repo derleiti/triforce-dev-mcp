@@ -116,3 +116,15 @@ def test_package_normalizes_python_modes_and_drops_historical_repair_copy():
     assert "chmod 0755" in rules
     assert "model_registry.py_20260410_fix" in rules
     assert "forbidden historical repair copy" in guard
+
+
+def test_legacy_upgrade_state_restore_is_strictly_marker_gated():
+    preinst = Path("debian/preinst").read_text()
+    postinst = Path("debian/postinst").read_text()
+    assert "source-service.was-running" in preinst
+    assert "source-service.was-enabled" in preinst
+    assert 'if [ -f "$ENABLED_MARKER" ]; then' in postinst
+    assert 'if [ -f "$RUNNING_MARKER" ] && ! systemctl is-active --quiet triforce.service; then' in postinst
+    assert postinst.count("systemctl start triforce.service") == 1
+    assert postinst.count("systemctl enable triforce.service") == 1
+    assert "systemctl restart triforce.service" not in postinst
