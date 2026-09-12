@@ -4,24 +4,51 @@
 
 override_dh_auto_install:
 	install -d $(CURDIR)/debian/triforce-backend/opt/triforce
-	# Copy app code
-	cp -r app $(CURDIR)/debian/triforce-backend/opt/triforce/
-	cp -r scripts $(CURDIR)/debian/triforce-backend/opt/triforce/
-	cp -r config $(CURDIR)/debian/triforce-backend/opt/triforce/
+	install -d $(CURDIR)/debian/triforce-backend/usr/lib/triforce
+	install -d $(CURDIR)/debian/triforce-backend/usr/lib/systemd/system
+	install -d $(CURDIR)/debian/triforce-backend/usr/share/triforce/systemd
+	# Source-bundle payload. Runtime state stays outside /opt.
+	cp -a app $(CURDIR)/debian/triforce-backend/opt/triforce/
+	# Normalize Python source modes in the package only: imported modules are
+	# data files, while files with an actual shebang remain executable.
+	find $(CURDIR)/debian/triforce-backend/opt/triforce/app -type f -name '*.py' -exec chmod 0644 {} +
+	find $(CURDIR)/debian/triforce-backend/opt/triforce/app -type f -name '*.py' -exec sh -c 'for f do head -c 2 "$$f" | grep -q "^#!" && chmod 0755 "$$f" || true; done' sh {} +
+	# Historical repair copies are not runtime payload.
+	rm -f $(CURDIR)/debian/triforce-backend/opt/triforce/app/services/model_registry.py_20260410_fix
+	install -d $(CURDIR)/debian/triforce-backend/opt/triforce/scripts
+	install -m 0755 scripts/start-triforce.sh $(CURDIR)/debian/triforce-backend/opt/triforce/scripts/start-triforce.sh
+	# Only immutable config templates belong in the package payload.
+	install -d $(CURDIR)/debian/triforce-backend/opt/triforce/config
+	install -m 0644 config/triforce.env.example $(CURDIR)/debian/triforce-backend/opt/triforce/config/triforce.env.example
 	cp requirements.txt $(CURDIR)/debian/triforce-backend/opt/triforce/
 	cp VERSION $(CURDIR)/debian/triforce-backend/opt/triforce/
-	# Systemd service
-	install -d $(CURDIR)/debian/triforce-backend/etc/systemd/system
-	install -m 644 debian/triforce-backend.service $(CURDIR)/debian/triforce-backend/etc/systemd/system/triforce.service
+	install -m 0755 packaging/triforce-admin-helper.py $(CURDIR)/debian/triforce-backend/usr/lib/triforce/triforce-admin-helper
+	install -m 0644 packaging/systemd/triforce-source-bundle.service $(CURDIR)/debian/triforce-backend/usr/lib/systemd/system/triforce.service
+	install -m 0644 packaging/systemd/triforce-source-bundle.service $(CURDIR)/debian/triforce-backend/usr/share/triforce/systemd/triforce.service
+	# Never ship machine-local caches, logs, backups or host-bound symlinks.
+	find $(CURDIR)/debian/triforce-backend/opt/triforce -type d \
+		\( -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ruff_cache \
+		-o -name .cache -o -name .bun -o -name .local -o -name .claude \) \
+		-prune -exec rm -rf {} + || true
+	find $(CURDIR)/debian/triforce-backend/opt/triforce -type f \
+		\( -name '*.pyc' -o -name '*.pyo' -o -name '*.log' -o -name '*~' \
+		-o -name '*.orig' -o -name '*.bak' -o -name '*.bak-*' -o -name '*.last-good' \
+		-o -name '*.before-*' -o -name '*#' \) -delete || true
+	find $(CURDIR)/debian/triforce-backend/opt/triforce -type l \
+		\( -lname '/home/*' -o -lname '/root/*' \) -delete || true
+	python3 packaging/verify-backend-staging.py $(CURDIR)/debian/triforce-backend
 
 override_dh_auto_build:
-	@echo "No build needed"
+	@echo "No native build needed: shipping audited Python source bundle"
 
 override_dh_auto_test:
-	@echo "Skipping tests"
+	@echo "Tests are run before package build by the release pipeline"
 
 override_dh_shlibdeps:
-	@echo "No shared libs"
+	@echo "No shared-library payload"
 
 override_dh_strip:
 	@echo "No stripping"
+
+override_dh_installsystemd:
+	@echo "Skipping debhelper systemd autoscripts; runtime mode is operator-managed"

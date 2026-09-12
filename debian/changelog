@@ -1,3 +1,38 @@
+triforce-backend (1:2.86.2-6) noble; urgency=medium
+
+  * Preserve the operator-selected source service across package upgrades
+  * Stop Debian maintainer scripts from auto-starting or restarting TriForce
+  * Migrate legacy package-owned /etc systemd units without changing
+    runtime mode
+  * Record explicit source mode in /etc/triforce/source-mode.enabled
+  * Keep package/source mode switching exclusively in install-service.sh
+  * Packaging: exclude live secrets, agent state, caches and host symlinks
+  * Packaging: use /etc/triforce as the packaged runtime config directory
+  * Packaging: preserve source-owned config/state/log permissions on package
+    upgrades
+  * Packaging: isolate package metadata below /var/lib/triforce/package-runtime
+  * Packaging: install tmpfiles policy for package runtime directories
+  * Packaging: rotate TriForce log files with a 14-day compressed retention
+    policy
+  * Runtime: route TriStar mutable state through the canonical package state
+    path
+
+  * Packaging: align backend runtime version metadata with 2.86.2
+  * Packaging: keep a canonical immutable service template for safe repair
+  * Control Center: make the window heading release-neutral
+ -- Markus Leitermann <admin@ailinux.me>  Sat, 12 Sep 2026 18:15:00 +0200
+
+triforce-backend (1:2.86.1-1) noble; urgency=medium
+
+  * Packaging: separate package and source service modes cleanly
+  * Packaging: install package unit under /usr/lib/systemd/system
+  * Packaging: run packaged backend as dedicated triforce service user
+  * Packaging: keep mutable state and logs outside /opt/triforce
+  * Packaging: resync Python dependencies when requirements change
+  * Packaging: preserve explicit source-mode /etc systemd override on upgrade
+
+ -- Markus Leitermann <admin@ailinux.me>  Sat, 12 Sep 2026 17:46:00 +0200
+
 triforce-backend (2.86.0-1) noble; urgency=medium
 
   * Version 2.86.0 Release

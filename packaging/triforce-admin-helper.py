@@ -1,4 +1,4 @@
-#!/opt/triforce/runtime/bin/python
+#!/usr/bin/python3
 """Narrow privileged helper for TriForce Control Center.
 
 Only fixed actions are accepted. There is no arbitrary command, unit name,
@@ -23,7 +23,7 @@ ETC_DIR = Path("/etc/triforce")
 CONFIG = ETC_DIR / "triforce.env"
 STATE_DIR = Path("/var/lib/triforce")
 LOG_DIR = Path("/var/log/triforce")
-UNIT_SOURCE = INSTALL_ROOT / "packaging/systemd/triforce.service"
+UNIT_SOURCE = Path("/usr/share/triforce/systemd/triforce.service")
 UNIT_DEST = Path("/usr/lib/systemd/system/triforce.service")
 SERVICE = "triforce.service"
 SETUP_RUNNER = Path("/usr/lib/triforce/triforce-setup-runner")
@@ -110,6 +110,21 @@ def runtime_init() -> None:
         pwd.getpwnam("triforce")
     except KeyError:
         run_fixed("/usr/sbin/useradd", "--system", "--home", str(STATE_DIR), "--shell", "/usr/sbin/nologin", "triforce")
+
+    local_unit = Path("/etc/systemd/system/triforce.service")
+    source_mode = local_unit.is_file() or local_unit.is_symlink()
+    if source_mode:
+        # Coexistence mode: package upgrades must not take ownership of
+        # operator-managed config, state, or log trees.
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        ETC_DIR.mkdir(parents=True, exist_ok=True)
+        package_runtime = STATE_DIR / "package-runtime"
+        package_runtime.mkdir(parents=True, exist_ok=True)
+        os.chmod(package_runtime, 0o750)
+        shutil.chown(package_runtime, user="triforce", group="triforce")
+        return
+
     for path, mode in (
         (STATE_DIR, 0o750),
         (STATE_DIR / "runtime", 0o750),
@@ -141,6 +156,10 @@ def runtime_init() -> None:
 def config_init() -> None:
     runtime_init()
     if CONFIG.exists():
+        return
+    local_unit = Path("/etc/systemd/system/triforce.service")
+    if local_unit.is_file() or local_unit.is_symlink():
+        # Source mode owns its configuration. Package installation is file-only.
         return
     template = INSTALL_ROOT / "config" / "triforce.env.example"
     if not template.is_file():

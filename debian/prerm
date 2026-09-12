@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+LOCAL_UNIT=/etc/systemd/system/triforce.service
+
+case "${1:-}" in
+  remove|deconfigure)
+    # Never disturb an operator-managed source override. Only stop/disable the
+    # package-owned unit when package mode is actually selected.
+    if [ ! -e "$LOCAL_UNIT" ] && [ ! -L "$LOCAL_UNIT" ]; then
+      deb-systemd-invoke stop triforce.service >/dev/null 2>&1 || true
+      deb-systemd-helper disable triforce.service >/dev/null 2>&1 || true
+    else
+      echo "Preserving operator-selected TriForce source service."
+    fi
+    ;;
+  upgrade|failed-upgrade)
+    # Package upgrades are file-only and must not change the active runtime mode.
+    ;;
+  *)
+    ;;
+esac
+
+#DEBHELPER#
+exit 0

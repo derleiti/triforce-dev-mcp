@@ -1,0 +1,4 @@
+# TriForce intentionally ships its self-contained source bundle under /opt/triforce.
+# Mutable configuration/state/logs live under /etc and /var and are verified separately.
+triforce-backend: dir-or-file-in-opt [opt/triforce/*]
+triforce-backend: dir-or-file-in-opt [opt/triforce/]

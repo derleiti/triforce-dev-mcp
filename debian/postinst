@@ -1,20 +1,55 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+set -eu
 
-# Create venv if not exists
-if [ ! -d /opt/triforce/.venv ]; then
-    echo "Creating Python virtual environment..."
-    python3 -m venv /opt/triforce/.venv
-    /opt/triforce/.venv/bin/pip install --upgrade pip
-    /opt/triforce/.venv/bin/pip install -r /opt/triforce/requirements.txt
+ROOT=/opt/triforce
+VENV="$ROOT/.venv"
+REQ="$ROOT/requirements.txt"
+STATE=/var/lib/triforce
+PACKAGE_STATE="$STATE/package-runtime"
+REQ_HASH="$PACKAGE_STATE/.requirements.sha256"
+MIGRATION_DIR="$PACKAGE_STATE/migration"
+BACKUP_UNIT="$MIGRATION_DIR/source-service.backup"
+RESTORE_MARKER="$MIGRATION_DIR/restore-source-service"
+LOCAL_UNIT=/etc/systemd/system/triforce.service
+SOURCE_MODE_MARKER=/etc/triforce/source-mode.enabled
+
+/usr/lib/triforce/triforce-admin-helper runtime-init
+/usr/lib/triforce/triforce-admin-helper config-init
+
+if [ ! -x "$VENV/bin/python" ]; then
+    echo "Creating TriForce virtual environment..."
+    python3 -m venv "$VENV"
 fi
 
-# Create config dir
-mkdir -p /opt/triforce/config /opt/triforce/logs
+new_hash="$(sha256sum "$REQ" | awk '{print $1}')"
+old_hash=""
+[ ! -f "$REQ_HASH" ] || old_hash="$(cat "$REQ_HASH" 2>/dev/null || true)"
 
-# Enable and start service
-systemctl daemon-reload
-systemctl enable triforce.service || true
-echo "TriForce v$(cat /opt/triforce/VERSION) installed. Start with: systemctl start triforce"
+if [ "$new_hash" != "$old_hash" ] || ! "$VENV/bin/python" -m pip check >/dev/null 2>&1; then
+    echo "Synchronizing TriForce Python dependencies..."
+    "$VENV/bin/python" -m pip install --disable-pip-version-check --upgrade pip
+    "$VENV/bin/python" -m pip install --disable-pip-version-check -r "$REQ"
+    "$VENV/bin/python" -m pip check
+    printf '%s\n' "$new_hash" > "$REQ_HASH"
+    chown triforce:triforce "$REQ_HASH"
+    chmod 0640 "$REQ_HASH"
+fi
 
+# Restore a source-mode unit that a legacy package used to own under /etc.
+# New packages never own or overwrite /etc/systemd/system/triforce.service.
+if [ -f "$RESTORE_MARKER" ] && [ -f "$BACKUP_UNIT" ]; then
+    install -m 0644 "$BACKUP_UNIT" "$LOCAL_UNIT"
+    [ -d /etc/triforce ] || install -d -m 0755 /etc/triforce
+    printf 'source\n' > "$SOURCE_MODE_MARKER"
+    chmod 0644 "$SOURCE_MODE_MARKER"
+    rm -f "$RESTORE_MARKER"
+    echo "Restored operator-selected TriForce source service."
+fi
+
+systemctl daemon-reload || true
+
+# Intentionally do not start, stop, restart, enable, disable, or switch the
+# service here. Package installation updates files only. Runtime mode is an
+# explicit operator decision via scripts/install-service.sh.
 #DEBHELPER#
+exit 0

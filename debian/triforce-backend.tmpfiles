@@ -1,0 +1,4 @@
+d /var/lib/triforce 0750 triforce triforce -
+d /var/lib/triforce/package-runtime 0750 triforce triforce -
+d /var/log/triforce 0750 triforce triforce -
+d /run/triforce 0750 triforce triforce -

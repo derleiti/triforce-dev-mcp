@@ -1,0 +1,44 @@
+[Unit]
+Description=TriForce AI Backend Server (packaged source bundle)
+Documentation=https://ailinux.me/docs/triforce
+After=network-online.target redis-server.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=triforce
+Group=triforce
+WorkingDirectory=/opt/triforce
+Environment=PYTHONUNBUFFERED=1
+Environment=TRIFORCE_AUTO_UPDATE=0
+Environment=TRIFORCE_CONFIG_FILE=/etc/triforce/triforce.env
+Environment=TRIFORCE_PYTHON=/opt/triforce/.venv/bin/python
+Environment=TRIFORCE_LOG_DIR=/var/log/triforce
+Environment=TRIFORCE_STATE_DIR=/var/lib/triforce
+Environment=TRISTAR_BASE=/var/lib/triforce/tristar
+Environment=TRIFORCE_DATA_DIR=/var/lib/triforce/data
+Environment=TRIFORCE_VAULT_DIR=/var/lib/triforce/.vault
+Environment=TRIFORCE_SSH_KEY=/var/lib/triforce/.ssh/id_ed25519
+Environment=TRIFORCE_PROJECT_ROOT=/opt/triforce
+Environment=TRIFORCE_CONFIG_DIR=/etc/triforce
+ExecStart=/opt/triforce/scripts/start-triforce.sh
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/triforce /var/log/triforce
+StateDirectory=triforce
+StateDirectoryMode=0750
+RuntimeDirectory=triforce
+RuntimeDirectoryMode=0750
+LogsDirectory=triforce
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

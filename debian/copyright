@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: TriForce
+Source: https://github.com/derleiti/triforce-dev-mcp
+
+Files: *
+Copyright: 2025-2026 Markus Leitermann and TriForce contributors
+License: upstream
+ This package is distributed under the terms in the upstream LICENSE file.
+ .
+ See /usr/share/doc/triforce-backend/copyright for this notice and the
+ upstream project for the complete license text.

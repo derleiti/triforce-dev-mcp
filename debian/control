@@ -7,9 +7,11 @@ Build-Depends: debhelper-compat (= 13)
 
 Package: triforce-backend
 Architecture: all
-Depends: python3 (>= 3.11), python3-venv, python3-pip, redis-server
+Depends: python3 (>= 3.11), python3-venv, python3-pip, systemd, redis-server
 Recommends: docker.io
-Description: AILinux TriForce Multi-LLM Backend
+Description: AILinux TriForce Multi-LLM Backend source bundle
  TriForce is a FastAPI-based multi-LLM orchestration backend supporting
- 600+ AI models across 9 providers with 134+ MCP tools, RBAC, federation
- mesh, and 4-layer memory. Powers the AILinux ecosystem.
+ hundreds of AI models, MCP tools, federation and persistent memory.
+ This package installs the audited application source under /opt/triforce,
+ maintains an isolated virtualenv there, and keeps mutable runtime state in
+ /var/lib/triforce and /var/log/triforce.

@@ -24,8 +24,8 @@ def test_helper_rejects_free_unit_or_path_arguments_by_parser_shape():
     assert 'parser.add_argument("--path"' not in text
     assert '"--unit=triforce-setup-job"' in text
 
-def test_helper_uses_packaged_isolated_runtime():
-    assert HELPER.read_text().startswith("#!/opt/triforce/runtime/bin/python\n")
+def test_helper_uses_system_python_before_package_venv_exists():
+    assert HELPER.read_text().startswith("#!/usr/bin/python3\n")
 
 def test_config_directory_is_group_readable_by_service_user():
     text = HELPER.read_text()
