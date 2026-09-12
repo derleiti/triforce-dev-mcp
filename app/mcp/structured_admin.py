@@ -15,6 +15,9 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger("ailinux.mcp.admin")
 
+PROJECT_ROOT = Path(os.environ.get("TRIFORCE_PROJECT_ROOT", str(Path(__file__).resolve().parents[2])))
+SSH_KEY_PATH = Path(os.environ.get("TRIFORCE_SSH_KEY", str(Path.home() / ".ssh" / "id_ed25519")))
+
 READ_PATHS = ["/home/zombie/triforce", "/etc/systemd/system", "/etc/apache2",
               "/etc/nginx", "/etc/wireguard", "/var/log", "/tmp", "/home/zombie/.config"]
 WRITE_PATHS = ["/home/zombie/triforce", "/tmp"]
@@ -78,7 +81,7 @@ async def _asyncssh_run(host: str, user: str, cmd_list, timeout: int = 30):
     import sys
 
     start = time.time()
-    vendor_dir = "/home/zombie/triforce/vendor"
+    vendor_dir = str(PROJECT_ROOT / "vendor")
     if vendor_dir not in sys.path:
         sys.path.insert(0, vendor_dir)
 
@@ -86,7 +89,7 @@ async def _asyncssh_run(host: str, user: str, cmd_list, timeout: int = 30):
         import asyncssh
 
         command = " ".join(shlex.quote(str(part)) for part in cmd_list)
-        key_path = "/home/zombie/.ssh/id_ed25519"
+        key_path = str(SSH_KEY_PATH)
         async with asyncssh.connect(
             host,
             username=user,
@@ -898,6 +901,8 @@ async def handle_task_runner(a):
             "ssh", "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=5",
         ]
+        if SSH_KEY_PATH.is_file():
+            ssh_base += ["-i", str(SSH_KEY_PATH)]
 
         target = f"{host_info['user']}@{host_info['ip']}"
 

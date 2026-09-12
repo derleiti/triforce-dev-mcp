@@ -16,6 +16,9 @@ Environment=TRIFORCE_CONFIG_FILE=/etc/triforce/triforce.env
 Environment=TRIFORCE_PYTHON=/opt/triforce/runtime/bin/python
 Environment=TRIFORCE_LOG_DIR=/var/log/triforce
 Environment=TRIFORCE_STATE_DIR=/var/lib/triforce
+Environment=TRIFORCE_DATA_DIR=/var/lib/triforce/data
+Environment=TRIFORCE_VAULT_DIR=/var/lib/triforce/.vault
+Environment=TRIFORCE_SSH_KEY=/var/lib/triforce/.ssh/id_ed25519
 Environment=TRIFORCE_PROJECT_ROOT=/opt/triforce
 Environment=TRIFORCE_CONFIG_DIR=/opt/triforce/config
 ExecStart=/opt/triforce/scripts/start-triforce.sh

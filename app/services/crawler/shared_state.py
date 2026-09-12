@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Dict, Optional, Set
 
+from app.paths import DATA_DIR
 from ...config import get_settings
 
 
@@ -13,7 +14,7 @@ class CrawlerSharedState:
 
     def __init__(self, persist_name: str = "crawler-shared-state.json") -> None:
         settings = get_settings()
-        spool_dir = Path(getattr(settings, "crawler_spool_dir", "data/crawler_spool"))
+        spool_dir = Path(getattr(settings, "crawler_spool_dir", str(DATA_DIR / "crawler_spool")))
         spool_dir.mkdir(parents=True, exist_ok=True)
 
         self._persist_path = spool_dir / persist_name

@@ -15,11 +15,12 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 
+from app.paths import PROJECT_ROOT
 from ..aicoder_runner import AICoderRunner, apply_profile_state, load_profile, prepare_instance_home
 from .idle_prompt import WORK_CATALOGUE, build_idle_prompt
 
 logger = logging.getLogger("ailinux.tristar.idle_worker")
-DEFAULT_WORKSPACE = Path("/home/zombie/triforce")
+DEFAULT_WORKSPACE = Path(os.environ.get("TRISTAR_IDLE_WORKSPACE", str(PROJECT_ROOT))).expanduser().resolve()
 STATE_FILE = Path(os.environ.get("TRISTAR_IDLE_STATE_FILE", "/var/tristar/agents/idle-state.json"))
 STATE_LOCK_FILE = Path(os.environ.get("TRISTAR_IDLE_STATE_LOCK_FILE", "/var/tristar/agents/idle-state.lock"))
 WORKER_LOCK_FILE = Path(os.environ.get("TRISTAR_IDLE_WORKER_LOCK_FILE", "/var/tristar/agents/idle-worker.lock"))
@@ -317,6 +318,12 @@ def start_idle_worker() -> asyncio.Task | None:
     global _worker_task, _worker_lock_handle
     if os.environ.get("TRISTAR_IDLE_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
         logger.info("Idle worker disabled (TRISTAR_IDLE_ENABLED=false)")
+        return None
+    workspace = DEFAULT_WORKSPACE
+    try:
+        _git(workspace, "rev-parse", "--is-inside-work-tree")
+    except (OSError, subprocess.CalledProcessError):
+        logger.info("Idle worker disabled: workspace is not a Git checkout: %s", workspace)
         return None
     if _worker_task and not _worker_task.done():
         return _worker_task

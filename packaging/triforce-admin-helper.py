@@ -80,12 +80,46 @@ def _chown_tree(path: Path, user: str, group: str) -> None:
             shutil.chown(Path(root) / name, user=user, group=group)
 
 
+def migrate_legacy_ssh_identity(legacy_home: Path, target_dir: Path) -> None:
+    """Copy an existing legacy SSH client identity into package state safely.
+
+    Existing package-owned identities are never overwritten. Only the standard
+    ed25519 key pair is migrated and private key contents are never logged.
+    """
+    source_private = legacy_home / "id_ed25519"
+    source_public = legacy_home / "id_ed25519.pub"
+    target_private = target_dir / "id_ed25519"
+    target_public = target_dir / "id_ed25519.pub"
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(target_dir, 0o700)
+    shutil.chown(target_dir, user="triforce", group="triforce")
+
+    if source_private.is_file() and not target_private.exists():
+        shutil.copyfile(source_private, target_private)
+        os.chmod(target_private, 0o600)
+        shutil.chown(target_private, user="triforce", group="triforce")
+    if source_public.is_file() and not target_public.exists():
+        shutil.copyfile(source_public, target_public)
+        os.chmod(target_public, 0o644)
+        shutil.chown(target_public, user="triforce", group="triforce")
+
+
 def runtime_init() -> None:
     try:
         pwd.getpwnam("triforce")
     except KeyError:
         run_fixed("/usr/sbin/useradd", "--system", "--home", str(STATE_DIR), "--shell", "/usr/sbin/nologin", "triforce")
-    for path, mode in ((STATE_DIR, 0o750), (STATE_DIR / "runtime", 0o750), (STATE_DIR / "crawler_spool", 0o750), (STATE_DIR / "crawler_spool/train", 0o750), (STATE_DIR / "tristar", 0o750), (LOG_DIR, 0o750)):
+    for path, mode in (
+        (STATE_DIR, 0o750),
+        (STATE_DIR / "runtime", 0o750),
+        (STATE_DIR / "data", 0o750),
+        (STATE_DIR / "crawler_spool", 0o750),
+        (STATE_DIR / "crawler_spool/train", 0o750),
+        (STATE_DIR / "tristar", 0o750),
+        (STATE_DIR / ".vault", 0o700),
+        (LOG_DIR, 0o750),
+    ):
         path.mkdir(parents=True, exist_ok=True)
         os.chmod(path, mode)
         shutil.chown(path, user="triforce", group="triforce")
@@ -95,7 +129,13 @@ def runtime_init() -> None:
     legacy_tristar = Path("/var/tristar")
     tristar_state = STATE_DIR / "tristar"
     migrate_legacy_tristar(legacy_tristar, tristar_state)
-    _chown_tree(tristar_state, "triforce", "triforce")
+    # Upgrades can inherit state/log files created by the former per-user
+    # source service. The packaged service runs as the dedicated triforce
+    # user, so normalize ownership without weakening existing file modes.
+    _chown_tree(STATE_DIR, "triforce", "triforce")
+    _chown_tree(LOG_DIR, "triforce", "triforce")
+    os.chmod(STATE_DIR / ".vault", 0o700)
+    migrate_legacy_ssh_identity(Path("/home/zombie/.ssh"), STATE_DIR / ".ssh")
 
 
 def config_init() -> None:

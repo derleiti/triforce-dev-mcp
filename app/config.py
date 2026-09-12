@@ -4,6 +4,7 @@ VERSION = "2.85 Beta 2"
 from functools import lru_cache
 from typing import Dict, List, Optional, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.paths import DATA_DIR
 from pydantic import AliasChoices, AnyHttpUrl, Field, model_validator
 
 from .settings_store import effective_environment
@@ -340,8 +341,8 @@ class Settings(BaseSettings):
     # Crawler - User Instance (fast, for /crawl prompts)
     crawler_enabled: bool = Field(default=True, validation_alias="CRAWLER_ENABLED")
     crawler_max_memory_bytes: int = Field(default=256*1024*1024, validation_alias="CRAWLER_MAX_MEMORY_BYTES")
-    crawler_spool_dir: str = Field(default="data/crawler_spool", validation_alias="CRAWLER_SPOOL_DIR")
-    crawler_train_dir: str = Field(default="data/crawler_spool/train", validation_alias="CRAWLER_TRAIN_DIR")
+    crawler_spool_dir: str = Field(default=str(DATA_DIR / "crawler_spool"), validation_alias="CRAWLER_SPOOL_DIR")
+    crawler_train_dir: str = Field(default=str(DATA_DIR / "crawler_spool" / "train"), validation_alias="CRAWLER_TRAIN_DIR")
     crawler_flush_interval: int = Field(default=3600, validation_alias="CRAWLER_FLUSH_INTERVAL")
     crawler_retention_days: int = Field(default=30, validation_alias="CRAWLER_RETENTION_DAYS")
     crawler_summary_model: str | None = Field(default=None, validation_alias="CRAWLER_SUMMARY_MODEL")

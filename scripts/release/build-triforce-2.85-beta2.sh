@@ -3,6 +3,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSION="$(tr -d '\n' < "$ROOT/VERSION")"
 ARCH="$(dpkg --print-architecture)"
+DEBIAN_VERSION="${DEBIAN_VERSION:-1:${VERSION}}"
 OUT="${OUT_DIR:-$ROOT/dist/2.85-beta2}"
 RUNTIME="${BACKEND_RUNTIME:-/tmp/triforce-2.85-backend-runtime}"
 GUI="${GUI_BUNDLE:-/tmp/triforce-2.85-nuitka/main.dist}"
@@ -45,11 +46,11 @@ EOF
   chmod 755 "$pkg/usr/bin/triforce-control-center"
   cat > "$pkg/DEBIAN/control" <<EOF
 Package: triforce-control-center
-Version: $VERSION
+Version: $DEBIAN_VERSION
 Architecture: $ARCH
 Section: admin
 Priority: optional
-Depends: triforce-backend (= $VERSION), pkexec, systemd, libgl1, libegl1, libx11-6, libx11-xcb1, libxcb1, libxcb-cursor0, libxcb-glx0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render0, libxcb-render-util0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-util1, libxcb-xfixes0, libxcb-xkb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libwayland-client0, libwayland-cursor0, libwayland-egl1, libgbm1, libdrm2
+Depends: triforce-backend (= $DEBIAN_VERSION), pkexec, systemd, libgl1, libegl1, libx11-6, libx11-xcb1, libxcb1, libxcb-cursor0, libxcb-glx0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render0, libxcb-render-util0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-util1, libxcb-xfixes0, libxcb-xkb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libwayland-client0, libwayland-cursor0, libwayland-egl1, libgbm1, libdrm2
 Maintainer: Markus Leitermann <admin@ailinux.me>
 Homepage: https://ailinux.me
 Description: Compiled PyQt6 Control Center for TriForce
@@ -111,7 +112,7 @@ EOF
   cp "$ROOT/LICENSE" "$pkg/usr/share/doc/triforce-backend/copyright"
   cat > "$pkg/DEBIAN/control" <<EOF
 Package: triforce-backend
-Version: $VERSION
+Version: $DEBIAN_VERSION
 Architecture: $ARCH
 Section: net
 Priority: optional
@@ -166,7 +167,7 @@ CONTROL_DEB="$(make_control)"
 (cd "$OUT" && sha256sum "$(basename "$BACKEND_DEB")" "$(basename "$CONTROL_DEB")" > SHA256SUMS)
 cat > "$OUT/BUILD-MANIFEST.txt" <<EOF
 TriForce product: 2.85 Beta 2
-Debian version: $VERSION
+Debian version: $DEBIAN_VERSION
 Architecture: $ARCH
 Build OS: $(. /etc/os-release; echo "$PRETTY_NAME")
 Python: $(python3.14 --version 2>&1)

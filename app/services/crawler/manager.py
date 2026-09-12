@@ -150,6 +150,7 @@ def is_ssrf_safe(url: str, *, allow_private_networks: bool = False) -> Tuple[boo
 import gzip
 import jsonlines
 from rank_bm25 import BM25Okapi
+from app.paths import DATA_DIR
 from ...config import get_settings
 from .shared_state import CrawlerSharedState, shared_crawler_state
 
@@ -505,7 +506,7 @@ class CrawlerStore:
 class CrawlerManager:
     def __init__(self, *, shared_state: Optional[CrawlerSharedState] = None, instance_name: str = "default") -> None:
         settings = get_settings()
-        spool_dir = Path(getattr(settings, "crawler_spool_dir", "data/crawler_spool"))
+        spool_dir = Path(getattr(settings, "crawler_spool_dir", str(DATA_DIR / "crawler_spool")))
         self._store = CrawlerStore(
             max_memory_bytes=int(getattr(settings, "crawler_max_memory_bytes", 2 * 1024**3)),
             spool_dir=spool_dir,

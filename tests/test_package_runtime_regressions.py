@@ -100,3 +100,35 @@ def test_mcp_well_known_uses_product_version_and_current_protocol():
 def test_openrouter_default_is_current_chat_capable_fallback():
     from app.config import Settings
     assert Settings.model_fields["openrouter_default_model"].default == "nvidia/nemotron-3-ultra-550b-a55b:free"
+
+
+def test_package_ssh_identity_migration_is_safe(tmp_path, monkeypatch):
+    helper = _load_admin_helper()
+    legacy = tmp_path / "legacy-ssh"
+    target = tmp_path / "state-ssh"
+    legacy.mkdir()
+    (legacy / "id_ed25519").write_text("private-test-key")
+    (legacy / "id_ed25519.pub").write_text("public-test-key")
+
+    monkeypatch.setattr(helper.shutil, "chown", lambda *args, **kwargs: None)
+    helper.migrate_legacy_ssh_identity(legacy, target)
+
+    assert (target / "id_ed25519").read_text() == "private-test-key"
+    assert (target / "id_ed25519.pub").read_text() == "public-test-key"
+    assert (target / "id_ed25519").stat().st_mode & 0o777 == 0o600
+    assert (target / "id_ed25519.pub").stat().st_mode & 0o777 == 0o644
+
+    (legacy / "id_ed25519").write_text("replacement-must-not-win")
+    helper.migrate_legacy_ssh_identity(legacy, target)
+    assert (target / "id_ed25519").read_text() == "private-test-key"
+
+
+def test_packaged_service_uses_state_owned_ssh_identity():
+    root = Path(__file__).parents[1]
+    unit = (root / "packaging/systemd/triforce.service").read_text()
+    admin = (root / "app/mcp/structured_admin.py").read_text()
+    assert "Environment=TRIFORCE_SSH_KEY=/var/lib/triforce/.ssh/id_ed25519" in unit
+    assert 'SSH_KEY_PATH = Path(os.environ.get("TRIFORCE_SSH_KEY"' in admin
+    assert 'key_path = str(SSH_KEY_PATH)' in admin
+    assert '["-i", str(SSH_KEY_PATH)]' in admin
+    assert '/home/zombie/.ssh/id_ed25519' not in admin
