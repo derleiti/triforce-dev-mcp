@@ -1,39 +1,26 @@
-#!/bin/bash
-# AILinux Backend Service Installation Script
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-set -e
+[[ $EUID -eq 0 ]] || { echo "Usage: sudo $0" >&2; exit 1; }
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TARGET="/etc/systemd/system/triforce.service"
 
-echo "Installing AILinux AI Server Backend systemd service..."
+candidates=(
+  "$TRIFORCE_DIR/scripts/systemd/triforce.service"
+  "$TRIFORCE_DIR/packaging/systemd/triforce.service"
+  "$TRIFORCE_DIR/config/triforce.service"
+)
+source_unit=""
+for f in "${candidates[@]}"; do
+  if [[ -f "$f" ]]; then source_unit="$f"; break; fi
+done
+[[ -n "$source_unit" ]] || { echo "No current triforce.service source found in $TRIFORCE_DIR" >&2; exit 1; }
 
-# Check if running with sudo
-if [ "$EUID" -ne 0 ]; then
-    echo "This script must be run with sudo"
-    echo "Usage: sudo ./install-service.sh"
-    exit 1
+systemd-analyze verify "$source_unit"
+if [[ -f "$TARGET" ]]; then
+  cp -a "$TARGET" "$TARGET.bak.$(date +%Y%m%d-%H%M%S)"
 fi
-
-# Copy service file to systemd directory
-echo "Copying service file to /etc/systemd/system/..."
-cp ailinux-backend.service /etc/systemd/system/ailinux-backend.service
-chmod 644 /etc/systemd/system/ailinux-backend.service
-
-# Reload systemd daemon
-echo "Reloading systemd daemon..."
+install -m 0644 "$source_unit" "$TARGET"
 systemctl daemon-reload
-
-# Enable service to start on boot
-echo "Enabling service to start on boot..."
-systemctl enable --now ailinux-backend.service
-
-echo ""
-echo "✅ Service installed successfully!"
-echo ""
-echo "Available commands:"
-echo "  sudo systemctl start ailinux-backend      # Start the service"
-echo "  sudo systemctl stop ailinux-backend       # Stop the service"
-echo "  sudo systemctl restart ailinux-backend    # Restart the service"
-echo "  sudo systemctl status ailinux-backend     # Check service status"
-echo "  sudo journalctl -u ailinux-backend -f     # View live logs"
-echo ""
-echo "To start the service now, run:"
-echo "  sudo systemctl start ailinux-backend"
+systemctl enable --now triforce.service
+systemctl --no-pager --full status triforce.service | sed -n '1,35p'

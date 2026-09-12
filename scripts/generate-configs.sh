@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TriForce Config Generator v4.1
 # Generiert alle Container-Configs aus .env via envsubst
 
@@ -16,6 +16,7 @@ fi
 
 # Lade .env
 set -a
+# shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
 

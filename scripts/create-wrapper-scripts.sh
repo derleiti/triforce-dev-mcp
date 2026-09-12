@@ -1,48 +1,47 @@
-#!/bin/bash
-# Script: create-triforce-wrappers.sh
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-BIN_DIR="/home/zombie/triforce/bin"
-NPM_GLOBAL="/root/.npm-global/bin"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+BIN_DIR="${TRIFORCE_BIN_DIR:-$TRIFORCE_DIR/bin}"
+TARGET_USER="${TRIFORCE_USER:-zombie}"
+TARGET_HOME="${TRIFORCE_USER_HOME:-$(getent passwd "$TARGET_USER" | cut -d: -f6)}"
+NPM_GLOBAL="${TRIFORCE_NPM_BIN:-$TARGET_HOME/.npm-global/bin}"
 
+[[ -d "$TRIFORCE_DIR" ]] || { echo "TriForce directory not found: $TRIFORCE_DIR" >&2; exit 1; }
+[[ -n "$TARGET_HOME" ]] || { echo "Home not found for $TARGET_USER" >&2; exit 1; }
 mkdir -p "$BIN_DIR"
 
-# Claude wrapper
-cat > "$BIN_DIR/claude-triforce" << 'EOF'
-#!/bin/bash
-export HOME=/var/tristar/cli-config/claude
-export CLAUDE_CONFIG_DIR=/var/tristar/cli-config/claude
-exec /root/.npm-global/bin/claude "$@"
-EOF
+make_wrapper() {
+  local name="$1" config_home="$2" extra_env="$3"
+  local binary="$NPM_GLOBAL/$name"
+  [[ -x "$binary" ]] || binary="$(command -v "$name" 2>/dev/null || true)"
+  if [[ -z "$binary" || ! -x "$binary" ]]; then
+    echo "SKIP: $name binary not found" >&2
+    return 0
+  fi
 
-# Codex wrapper
-cat > "$BIN_DIR/codex-triforce" << 'EOF'
-#!/bin/bash
-export HOME=/var/tristar/cli-config/codex
-export CODEX_CONFIG_DIR=/var/tristar/cli-config/codex
-exec /root/.npm-global/bin/codex "$@"
-EOF
+  cat > "$BIN_DIR/${name}-triforce" <<WRAPPER
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export HOME="$config_home"
+$extra_env
+exec "$binary" "\$@"
+WRAPPER
+  chmod 0755 "$BIN_DIR/${name}-triforce"
+  echo "OK: $BIN_DIR/${name}-triforce -> $binary"
+}
 
-# Gemini wrapper
-cat > "$BIN_DIR/gemini-triforce" << 'EOF'
-#!/bin/bash
-export HOME=/var/tristar/cli-config/gemini
-export GEMINI_CONFIG_DIR=/var/tristar/cli-config/gemini
-exec /root/.npm-global/bin/gemini "$@"
-EOF
+RUNTIME_BASE="${TRIFORCE_CLI_CONFIG_DIR:-/var/tristar/cli-config}"
+install -d -o "$TARGET_USER" -g "$TARGET_USER" -m 0750 \
+  "$RUNTIME_BASE/claude" "$RUNTIME_BASE/codex" "$RUNTIME_BASE/gemini" "$RUNTIME_BASE/opencode"
 
-# OpenCode wrapper (falls installiert)
-cat > "$BIN_DIR/opencode-triforce" << 'EOF'
-#!/bin/bash
-export HOME=/var/tristar/cli-config/opencode
-exec /root/.npm-global/bin/opencode "$@" || echo "opencode nicht installiert"
-EOF
-
-# Ausführbar machen
-chmod +x "$BIN_DIR"/*-triforce
-
-# Symlinks prüfen
-echo "=== Checking npm-global binaries ==="
-ls -la "$NPM_GLOBAL"/{claude,codex,gemini} 2>/dev/null || echo "Some binaries missing!"
-
-echo "=== Wrapper scripts created ==="
-ls -la "$BIN_DIR"/
+# literal $HOME is intentional in generated wrapper environment
+# shellcheck disable=SC2016
+make_wrapper claude "$RUNTIME_BASE/claude" 'export CLAUDE_CONFIG_DIR="$HOME"'
+# literal $HOME is intentional in generated wrapper environment
+# shellcheck disable=SC2016
+make_wrapper codex "$RUNTIME_BASE/codex" 'export CODEX_HOME="$HOME"'
+# literal $HOME is intentional in generated wrapper environment
+# shellcheck disable=SC2016
+make_wrapper gemini "$RUNTIME_BASE/gemini" 'export GEMINI_CONFIG_DIR="$HOME"'
+make_wrapper opencode "$RUNTIME_BASE/opencode" ''

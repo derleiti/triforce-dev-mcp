@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # AILinux Repository Healthcheck v2 (Auto-Deps, Cert-Discovery, Stale/By-Hash, IPv6, robust curl)
 # Date: 2025-09-25

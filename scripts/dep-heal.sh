@@ -11,7 +11,8 @@ DRY_RUN=0
 DO_DIST=1
 AGGRESSIVE=0
 ALLOW_DESKTOP=0   # Server-freundlich per Default (keine Recommends)
-APT_COMMON_OPTS='-y -o Dpkg::Options::=--force-confnew -o APT::Install-Recommends=false -o APT::Install-Suggests=false'
+AUTOREMOVE=0       # Destruktives Cleanup nur explizit
+APT_COMMON_OPTS=(-y -o Dpkg::Options::=--force-confnew -o APT::Install-Recommends=false -o APT::Install-Suggests=false)
 
 for a in "$@"; do
   case "$a" in
@@ -19,15 +20,21 @@ for a in "$@"; do
     --no-dist) DO_DIST=0 ;;
     --aggressive) AGGRESSIVE=1 ;;
     --desktop-allow) ALLOW_DESKTOP=1 ;; # erlaubt Recommends (Plasma/Qt zieht breiter)
+    --autoremove) AUTOREMOVE=1 ;;
     *) echo "Unbekannte Option: $a" >&2; exit 2 ;;
   esac
 done
 
 if [ "$ALLOW_DESKTOP" -eq 1 ]; then
-  APT_COMMON_OPTS='-y -o Dpkg::Options::=--force-confnew'
+  APT_COMMON_OPTS=(-y -o Dpkg::Options::=--force-confnew)
 fi
 
+APT_COMMON_STR=$(printf " %q" "${APT_COMMON_OPTS[@]}")
+APT_COMMON_STR=${APT_COMMON_STR# }
+
 log() { printf "\033[1;34m[dep-heal]\033[0m %s\n" "$*"; }
+# run() intentionally accepts logged command strings for dry-run parity.
+# shellcheck disable=SC2294
 run() { if [ "$DRY_RUN" -eq 1 ]; then log "(dry-run) $*"; else eval "$@"; fi; }
 
 [ "$(id -u)" -eq 0 ] || { echo "Bitte als root ausführen."; exit 1; }
@@ -53,13 +60,13 @@ run "dpkg --configure -a 2>&1 | tee -a '$LOG' || true"
 # 3) Basis-Fix
 log "apt-get -f install (Basisfix)"
 set +e
-apt-get $APT_COMMON_OPTS -f install 2>&1 | tee -a "$LOG"
+apt-get "${APT_COMMON_OPTS[@]}" -f install 2>&1 | tee -a "$LOG"
 EC=$?
 set -e
 
 if [ $EC -ne 0 ] && [ "$AGGRESSIVE" -eq 1 ]; then
   log "Fehler erkannt – versuche erneut mit --force-overwrite"
-  run "apt-get $APT_COMMON_OPTS -o Dpkg::Options::=--force-overwrite -f install 2>&1 | tee -a '$LOG'"
+  run "apt-get $APT_COMMON_STR -o Dpkg::Options::=--force-overwrite -f install 2>&1 | tee -a '$LOG'"
 fi
 
 # 4) Spezieller Konfliktfix: libkf5globalaccel-bin ↔ kglobalacceld
@@ -70,12 +77,12 @@ if dpkg -l 2>/dev/null | grep -q '^.i  libkf5globalaccel-bin'; then
     run "apt-mark unhold libkf5globalaccel-bin 2>/dev/null || true"
     run "apt-get -y remove libkf5globalaccel-bin 2>&1 | tee -a '$LOG' || true"
     if [ "$AGGRESSIVE" -eq 1 ]; then
-      run "apt-get $APT_COMMON_OPTS -o Dpkg::Options::=--force-overwrite install kglobalacceld 2>&1 | tee -a '$LOG' || true"
+      run "apt-get $APT_COMMON_STR -o Dpkg::Options::=--force-overwrite install kglobalacceld 2>&1 | tee -a '$LOG' || true"
     else
-      run "apt-get $APT_COMMON_OPTS install kglobalacceld 2>&1 | tee -a '$LOG' || true"
+      run "apt-get $APT_COMMON_STR install kglobalacceld 2>&1 | tee -a '$LOG' || true"
     fi
     run "dpkg --configure -a 2>&1 | tee -a '$LOG' || true"
-    run "apt-get $APT_COMMON_OPTS -f install 2>&1 | tee -a '$LOG'"
+    run "apt-get $APT_COMMON_STR -f install 2>&1 | tee -a '$LOG'"
   fi
 fi
 
@@ -83,16 +90,20 @@ fi
 if [ "$DO_DIST" -eq 1 ]; then
   log "dist-upgrade (kann große Stände harmonisieren)"
   if [ "$AGGRESSIVE" -eq 1 ]; then
-    run "apt-get $APT_COMMON_OPTS -o Dpkg::Options::=--force-overwrite dist-upgrade 2>&1 | tee -a '$LOG'"
+    run "apt-get $APT_COMMON_STR -o Dpkg::Options::=--force-overwrite dist-upgrade 2>&1 | tee -a '$LOG'"
   else
-    run "apt-get $APT_COMMON_OPTS dist-upgrade 2>&1 | tee -a '$LOG'"
+    run "apt-get $APT_COMMON_STR dist-upgrade 2>&1 | tee -a '$LOG'"
   fi
 fi
 
 # 6) Aufräumen & Abschluss
-log "autoremove & finaler Fixlauf"
-run "apt-get -y autoremove --purge 2>&1 | tee -a '$LOG' || true"
-run "apt-get $APT_COMMON_OPTS -f install 2>&1 | tee -a '$LOG' || true"
+if [ "$AUTOREMOVE" -eq 1 ]; then
+  log "autoremove --purge (explizit angefordert)"
+  run "apt-get -y autoremove --purge 2>&1 | tee -a '$LOG' || true"
+else
+  log "autoremove übersprungen (mit --autoremove aktivieren)"
+fi
+run "apt-get $APT_COMMON_STR -f install 2>&1 | tee -a '$LOG' || true"
 
 log "dpkg --audit (Prüfung)"
 run "dpkg --audit || true"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Secret Generator für TriForce .env
 # Ersetzt __GENERATE_SECRET_XX__ Platzhalter mit zufälligen Werten
@@ -55,7 +55,6 @@ while grep -q "__GENERATE_SECRET_16__" "$ENV_FILE"; do
 done
 
 # Zähle generierte Secrets
-SECRETS_COUNT=$(grep -c "^[A-Z_]*=[a-zA-Z0-9]\{16,\}$" "$ENV_FILE" 2>/dev/null || echo "0")
 
 log_info "✅ Secrets generiert!"
 log_info "   Datei: $ENV_FILE"

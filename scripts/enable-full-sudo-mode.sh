@@ -1,43 +1,43 @@
-#!/bin/bash
-# Aktiviert VOLLEN sudo-Modus für das AILinux Backend
-# Entfernt alle Security-Einschränkungen die sudo blockieren
-# Ausführen mit: sudo bash scripts/enable-full-sudo-mode.sh
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-echo "🔧 Enabling FULL sudo mode for AILinux Backend..."
+SERVICE="triforce.service"
+UNIT="/etc/systemd/system/$SERVICE"
 
-# Backup der Unit-Datei
-cp /etc/systemd/system/ailinux-backend.service /etc/systemd/system/ailinux-backend.service.bak.full
+[[ $EUID -eq 0 ]] || { echo "Run with sudo/root." >&2; exit 1; }
+[[ -f "$UNIT" ]] || { echo "Missing unit: $UNIT" >&2; exit 1; }
 
-# Alle relevanten Einschränkungen entfernen
-sed -i 's/NoNewPrivileges=true/NoNewPrivileges=false/' /etc/systemd/system/ailinux-backend.service
-sed -i 's/NoNewPrivileges=false/NoNewPrivileges=false/' /etc/systemd/system/ailinux-backend.service
-sed -i 's/ProtectSystem=strict/ProtectSystem=false/' /etc/systemd/system/ailinux-backend.service
-sed -i 's/PrivateTmp=true/PrivateTmp=false/' /etc/systemd/system/ailinux-backend.service
+# Current TriForce intentionally runs with these relaxed settings because
+# privileged operations are mediated by its own helper/policy layer.
+required=(
+  'NoNewPrivileges=false'
+  'ProtectSystem=false'
+  'PrivateTmp=false'
+)
 
-# /run/sudo muss beschreibbar sein
-if ! grep -q "ReadWritePaths=.*\/run\/sudo" /etc/systemd/system/ailinux-backend.service; then
-    sed -i 's|ReadWritePaths=|ReadWritePaths=/run/sudo |' /etc/systemd/system/ailinux-backend.service
+changed=0
+backup="$UNIT.bak.full.$(date +%Y%m%d-%H%M%S)"
+for setting in "${required[@]}"; do
+  key=${setting%%=*}
+  if grep -q "^${setting}$" "$UNIT"; then
+    echo "OK: $setting"
+    continue
+  fi
+  (( changed )) || cp -a "$UNIT" "$backup"
+  if grep -q "^${key}=" "$UNIT"; then
+    sed -i "s/^${key}=.*/${setting}/" "$UNIT"
+  else
+    sed -i "/^\[Service\]/a ${setting}" "$UNIT"
+  fi
+  changed=1
+done
+
+if (( changed )); then
+  systemd-analyze verify "$UNIT"
+  systemctl daemon-reload
+  systemctl restart "$SERVICE"
 fi
 
-# Prüfen
-echo "Checking settings..."
-grep -E "NoNewPrivileges|ProtectSystem|PrivateTmp|ReadWritePaths" /etc/systemd/system/ailinux-backend.service
-
-# Reload und Restart
-systemctl daemon-reload
-systemctl restart ailinux-backend
-
-sleep 2
-
-# Status prüfen
-if systemctl is-active --quiet ailinux-backend; then
-    echo ""
-    echo "============================================"
-    echo "✅ FULL Sudo-Modus aktiviert!"
-    echo "============================================"
-    echo ""
-    echo "Backend läuft und kann jetzt sudo-Befehle ausführen."
-else
-    echo "❌ Backend startet nicht! Logs prüfen:"
-    journalctl -u ailinux-backend --no-pager -n 20
-fi
+systemctl is-active --quiet "$SERVICE"
+echo "TriForce service is active with current sudo-compatible settings."
+grep -E '^(NoNewPrivileges|ProtectSystem|PrivateTmp)=' "$UNIT"

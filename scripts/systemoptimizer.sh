@@ -29,17 +29,14 @@ DISK="💾"
 CPU_ICON="🧠"
 GPU_ICON="🖼️"
 NET_ICON="🌐"
-TEMP_ICON="🌡️"
 
 VERSION="2.1"
 PROFILE="desktop"
 DRY_RUN=false
-INTERACTIVE=false
 
 LOG_FILE="/tmp/systemoptimizer_$(date +%Y%m%d_%H%M%S).log"
 BACKUP_DIR="/tmp/sysopt_backup_$(date +%Y%m%d_%H%M%S)"
 
-declare -A HW_INFO
 declare -A CURRENT_SETTINGS
 declare -A OPTIMAL_SETTINGS
 
@@ -112,11 +109,11 @@ backup_settings(){
 collect_cpu(){
     section_header "$CPU_ICON CPU ANALYSIS"
 
-    local vendor=$(grep -m1 vendor_id /proc/cpuinfo | awk -F: '{print $2}' | xargs)
-    local model=$(grep -m1 "model name" /proc/cpuinfo | awk -F: '{print $2}' | xargs)
+    local vendor
+    vendor=$(grep -m1 vendor_id /proc/cpuinfo | awk -F: '{print $2}' | xargs)
+    local model
+    model=$(grep -m1 "model name" /proc/cpuinfo | awk -F: '{print $2}' | xargs)
 
-    HW_INFO[cpu_vendor]="$vendor"
-    HW_INFO[cpu_model]="$model"
 
     log "Vendor: ${WHITE}$vendor${NC}"
     log "Model: ${WHITE}$model${NC}"
@@ -134,7 +131,8 @@ collect_cpu(){
 #--------------------------------------------------
 collect_ram(){
     section_header "$DISK RAM ANALYSIS"
-    local total=$(grep MemTotal /proc/meminfo | awk '{print $2/1024/1024}')
+    local total
+    total=$(grep MemTotal /proc/meminfo | awk '{print $2/1024/1024}')
     log "Total RAM: ${WHITE}${total} GB${NC}"
 }
 
@@ -148,8 +146,10 @@ collect_storage(){
 
     for d in /sys/block/*; do
         [[ ! -f "$d/queue/rotational" ]] && continue
-        local name=$(basename "$d")
-        local rotational=$(cat "$d/queue/rotational")
+        local name
+        name=$(basename "$d")
+        local rotational
+        rotational=$(cat "$d/queue/rotational")
         local type="HDD"
         [[ "$rotational" == "0" ]] && type="SSD"
         [[ "$name" == nvme* ]] && type="NVMe"
@@ -166,17 +166,14 @@ collect_storage(){
 collect_gpu(){
     section_header "$GPU_ICON GPU INFO"
 
-    if lspci | grep -qi amd.*vga; then
-        HW_INFO[gpu]="amd"
+    if lspci | grep -qi 'amd.*vga'; then
         log "AMD GPU detected"
         for card in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
             CURRENT_SETTINGS[gpu_perf_level]=$(cat "$card" 2>/dev/null || echo "auto")
         done
-    elif which nvidia-smi &>/dev/null; then
-        HW_INFO[gpu]="nvidia"
+    elif command -v nvidia-smi &>/dev/null; then
         log "NVIDIA GPU detected"
     else
-        HW_INFO[gpu]="none"
         warning "No GPU found"
     fi
 }
@@ -281,7 +278,6 @@ main(){
         case $1 in
             -p|--profile) PROFILE="$2"; shift 2;;
             -d|--dry-run) DRY_RUN=true; shift;;
-            -i|--interactive) INTERACTIVE=true; shift;;
             -b|--backup) backup_settings; shift;;
             *) shift;;
         esac

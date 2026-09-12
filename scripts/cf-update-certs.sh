@@ -1,267 +1,240 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-# ==============================================================
-#  Cloudflare + Let's Encrypt (DNS-01) Zertifikats-Updater
-#  Ohne Webserver: Zert direkt für Maildienste (Postfix/Dovecot)
-#  - Logging nach /var/log/cf-le/cf-update-certs.log
-#  - Installer: APT (nur certbot) → Snap (Plugin dns-cloudflare)
-#  - Domains: Apex + Wildcard; redundante Subdomains werden entfernt
-# ==============================================================
+# ================================================================
+# AILinux Cloudflare + Let's Encrypt Certificate Manager
+# - Ubuntu 26.04 / APT only -- NO SNAP
+# - DNS-01 via Cloudflare
+# - Certificate lineage: ailinux.me
+# - Domains: ailinux.me + *.ailinux.me
+# - Reloads Docker Apache after successful renewal
+# ================================================================
 
-# ---- Logging --------------------------------------------------
 LOG_DIR="/var/log/cf-le"
 LOG_FILE="${LOG_DIR}/cf-update-certs.log"
-mkdir -p "$LOG_DIR"
-chmod 750 "$LOG_DIR"
-exec 3>>"$LOG_FILE"
-BASH_XTRACEFD=3
-PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
-set -o pipefail
-set -x
 
-kon_log()  { printf "\033[1;32m[CF-LE]\033[0m %s\n" "$*"; }
-kon_warn() { printf "\033[1;33m[WARN]\033[0m %s\n" "$*"; }
-kon_err()  { printf "\033[1;31m[ERR]\033[0m %s\n" "$*"; }
-
-{
-  echo "===== $(date -Iseconds) START cf-update-certs ====="
-  echo "USER=$USER EUID=$EUID SHELL=$SHELL"
-  echo "PATH=$PATH"
-  uname -a || true
-  lsb_release -a 2>/dev/null || true
-  echo "---------------------------------------------------"
-} >&3
-
-on_exit() {
-  local rc=$?
-  {
-    echo "===== $(date -Iseconds) END (rc=$rc) cf-update-certs ====="
-  } >&3
-  set +x
-  if (( rc != 0 )); then
-    kon_err "Fehler (rc=$rc). Letzte 60 Zeilen:"
-    tail -n 60 "$LOG_FILE" | sed 's/^/  │ /'
-    kon_warn "Vollständiges Log: $LOG_FILE"
-  else
-    kon_log "Erfolg. Log: $LOG_FILE"
-  fi
-}
-trap on_exit EXIT
-
-# ---- Env finden & laden --------------------------------------
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-ENV_FILE_DEFAULTS=(
-  "$SCRIPT_DIR/.env"
-  "${HOME:-/root}/scripts/.env"
-  "/etc/ailinux.env"
-)
-ENV_FILE="${ENV_FILE:-}"
-
-find_env_file() {
-  if [[ -n "${ENV_FILE:-}" && -f "$ENV_FILE" ]]; then
-    echo "$ENV_FILE"; return
-  fi
-  for p in "${ENV_FILE_DEFAULTS[@]}"; do
-    [[ -f "$p" ]] && { echo "$p"; return; }
-  done
-  return 1
-}
-
-ENV_FILE_FOUND="$(find_env_file || true)"
-if [[ -z "${ENV_FILE_FOUND:-}" ]]; then
-  kon_err "Keine .env gefunden. Gesucht in:"
-  printf ' - %s\n' "${ENV_FILE_DEFAULTS[@]}"
-  kon_log "Tipp: ENV_FILE=/home/zombie/scripts/.env sudo -E bash cf-update-certs.sh"
-  exit 1
-fi
-
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE_FOUND"
-set +a
-
-# ---- Credentials ---------------------------------------------
-CF_API_TOKEN="${CF_API_TOKEN:-}"
-CF_EMAIL="${CF_EMAIL:-}"
-CF_GLOBAL_API_KEY="${CF_GLOBAL_API_KEY:-}"
-CRED_FILE="/etc/letsencrypt/cloudflare.ini"
-
-if [[ -z "$CF_API_TOKEN" && ( -z "$CF_EMAIL" || -z "$CF_GLOBAL_API_KEY" ) ]]; then
-  kon_err "Cloudflare-Creds fehlen. Setze CF_API_TOKEN ODER (CF_EMAIL + CF_GLOBAL_API_KEY) in $ENV_FILE_FOUND."
-  exit 1
-fi
-
-# ---- Domains (Apex + Wildcard) -------------------------------
+CERT_NAME="${CERT_NAME:-ailinux.me}"
 DOMAINS=(
   "ailinux.me"
   "*.ailinux.me"
 )
 
-# FIXED: Wildcard korrekt aus Apex ableiten (nie TLD!)
-collapse_domains() {
-  local apex="" d have_wc=""
-  for d in "${DOMAINS[@]}"; do
-    if [[ "$d" == \*.* ]]; then have_wc="y"; else apex="$d"; fi
+CRED_FILE="/etc/letsencrypt/cloudflare.ini"
+
+ENV_CANDIDATES=(
+  "/home/zombie/triforce/config/triforce.env"
+  "/home/zombie/triforce/.env"
+  "/home/zombie/scripts/.env"
+  "/etc/ailinux.env"
+)
+
+
+log() {
+  printf '[CF-LE] %s\n' "$*" | tee -a "$LOG_FILE"
+}
+
+warn() {
+  printf '[CF-LE][WARN] %s\n' "$*" | tee -a "$LOG_FILE" >&2
+}
+
+die() {
+  printf '[CF-LE][ERR] %s\n' "$*" | tee -a "$LOG_FILE" >&2
+  exit 1
+}
+
+require_root() {
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "Bitte mit sudo/root ausführen."
+}
+
+init_log() {
+  install -d -m 0750 "$LOG_DIR"
+  touch "$LOG_FILE"
+  chmod 0640 "$LOG_FILE"
+  log "============================================================"
+  log "Start: $(date -Iseconds)"
+}
+
+load_env() {
+  local env_file=""
+
+  for candidate in "${ENV_CANDIDATES[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      env_file="$candidate"
+      break
+    fi
   done
-  if [[ -n "$apex" ]]; then
-    local wc="*.$apex"
-    # Setze stets auf genau Apex + korrekte Wildcard
-    DOMAINS=("$apex" "$wc")
-  fi
-  # Duplikate entfernen
-  local -A seen; local out=()
-  for d in "${DOMAINS[@]}"; do
-    [[ -n "${seen[$d]:-}" ]] || { out+=("$d"); seen[$d]=1; }
-  done
-  DOMAINS=("${out[@]}")
-}
-collapse_domains
 
-require_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || { kon_err "Bitte mit sudo/root ausführen."; exit 1; }; }
-have_cmd(){ command -v "$1" >/dev/null 2>&1; }
-ensure_path(){ export PATH="/usr/local/bin:/usr/bin:/bin:/root/.local/bin:/snap/bin:${PATH}"; }
-
-# ---- System-Snapshot -----------------------------------------
-{
-  echo "APT sources:"
-  grep -hR "^[^#].*" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true
-  echo "--- Versions ---"
-  which certbot || true; certbot --version 2>/dev/null || true
-  which snap || true; snap --version 2>/dev/null || true
-  python3 --version 2>/dev/null || true
-  echo "----------------"
-} >&3
-
-# ---- Installer ------------------------------------------------
-ensure_universe() {
-  if have_cmd add-apt-repository; then
-    add-apt-repository -y universe >/dev/null 2>&1 || true
+  if [[ -n "$env_file" ]]; then
+    log "Lade Environment aus: $env_file"
+    set -a
+    # shellcheck disable=SC1090
+    source "$env_file"
+    set +a
   else
-    apt-get update -qq || true
-    apt-get install -y software-properties-common >/dev/null 2>&1 || true
-    add-apt-repository -y universe >/dev/null 2>&1 || true
+    warn "Keine Environment-Datei gefunden; vorhandene Cloudflare-Credentials werden verwendet."
   fi
+
+  # Unterstützte Alias-Namen
+  CF_API_TOKEN="${CF_API_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+  CF_EMAIL="${CF_EMAIL:-${CLOUDFLARE_EMAIL:-}}"
+  CF_GLOBAL_API_KEY="${CF_GLOBAL_API_KEY:-${CLOUDFLARE_GLOBAL_API_KEY:-${CLOUDFLARE_API_KEY:-}}}"
+
+  LE_EMAIL="${LETSENCRYPT_EMAIL:-${CF_EMAIL:-admin@ailinux.me}}"
 }
 
-install_certbot_via_apt() {
-  kon_log "Versuche Certbot via APT…"
-  apt-get update -qq
-  if have_cmd snap && snap list 2>/dev/null | grep -q '^certbot '; then
-    kon_warn "snap/certbot gefunden — entferne für APT-Betrieb."
-    snap remove certbot-dns-cloudflare || true
-    snap remove certbot || true
+ensure_packages() {
+  if command -v certbot >/dev/null 2>&1 \
+     && certbot plugins 2>/dev/null | grep -q 'dns-cloudflare'; then
+    log "Certbot + dns-cloudflare bereits vorhanden."
+    return
   fi
-  ensure_universe
-  apt-get install -y certbot || return 1
-  return 0
+
+  log "Installiere Certbot + Cloudflare-Plugin via APT..."
+
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    certbot \
+    python3-certbot-dns-cloudflare
+
+  command -v certbot >/dev/null 2>&1 \
+    || die "Certbot wurde nicht korrekt installiert."
+
+  certbot plugins 2>/dev/null | grep -q 'dns-cloudflare' \
+    || die "dns-cloudflare Plugin fehlt."
 }
 
-install_plugin_via_snap() {
-  kon_log "Installiere dns-cloudflare-Plugin via Snap…"
-  have_cmd snap || { kon_err "snap nicht verfügbar."; return 1; }
-  snap install core || true
-  snap refresh core || true
-  snap install --classic certbot || snap refresh certbot || true
-  snap set certbot trust-plugin-with-root=ok || true
-  snap install certbot-dns-cloudflare || true
-  snap connect certbot:plugin certbot-dns-cloudflare || true
-  # KEIN 'certbot-metadata' connect (bei deiner Snap-Version nicht vorhanden)
-  ln -sf /snap/bin/certbot /usr/bin/certbot
-  {
-    echo "--- snap connections certbot ---"
-    snap connections certbot || true
-  } >&3
-  certbot plugins | grep -q 'dns-cloudflare'
+credentials_valid() {
+  [[ -s "$CRED_FILE" ]] || return 1
+
+  grep -Eq '^[[:space:]]*dns_cloudflare_api_token[[:space:]]*=' "$CRED_FILE" \
+    && return 0
+
+  grep -Eq '^[[:space:]]*dns_cloudflare_api_key[[:space:]]*=' "$CRED_FILE" \
+    && grep -Eq '^[[:space:]]*dns_cloudflare_email[[:space:]]*=' "$CRED_FILE" \
+    && return 0
+
+  return 1
 }
 
-install_certbot() {
-  ensure_path
-  if have_cmd apt-get; then
-    install_certbot_via_apt || true
-  fi
-  install_plugin_via_snap || kon_err "dns-cloudflare-Plugin via Snap nicht verfügbar."
-  have_cmd certbot || kon_err "Certbot nicht verfügbar."
-  certbot plugins 2>/dev/null | grep -q 'dns-cloudflare' || kon_err "dns-cloudflare-Plugin nicht sichtbar."
-}
+setup_credentials() {
+  install -d -m 0700 /etc/letsencrypt
 
-# ---- Creds & Mail-Deploy-Hook --------------------------------
-setup_creds() {
-  mkdir -p /etc/letsencrypt
-  if [[ -n "$CF_API_TOKEN" ]]; then
-    cat > "$CRED_FILE" <<EOF
-dns_cloudflare_api_token = ${CF_API_TOKEN}
-EOF
-    kon_log "Cloudflare Credentials (API Token) → $CRED_FILE"
+  if [[ -n "${CF_API_TOKEN:-}" ]]; then
+    log "Aktualisiere Cloudflare-Credentials aus API Token."
+    umask 077
+    printf 'dns_cloudflare_api_token = %s\n' "$CF_API_TOKEN" > "$CRED_FILE"
+
+  elif [[ -n "${CF_EMAIL:-}" && -n "${CF_GLOBAL_API_KEY:-}" ]]; then
+    log "Aktualisiere Cloudflare-Credentials aus Global API Key."
+    umask 077
+    {
+      printf 'dns_cloudflare_email = %s\n' "$CF_EMAIL"
+      printf 'dns_cloudflare_api_key = %s\n' "$CF_GLOBAL_API_KEY"
+    } > "$CRED_FILE"
+
+  elif credentials_valid; then
+    log "Verwende vorhandene Cloudflare-Credentials: $CRED_FILE"
+
   else
-    cat > "$CRED_FILE" <<EOF
-dns_cloudflare_email = ${CF_EMAIL}
-dns_cloudflare_api_key = ${CF_GLOBAL_API_KEY}
-EOF
-    kon_log "Cloudflare Credentials (Global API Key) → $CRED_FILE"
+    die "Keine nutzbaren Cloudflare-Credentials gefunden."
   fi
-  chmod 600 "$CRED_FILE"
+
+  chown root:root "$CRED_FILE"
+  chmod 0600 "$CRED_FILE"
 }
 
-setup_mail_deploy_hook() {
-  local hook="/etc/letsencrypt/renewal-hooks/deploy/10-reload-mail.sh"
-  mkdir -p "$(dirname "$hook")"
-  cat > "$hook" <<'EOF'
+install_deploy_hook() {
+  local hook="/etc/letsencrypt/renewal-hooks/deploy/20-ailinux-services.sh"
+
+  install -d -m 0755 "$(dirname "$hook")"
+
+  cat > "$hook" <<'HOOK'
 #!/usr/bin/env bash
-set -euo pipefail
-log(){ printf "[deploy-hook] %s\n" "$*"; }
-services=(postfix dovecot)  # ggf. erweitern: exim4, opensmtpd, etc.
-for s in "${services[@]}"; do
-  if systemctl is-active "$s" >/dev/null 2>&1; then
-    log "reloading $s..."
-    systemctl reload "$s" || systemctl restart "$s" || true
-  else
-    log "$s nicht aktiv – übersprungen."
+set -u
+
+COMPOSE="/home/zombie/triforce/docker/wordpress/docker-compose.yml"
+
+logger -t ailinux-certbot "Let's Encrypt certificate deployed"
+
+if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
+  docker compose -f "$COMPOSE" restart apache \
+    || logger -t ailinux-certbot "WARNING: WordPress Apache restart failed"
+fi
+
+for service in postfix dovecot; do
+  if systemctl is-active --quiet "$service" 2>/dev/null; then
+    systemctl reload "$service" \
+      || systemctl restart "$service" \
+      || true
   fi
 done
-EOF
-  chmod +x "$hook"
-  kon_log "Mail-Deploy-Hook installiert (Postfix/Dovecot)."
+HOOK
+
+  chmod 0755 "$hook"
 }
 
-# ---- Zertifikat anfordern ------------------------------------
-request_cert() {
-  local domains_args=()
-  for d in "${DOMAINS[@]}"; do domains_args+=(-d "$d"); done
+request_or_renew() {
+  local args=()
 
-  kon_log "Fordere Zertifikat für:"
-  printf '   • %s\n' "${DOMAINS[@]}"
+  for domain in "${DOMAINS[@]}"; do
+    args+=(-d "$domain")
+  done
 
-  ensure_path
-  {
-    echo "--- certbot which/path ---"
-    which certbot || true
-    readlink -f "$(command -v certbot)" || true
-    echo "--- certbot plugins ---"
-    certbot plugins || true
-  } >&3
-
-  local reg_email="${CF_EMAIL:-admin@${DOMAINS[0]}}"
+  log "Prüfe Zertifikat: ${DOMAINS[*]}"
 
   certbot certonly \
+    --cert-name "$CERT_NAME" \
     --dns-cloudflare \
     --dns-cloudflare-credentials "$CRED_FILE" \
-    --agree-tos -m "$reg_email" --non-interactive \
-    --keep-until-expiring \
+    --dns-cloudflare-propagation-seconds 30 \
     --preferred-challenges dns \
-    --deploy-hook "/etc/letsencrypt/renewal-hooks/deploy/10-reload-mail.sh" \
-    "${domains_args[@]}"
+    --agree-tos \
+    --non-interactive \
+    --keep-until-expiring \
+    --email "$LE_EMAIL" \
+    "${args[@]}"
 
-  kon_log "Zertifikate unter /etc/letsencrypt/live/${DOMAINS[0]}/ bereit."
+  [[ -s "/etc/letsencrypt/live/${CERT_NAME}/fullchain.pem" ]] \
+    || die "fullchain.pem fehlt nach Certbot-Lauf."
+
+  [[ -s "/etc/letsencrypt/live/${CERT_NAME}/privkey.pem" ]] \
+    || die "privkey.pem fehlt nach Certbot-Lauf."
+
+  log "Zertifikat vorhanden: /etc/letsencrypt/live/${CERT_NAME}/"
 }
 
-# ---- Main -----------------------------------------------------
+show_expiry() {
+  if command -v openssl >/dev/null 2>&1; then
+    local expiry
+    expiry="$(
+      openssl x509 \
+        -in "/etc/letsencrypt/live/${CERT_NAME}/cert.pem" \
+        -noout -enddate 2>/dev/null || true
+    )"
+    [[ -n "$expiry" ]] && log "$expiry"
+  fi
+}
+
 main() {
   require_root
-  install_certbot
-  setup_creds
-  setup_mail_deploy_hook
-  request_cert
-  kon_log "✅ Fertig. Brumo hat die richtige Wildcard im Honigtopf."
+  init_log
+  load_env
+  ensure_packages
+  setup_credentials
+  install_deploy_hook
+
+  case "${1:-}" in
+    --dry-run)
+      log "Starte Certbot Renewal Dry-Run."
+      certbot renew --dry-run
+      ;;
+    *)
+      request_or_renew
+      show_expiry
+      ;;
+  esac
+
+  log "Fertig: $(date -Iseconds)"
 }
-main
+
+main "$@"

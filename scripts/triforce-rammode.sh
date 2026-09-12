@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TriForce RAM-Mode Controller v1.0
 # Runs TriForce/TriStar Backend completely in RAM for maximum performance
 
@@ -111,7 +111,8 @@ start_disk_streamer() {
     
     # Kill existing streamer if running
     if [[ -f "$STREAMER_PID_FILE" ]]; then
-        local old_pid=$(cat "$STREAMER_PID_FILE")
+        local old_pid
+        old_pid=$(cat "$STREAMER_PID_FILE")
         if kill -0 "$old_pid" 2>/dev/null; then
             kill "$old_pid"
             sleep 2
@@ -140,7 +141,8 @@ stop_disk_streamer() {
     log_info "Stopping disk streamer..."
     
     if [[ -f "$STREAMER_PID_FILE" ]]; then
-        local pid=$(cat "$STREAMER_PID_FILE")
+        local pid
+        pid=$(cat "$STREAMER_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
             kill "$pid"
             wait "$pid" 2>/dev/null || true
@@ -158,7 +160,8 @@ start_backend() {
     
     # Check if already running
     if [[ -f "$UVICORN_PID_FILE" ]]; then
-        local pid=$(cat "$UVICORN_PID_FILE")
+        local pid
+        pid=$(cat "$UVICORN_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
             log_warn "TriForce backend already running (PID: $pid)"
             return 0
@@ -188,7 +191,8 @@ start_backend() {
     # Wait a moment and check if it started
     sleep 3
     if [[ -f "$UVICORN_PID_FILE" ]]; then
-        local pid=$(cat "$UVICORN_PID_FILE")
+        local pid
+        pid=$(cat "$UVICORN_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
             log_success "TriForce backend started (PID: $pid)"
         else
@@ -206,7 +210,8 @@ stop_backend() {
     log_info "Stopping TriForce backend..."
     
     if [[ -f "$UVICORN_PID_FILE" ]]; then
-        local pid=$(cat "$UVICORN_PID_FILE")
+        local pid
+        pid=$(cat "$UVICORN_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid"
             
@@ -273,7 +278,8 @@ status() {
     
     # Check disk streamer
     if [[ -f "$STREAMER_PID_FILE" ]]; then
-        local streamer_pid=$(cat "$STREAMER_PID_FILE")
+        local streamer_pid
+        streamer_pid=$(cat "$STREAMER_PID_FILE")
         if kill -0 "$streamer_pid" 2>/dev/null; then
             echo -e "Disk Streamer: ${GREEN}RUNNING${NC} (PID: $streamer_pid)"
         else
@@ -286,7 +292,8 @@ status() {
     
     # Check backend
     if [[ -f "$UVICORN_PID_FILE" ]]; then
-        local backend_pid=$(cat "$UVICORN_PID_FILE")
+        local backend_pid
+        backend_pid=$(cat "$UVICORN_PID_FILE")
         if kill -0 "$backend_pid" 2>/dev/null; then
             echo -e "Backend: ${GREEN}RUNNING${NC} (PID: $backend_pid)"
         else

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================================
 # 🚀 WORDPRESS OPTIMIZED DEPLOYMENT 🚀
 # Führt alle Optimierungen aus und startet Container neu
@@ -6,7 +6,7 @@
 # ============================================================================
 
 set -e
-WP_DIR="/home/zombie/triforce/wordpress"
+WP_DIR="/home/zombie/triforce/docker/wordpress"
 cd "$WP_DIR"
 
 echo "🚀 WORDPRESS OPTIMIZED DEPLOYMENT"
@@ -20,7 +20,7 @@ bash /home/zombie/triforce/scripts/optimize-wordpress-extreme.sh
 # Step 2: Backup current docker-compose.yml
 echo ""
 echo "📦 [2/4] Backing up docker-compose.yml..."
-cp docker-compose.yml docker-compose.yml.bak.$(date +%Y%m%d_%H%M%S)
+cp docker-compose.yml "docker-compose.yml.bak.$(date +%Y%m%d_%H%M%S)"
 
 # Step 3: Create redis directory if missing
 mkdir -p redis
@@ -50,9 +50,9 @@ fi
 # Step 5: Restart containers
 echo ""
 echo "📦 [4/4] Restarting WordPress containers..."
-docker-compose down
+docker compose down
 sleep 2
-docker-compose up -d
+docker compose up -d
 
 # Wait for health
 echo ""
@@ -64,7 +64,7 @@ echo ""
 echo "============================================"
 echo "📊 CONTAINER STATUS"
 echo "============================================"
-docker-compose ps
+docker compose ps
 
 echo ""
 echo "============================================"

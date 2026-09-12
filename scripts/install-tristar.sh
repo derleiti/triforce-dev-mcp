@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # TriStar v2.80 Installation Script
 # Installs and configures the TriStar Chain Orchestration System

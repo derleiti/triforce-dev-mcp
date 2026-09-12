@@ -53,24 +53,29 @@ cmd_clean_python_cache() {
   echo "Python cache cleanup done"
 }
 
+config_value() {
+  local key="$1" file="${TRIFORCE_CONFIG_FILE:-$ROOT_DIR/config/triforce.env}"
+  [[ -r "$file" ]] || return 1
+  awk -F= -v k="$key" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$file"
+}
+
 cmd_status() {
-  local p1 p2 health_ok
-  p1="${TRIFORCE_API_PORT:-9100}"
-  p2="9000"
-  health_ok=0
-  set +e
-  if curl -fsS "http://127.0.0.1:${p1}/health" >/dev/null 2>&1; then
-    echo "Health: http://127.0.0.1:${p1}/health OK"
-    health_ok=1
-  elif curl -fsS "http://127.0.0.1:${p2}/health" >/dev/null 2>&1; then
-    echo "Health: http://127.0.0.1:${p2}/health OK (legacy port fallback)"
-    health_ok=1
-  fi
-  if [[ "$health_ok" -eq 0 ]]; then
-    echo "Health: backend not reachable on ${p1} or ${p2}"
+  local host port health_url
+  host="${TRIFORCE_BIND_HOST:-$(config_value TRIFORCE_BIND_HOST || true)}"
+  port="${TRIFORCE_API_PORT:-$(config_value TRIFORCE_API_PORT || true)}"
+  host="${host:-127.0.0.1}"
+  port="${port:-9000}"
+  [[ "$host" == "0.0.0.0" ]] && host="127.0.0.1"
+  health_url="http://${host}:${port}/health"
+  if curl -fsS --max-time 5 "$health_url" >/dev/null 2>&1; then
+    echo "Health: $health_url OK"
+  else
+    echo "Health: backend not reachable at $health_url"
   fi
   systemctl status triforce --no-pager -n 30 || true
-  systemctl status federation-node --no-pager -n 30 || true
+  if systemctl list-unit-files federation-node.service >/dev/null 2>&1; then
+    systemctl status federation-node --no-pager -n 30 || true
+  fi
 }
 
 cmd_start_services_except_triforce() {

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ################################################################################
 # fix-cli-agents.sh - Installiert CLI-Tools für zombie User (nicht root!)
 # AUSFÜHREN ALS: zombie (NICHT sudo!)
@@ -32,9 +32,13 @@ export PATH="$NPM_PREFIX/bin:$PATH"
 
 # In .bashrc eintragen falls nicht vorhanden
 if ! grep -q 'npm-global/bin' ~/.bashrc 2>/dev/null; then
-    echo '' >> ~/.bashrc
-    echo '# npm global binaries' >> ~/.bashrc
-    echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
+    {
+        echo ''
+        echo '# npm global binaries'
+        # literal shell code is appended to .bashrc
+        # shellcheck disable=SC2016
+        echo 'export PATH="$HOME/.npm-global/bin:$PATH"'
+    } >> ~/.bashrc
     echo "[✓] PATH zu ~/.bashrc hinzugefügt"
 fi
 
@@ -47,8 +51,8 @@ echo "[2/6] Installiere CLI-Tools für User zombie..."
 echo "  → @anthropic-ai/claude-code..."
 npm install -g @anthropic-ai/claude-code@latest 2>&1 | tail -3
 
-echo "  → Antigravity CLI (agy)..."
-curl -fsSL https://antigravity.google/cli/install.sh | bash >/dev/null
+echo "  → @google/gemini-cli..."
+npm install -g @google/gemini-cli@latest 2>&1 | tail -3
 
 echo "  → @openai/codex..."
 npm install -g @openai/codex@latest 2>&1 | tail -3
@@ -71,7 +75,7 @@ TRIFORCE_ROOT="/home/zombie/triforce/triforce"
 BINARY="$HOME/.npm-global/bin/claude"
 
 # Fallback
-[[ ! -x "$BINARY" ]] && BINARY=$(which claude 2>/dev/null || echo "$BINARY")
+[[ ! -x "$BINARY" ]] && BINARY=$(command -v claude 2>/dev/null || echo "$BINARY")
 
 export HOME="$TRIFORCE_ROOT/runtime/claude"
 export XDG_CONFIG_HOME="$HOME"
@@ -110,7 +114,7 @@ set -euo pipefail
 TRIFORCE_ROOT="/home/zombie/triforce/triforce"
 BINARY="$HOME/.npm-global/bin/codex"
 
-[[ ! -x "$BINARY" ]] && BINARY=$(which codex 2>/dev/null || echo "$BINARY")
+[[ ! -x "$BINARY" ]] && BINARY=$(command -v codex 2>/dev/null || echo "$BINARY")
 
 export HOME="$TRIFORCE_ROOT/runtime/codex"
 export XDG_CONFIG_HOME="$HOME"
@@ -139,8 +143,38 @@ fi
 exec "$BINARY" "${ARGS[@]}"
 EOF
 
-# Antigravity wrapper is tracked in the repository. Do not regenerate it here.
-chmod +x "$TRIFORCE_DIR/bin/agy-triforce" "$TRIFORCE_DIR/bin/gemini-triforce"
+# Gemini Wrapper
+cat > "$TRIFORCE_DIR/bin/gemini-triforce" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+TRIFORCE_ROOT="/home/zombie/triforce/triforce"
+BINARY="$HOME/.npm-global/bin/gemini"
+
+[[ ! -x "$BINARY" ]] && BINARY=$(command -v gemini 2>/dev/null || echo "$BINARY")
+
+export HOME="$TRIFORCE_ROOT/runtime/gemini"
+export XDG_CONFIG_HOME="$HOME"
+
+mkdir -p "$HOME/.gemini"
+
+ARGS=("$@")
+
+IS_MCP=false
+for a in "${ARGS[@]:-}"; do
+  [[ "$a" == "mcp" ]] && IS_MCP=true && break
+done
+
+if [[ "$IS_MCP" == "false" ]]; then
+  if [[ ! " ${ARGS[*]:-} " =~ " -y " ]] && [[ ! " ${ARGS[*]:-} " =~ " --yolo " ]]; then
+    ARGS+=("-y")
+  fi
+fi
+
+[[ "${TRIFORCE_DEBUG:-false}" == "true" ]] && ARGS+=("--debug")
+
+exec "$BINARY" "${ARGS[@]}"
+EOF
 
 chmod +x "$TRIFORCE_DIR/bin/"*-triforce
 
@@ -203,8 +237,24 @@ type = "http"
 url = "$MCP_URL"
 EOFCODEX
 
-# Antigravity MCP config is merged by agy-triforce into the signed-in zombie HOME.
-"$TRIFORCE_DIR/bin/agy-triforce" --help >/dev/null
+# Gemini MCP Config
+GEMINI_CONFIG="$TRIFORCE_DIR/runtime/gemini/.gemini/settings.json"
+mkdir -p "$(dirname "$GEMINI_CONFIG")"
+cat > "$GEMINI_CONFIG" << EOFGEMINI
+{
+  "mcpServers": {
+    "triforce-mcp": {
+      "httpUrl": "$MCP_URL"
+    }
+  },
+  "theme": "Default Dark",
+  "coreTools": {
+    "googleSearch": true,
+    "urlContext": true,
+    "codeExecution": true
+  }
+}
+EOFGEMINI
 
 echo "[✓] MCP Configs geschrieben (ohne OAuth)"
 
@@ -216,7 +266,7 @@ echo "[6/6] Verifiziere Installation..."
 
 echo ""
 echo "Installierte CLI-Tools:"
-for cmd in claude codex agy opencode; do
+for cmd in claude codex gemini opencode; do
     if command -v $cmd &>/dev/null; then
         version=$($cmd --version 2>/dev/null | head -1 || echo "OK")
         echo "  ✓ $cmd: $version"

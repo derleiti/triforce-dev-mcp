@@ -1,14 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ################################################################################
 # fix-permissions.sh - Corrects file permissions for AILinux Backend
 # RUN AS ROOT: sudo ./fix-permissions.sh
 ################################################################################
-set -e
+set -Eeuo pipefail
 
 # Dynamisch: User aus Verzeichnis-Owner ermitteln
-BASE_DIR="/home/${SUDO_USER:-$USER}/triforce"
-OWNER="${SUDO_USER:-$USER}"
-GROUP="${SUDO_USER:-$USER}"
+OWNER="${TRIFORCE_USER:-${SUDO_USER:-zombie}}"
+GROUP="${TRIFORCE_GROUP:-$OWNER}"
+BASE_DIR="${TRIFORCE_DIR:-$(getent passwd "$OWNER" | cut -d: -f6)/triforce}"
 DOCKER_GROUP="docker"
 
 echo "=== AILinux Backend Permission Fix ==="
@@ -26,7 +26,7 @@ cd "$BASE_DIR"
 
 # 1. Base Ownership (OHNE node_modules, .venv, .git - die dauern ewig)
 echo "[1/5] Setting base ownership to ${OWNER}:${GROUP} (excluding large dirs)..."
-find . -maxdepth 1 ! -name "node_modules" ! -name ".venv" ! -name ".git" ! -name "wordpress" ! -name "mailserver" ! -name "ailinux-repo" -exec chown -R ${OWNER}:${GROUP} {} \;
+find . -maxdepth 1 ! -name "node_modules" ! -name ".venv" ! -name ".git" ! -name "docker" -exec chown -R "${OWNER}:${GROUP}" {} \;
 
 # 2. Executable Scripts
 echo "[2/5] Setting executable permissions..."
@@ -35,25 +35,22 @@ chmod 755 scripts/start-backend.sh 2>/dev/null || true
 
 # 3. Docker & WordPress Directories
 echo "[3/5] Setting Docker/WP permissions..."
-if [[ -d "wordpress/html" ]]; then
-    echo "  -> Setting WordPress ownership to 33:33..."
-    chown -R 33:33 wordpress/html
-    find wordpress/html -type d -exec chmod 755 {} \;
-    find wordpress/html -type f -exec chmod 644 {} \;
+if [[ -d "docker/wordpress/html" ]]; then
+    echo "  -> Setting WordPress webroot ownership to 33:33..."
+    chown -R 33:33 docker/wordpress/html
+    find docker/wordpress/html -type d -exec chmod 755 {} \;
+    find docker/wordpress/html -type f -exec chmod 644 {} \;
 fi
 
-for dir in ailinux-repo/repo; do
-    if [[ -d "$dir" ]]; then
-        chown -R ${OWNER}:${DOCKER_GROUP} "$dir"
-        chmod -R 775 "$dir"
-    fi
-done
+if [[ -d "docker/repository" ]]; then
+    chown -R "${OWNER}:${DOCKER_GROUP}" docker/repository
+fi
 
 # 4. Runtime & Logs
 echo "[4/5] Setting runtime permissions..."
-for dir in logs triforce/logs triforce/runtime triforce/secrets; do
+for dir in logs runtime config/agents; do
     if [[ -d "$dir" ]]; then
-        chown -R ${OWNER}:${GROUP} "$dir"
+        chown -R "${OWNER}:${GROUP}" "$dir"
         chmod -R 775 "$dir"
     fi
 done
@@ -62,7 +59,7 @@ done
 echo "[5/5] Securing secrets..."
 find . -path ./node_modules -prune -o -path ./.venv -prune -o -name ".env" -exec chmod 600 {} \;
 find . -path ./node_modules -prune -o -path ./.venv -prune -o -name "*.key" -exec chmod 600 {} \;
-find triforce/secrets -type f -exec chmod 600 {} \; 2>/dev/null || true
+find config -type f \( -name "*.env" -o -name "*.key" -o -name "*.pem" \) -exec chmod 600 {} \; 2>/dev/null || true
 
 echo "=== Done ==="
-echo "Restart the backend: sudo systemctl restart ailinux-backend"
+echo "Restart the backend: sudo systemctl restart triforce.service"

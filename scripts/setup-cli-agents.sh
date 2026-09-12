@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ============================================================================
 # CLI Coding Agents Setup Script v1.0
@@ -18,11 +18,11 @@ set -euo pipefail
 # KONSTANTEN
 # ============================================================================
 readonly SCRIPT_VERSION="1.0.0"
-readonly SCRIPT_NAME=$(basename "$0")
+SCRIPT_NAME=$(basename "$0")
+readonly SCRIPT_NAME
 readonly BASE_DIR="/home/zombie/triforce"
 readonly NPM_GLOBAL_DIR="/root/.npm-global"
 readonly MCP_URL="http://localhost:9100/mcp"
-readonly MCP_SSE_URL="http://localhost:9100/mcp/sse"
 
 # npm Pakete
 readonly NPM_PACKAGES=(
@@ -81,6 +81,8 @@ run_cmd() {
         log_info "Executing: $*"
     fi
     if [ "$DRY_RUN" -eq 0 ]; then
+        # Commands are intentionally assembled as shell snippets by the legacy call sites.
+        # shellcheck disable=SC2294
         eval "$@"
     else
         echo -e "${YELLOW}[DRY-RUN]${NC} Would execute: $*"

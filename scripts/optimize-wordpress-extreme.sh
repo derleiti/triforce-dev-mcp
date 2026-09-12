@@ -1,12 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================================
 # 🔥 EXTREME WORDPRESS OPTIMIZATION SCRIPT 🔥
 # AILinux DevOps - Performance Tuning
 # Ausführen mit: sudo bash scripts/optimize-wordpress-extreme.sh
 # ============================================================================
 
-set -e
-cd /home/zombie/triforce/wordpress
+set -Eeuo pipefail
+WP_DIR="${AILINUX_WP_DIR:-/home/zombie/triforce/docker/wordpress}"
+[[ -d "$WP_DIR" ]] || { echo "WordPress stack not found: $WP_DIR" >&2; exit 1; }
+cd "$WP_DIR"
 
 echo "🔥 EXTREME WORDPRESS OPTIMIZATION 🔥"
 echo "====================================="
@@ -204,7 +206,7 @@ echo "  • Apache: Compression + Long-term Caching"
 echo ""
 echo "🔧 Nächste Schritte:"
 echo "1. docker-compose.yml anpassen (siehe unten)"
-echo "2. docker-compose down && docker-compose up -d"
+echo "2. docker compose down && docker compose up -d"
 echo ""
 echo "Beispiel docker-compose.yml Änderungen:"
 echo "  wordpress_fpm:"

@@ -1,69 +1,30 @@
-#!/bin/bash
-# OAuth 2.0 MCP Authentication Fix
-# Run as root: sudo ./apply-oauth-fix.sh
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-set -e
+# Legacy compatibility check. The OAuth implementation now lives directly in
+# TriForce app/routes/oauth_service.py and app/utils/auth_middleware.py.
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
 
-BACKEND_DIR="/home/zombie/triforce"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+required=(
+  "$TRIFORCE_DIR/app/routes/oauth_service.py"
+  "$TRIFORCE_DIR/app/utils/auth_middleware.py"
+  "$TRIFORCE_DIR/app/utils/mcp_auth.py"
+)
 
-echo "🔧 AILinux MCP OAuth 2.0 Fix"
-echo "============================="
-echo ""
+missing=0
+for f in "${required[@]}"; do
+  if [[ -f "$f" ]]; then echo "OK: $f"; else echo "MISSING: $f" >&2; missing=1; fi
+done
 
-# Backup original files
-echo "📦 Creating backups..."
-mkdir -p "$BACKEND_DIR/.backups/oauth-fix-$(date +%Y%m%d)"
-cp "$BACKEND_DIR/app/utils/mcp_auth.py" "$BACKEND_DIR/.backups/oauth-fix-$(date +%Y%m%d)/mcp_auth.py.bak" 2>/dev/null || true
-
-# Apply the auth fix
-echo "🔐 Updating mcp_auth.py..."
-cp "$SCRIPT_DIR/mcp_auth_oauth2_fix.py" "$BACKEND_DIR/app/utils/mcp_auth.py"
-chown zombie:zombie "$BACKEND_DIR/app/utils/mcp_auth.py"
-chmod 644 "$BACKEND_DIR/app/utils/mcp_auth.py"
-
-# Create token directory
-echo "📁 Creating token storage directory..."
-mkdir -p /var/tristar/auth
-chown zombie:zombie /var/tristar/auth
-chmod 700 /var/tristar/auth
-
-# Ensure env vars are set
-echo "🔑 Checking environment variables..."
-if ! grep -q "MCP_API_KEY" "$BACKEND_DIR/.env" 2>/dev/null; then
-    echo "⚠️  MCP_API_KEY not found in .env - add it!"
-fi
-if ! grep -q "MCP_OAUTH_USER" "$BACKEND_DIR/.env" 2>/dev/null; then
-    echo "⚠️  MCP_OAUTH_USER not found in .env - add it!"
-fi
-if ! grep -q "MCP_OAUTH_PASS" "$BACKEND_DIR/.env" 2>/dev/null; then
-    echo "⚠️  MCP_OAUTH_PASS not found in .env - add it!"
+if (( missing )); then
+  echo "Current OAuth implementation is incomplete; repair/update the TriForce source tree instead of applying the retired patch." >&2
+  exit 1
 fi
 
-echo ""
-echo "✅ OAuth 2.0 fix applied!"
-echo ""
-echo "📋 Supported authentication methods:"
-echo "   1. Bearer Token (Authorization: Bearer <token>)"
-echo "   2. X-API-Key header (for Cursor IDE)"
-echo "   3. X-MCP-Key header (alias)"
-echo "   4. Basic Auth (legacy)"
-echo ""
-echo "🔄 Restart the backend:"
-echo "   systemctl restart ailinux-backend"
-
-# Remove duplicate OAuth endpoints from mcp_remote.py (lines 2495-2595)
-echo "🧹 Removing duplicate OAuth endpoints from mcp_remote.py..."
-MCP_FILE="$BACKEND_DIR/app/routes/mcp_remote.py"
-if [ -f "$MCP_FILE" ]; then
-    # Backup
-    cp "$MCP_FILE" "$BACKEND_DIR/.backups/oauth-fix-$(date +%Y%m%d)/mcp_remote.py.bak"
-    
-    # Remove lines 2495-2595 (duplicate OAuth section at the end)
-    head -n 2494 "$MCP_FILE" > /tmp/mcp_remote_fixed.py
-    mv /tmp/mcp_remote_fixed.py "$MCP_FILE"
-    chown zombie:zombie "$MCP_FILE"
-    chmod 644 "$MCP_FILE"
-    
-    echo "✅ Duplicate endpoints removed"
+if systemctl list-unit-files triforce.service >/dev/null 2>&1; then
+  echo "TriForce OAuth files are present. Service: triforce.service"
+  echo "No legacy patch was applied."
+else
+  echo "TriForce files are present, but triforce.service is not installed." >&2
+  exit 1
 fi

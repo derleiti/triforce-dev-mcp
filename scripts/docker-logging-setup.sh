@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================================
 # Docker Log Collector für TriStar Central Logging
 # ============================================================================
@@ -16,9 +16,9 @@ SERVICE_PATH="/etc/systemd/system/docker-log-sync.service"
 
 # Bekannte Docker-Stacks
 STACKS=(
-    "wordpress:/home/zombie/wordpress"
-    "ailinux-repo:/home/zombie/ailinux-repo"
-    "mailserver:/home/zombie/mailserver"
+    "wordpress:${TRIFORCE_DIR:-/home/zombie/triforce}/docker/wordpress"
+    "ailinux-repo:${TRIFORCE_DIR:-/home/zombie/triforce}/docker/repository"
+    "mailserver:${TRIFORCE_DIR:-/home/zombie/triforce}/docker/mailserver"
 )
 
 # Farben

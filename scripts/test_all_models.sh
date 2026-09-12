@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Test all chat models with short response
 
 echo "=== Testing All Models ==="
