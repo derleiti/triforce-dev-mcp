@@ -3,7 +3,8 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSION="$(tr -d '\n' < "$ROOT/VERSION")"
 ARCH="$(dpkg --print-architecture)"
-DEBIAN_VERSION="${DEBIAN_VERSION:-1:${VERSION}}"
+DEBIAN_VERSION="${DEBIAN_VERSION:-1:${VERSION}-1}"
+DEB_FILE_VERSION="${DEBIAN_VERSION#*:}"
 OUT="${OUT_DIR:-$ROOT/dist/2.85-beta2}"
 RUNTIME="${BACKEND_RUNTIME:-/tmp/triforce-2.85-backend-runtime}"
 GUI="${GUI_BUNDLE:-/tmp/triforce-2.85-nuitka/main.dist}"
@@ -26,7 +27,7 @@ secret_scan(){
 }
 
 make_control(){
-  local pkg="$WORK/control" deb="$OUT/triforce-control-center_${VERSION}_${ARCH}.deb"
+  local pkg="$WORK/control" deb="$OUT/triforce-control-center_${DEB_FILE_VERSION}_${ARCH}.deb"
   mkdir -p "$pkg/DEBIAN" "$pkg/opt/triforce-control-center" "$pkg/usr/bin" \
     "$pkg/usr/share/applications" "$pkg/usr/share/icons/hicolor/scalable/apps" \
     "$pkg/usr/share/polkit-1/actions" "$pkg/usr/share/doc/triforce-control-center"
@@ -64,7 +65,7 @@ EOF
 }
 
 make_backend(){
-  local pkg="$WORK/backend" deb="$OUT/triforce-backend_${VERSION}_${ARCH}.deb"
+  local pkg="$WORK/backend" deb="$OUT/triforce-backend_${DEB_FILE_VERSION}_${ARCH}.deb"
   mkdir -p "$pkg/DEBIAN" "$pkg/opt/triforce" "$pkg/usr/lib/triforce" "$pkg/usr/bin" \
     "$pkg/usr/lib/systemd/system" "$pkg/usr/share/doc/triforce-backend"
   # Explicit source payload: no production .env/auth/data/logs/backups/.git/docker volumes.
@@ -124,13 +125,29 @@ Description: TriForce 2.85 Beta 2 AI backend
  Headless FastAPI/MCP backend with an isolated prebuilt Python runtime.
  No Python packages are installed into the system interpreter at package time.
 EOF
+  cat > "$pkg/DEBIAN/preinst" <<'EOF'
+#!/bin/sh
+set -e
+MARKER=/run/triforce-package-was-active
+rm -f "$MARKER"
+if [ "$1" = upgrade ] && /bin/systemctl is-active --quiet triforce.service 2>/dev/null; then
+  : > "$MARKER"
+  /bin/systemctl stop triforce.service
+fi
+exit 0
+EOF
   cat > "$pkg/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
+MARKER=/run/triforce-package-was-active
 /usr/lib/triforce/triforce-admin-helper runtime-init
 /usr/lib/triforce/triforce-admin-helper config-init
 /bin/systemctl daemon-reload || true
-# Deliberately do not start or enable the service. Those are independent choices.
+if [ -f "$MARKER" ]; then
+  rm -f "$MARKER"
+  /bin/systemctl restart triforce.service
+fi
+# Fresh installs remain an explicit operator choice; upgrades preserve prior active state.
 exit 0
 EOF
   cat > "$pkg/DEBIAN/prerm" <<'EOF'
@@ -155,7 +172,7 @@ fi
 # /etc/triforce and /var/lib/triforce are intentionally retained, including purge.
 exit 0
 EOF
-  chmod 755 "$pkg/DEBIAN/postinst" "$pkg/DEBIAN/prerm" "$pkg/DEBIAN/postrm"
+  chmod 755 "$pkg/DEBIAN/preinst" "$pkg/DEBIAN/postinst" "$pkg/DEBIAN/prerm" "$pkg/DEBIAN/postrm"
   find "$pkg" -type d -exec chmod 755 {} +
   secret_scan "$pkg"
   dpkg-deb --root-owner-group --build "$pkg" "$deb" >/dev/null

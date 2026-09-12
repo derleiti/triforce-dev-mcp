@@ -132,3 +132,16 @@ def test_packaged_service_uses_state_owned_ssh_identity():
     assert 'key_path = str(SSH_KEY_PATH)' in admin
     assert '["-i", str(SSH_KEY_PATH)]' in admin
     assert '/home/zombie/.ssh/id_ed25519' not in admin
+
+
+def test_beta2_upgrade_stops_running_service_before_unpack_and_restores_it():
+    root = Path(__file__).parents[1]
+    builder = (root / "scripts/release/build-triforce-2.85-beta2.sh").read_text()
+    assert 'DEBIAN_VERSION="${DEBIAN_VERSION:-1:${VERSION}-1}"' in builder
+    assert 'DEB_FILE_VERSION="${DEBIAN_VERSION#*:}"' in builder
+    assert 'cat > "$pkg/DEBIAN/preinst"' in builder
+    assert 'systemctl is-active --quiet triforce.service' in builder
+    assert 'systemctl stop triforce.service' in builder
+    assert 'MARKER=/run/triforce-package-was-active' in builder
+    assert 'systemctl restart triforce.service' in builder
+    assert 'Fresh installs remain an explicit operator choice' in builder
