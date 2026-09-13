@@ -42,3 +42,14 @@ def test_native_workspace_has_read_write_and_path_traversal_guards():
         assert implementation in saf
     assert 'path traversal rejected' in saf
     assert 'file exceeds 2 MiB text limit' in saf
+
+
+def test_android_pair_code_is_stable_copy_paste_ui():
+    activity = (ANDROID / "app/src/main/java/me/ailinux/workspace/MainActivity.java").read_text()
+    assert 'Copy code' in activity
+    assert 'Paste code' in activity
+    assert 'ClipboardManager' in activity
+    assert 'pair.hasFocus()||pair.hasSelection()' in activity
+    assert 'Pair code copied.' in activity
+    assert 'Pair code pasted.' in activity
+    assert 'Native Android routes local shares directly through the foreground MCP executor' in activity
