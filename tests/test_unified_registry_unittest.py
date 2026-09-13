@@ -30,15 +30,15 @@ class TestCanonicalMcpSurface(unittest.TestCase):
         self.assertIn("memory_history", names)
         self.assertIn("code_search", names)
 
-    def test_full_surface_is_canonical_and_bounded(self):
+    def test_full_surface_matches_canonical_inventory_without_duplicates(self):
         import asyncio
         from app.mcp.tool_registry_unified import CANONICAL_TOOL_NAMES
         from app.routes.mcp import handle_tools_list
         payload = asyncio.run(handle_tools_list({"inventory": "all"}))
         names = [tool["name"] for tool in payload["tools"]]
-        self.assertLessEqual(payload["count"], 80)
+        self.assertEqual(payload["count"], len(names))
         self.assertEqual(len(names), len(set(names)))
-        self.assertTrue(set(names).issubset(CANONICAL_TOOL_NAMES))
+        self.assertEqual(set(names), set(CANONICAL_TOOL_NAMES))
 
     def test_broken_and_duplicate_tools_are_not_advertised(self):
         import asyncio
