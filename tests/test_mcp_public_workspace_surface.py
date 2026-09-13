@@ -101,6 +101,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
     assert 'Desktop Helper' in html
+    assert "execCommand('copy')" in html
+    assert "Copy failed: " in html
     assert '/v1/mcp/workspace/desktop/linux-appimage' in html
     assert '/v1/mcp/workspace/desktop/linux-deb' in html
     assert '/v1/mcp/workspace/desktop/windows' in html

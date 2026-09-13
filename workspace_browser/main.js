@@ -56,13 +56,15 @@ function isTrustedDocument(urlValue) {
 }
 
 function configureSession(ses) {
-  ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
-    return permission === 'fileSystem' && isTrustedDocument(requestingOrigin);
+  const trustedPermissions = new Set(['fileSystem', 'clipboard-sanitized-write', 'screen-wake-lock']);
+  ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+    const requestingUrl = requestingOrigin || details?.requestingUrl || details?.requestingOrigin || '';
+    return trustedPermissions.has(permission) && isTrustedDocument(requestingUrl);
   });
 
   ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
     const requestingUrl = details?.requestingUrl || details?.requestingOrigin || '';
-    callback(permission === 'fileSystem' && isTrustedDocument(requestingUrl));
+    callback(trustedPermissions.has(permission) && isTrustedDocument(requestingUrl));
   });
 }
 

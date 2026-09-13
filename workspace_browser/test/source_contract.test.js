@@ -20,7 +20,7 @@ test('workspace browser uses a persistent profile and app suspension blocker', (
 });
 
 test('filesystem permission is restricted to the trusted origin', () => {
-  assert.match(source, /permission === 'fileSystem'/);
+  assert.match(source, /'fileSystem'/);
   assert.match(source, /https:\/\/api\.ailinux\.me\/v1\/mcp/);
   assert.match(source, /isTrustedDocument/);
 });
@@ -43,4 +43,11 @@ test('desktop helper identifies platform and keeps a clean tray lifecycle', () =
   assert.match(source, /Open AILinux Workspace/);
   assert.match(source, /Reconnect workspace/);
   assert.match(source, /Quit AILinux Workspace/);
+});
+
+
+test('trusted MCP origin can write clipboard and request wake lock', () => {
+  assert.match(source, /clipboard-sanitized-write/);
+  assert.match(source, /screen-wake-lock/);
+  assert.match(source, /trustedPermissions\.has\(permission\) && isTrustedDocument/);
 });
