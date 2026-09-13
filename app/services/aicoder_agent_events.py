@@ -261,3 +261,36 @@ async def record_aicoder_run(result: AICoderRunResult, *, cooldown_s: int = DEFA
         )
 
     return {'kind': kind, 'emitted': emitted, 'mailed': mailed, 'failure_streak': streak}
+
+async def record_agent_quota_limited(
+    *,
+    agent_id: str,
+    provider: str,
+    model: str,
+    reset_at: str = "",
+    retry_after_seconds: int = 0,
+) -> dict[str, Any]:
+    """Persist a deduplicated provider-quota event without failure-streak escalation."""
+    from app.mcp.notification_manager import create_event
+
+    reset_text = f" until {reset_at}" if reset_at else ""
+    title = f"{agent_id}: {provider} quota exhausted"
+    body = f"Provider quota for {model or provider} is exhausted{reset_text}."
+    entry = await create_event(
+        title=title,
+        body=body,
+        source="agent",
+        priority="normal",
+        event_type="agent.quota_limited",
+        tags=["agent-runtime", "quota"],
+        correlation_id=f"{agent_id}:{provider}:quota",
+        metadata={
+            "profile_id": agent_id,
+            "provider": provider,
+            "model": model,
+            "quota_reset_at": reset_at,
+            "quota_retry_after_seconds": max(0, int(retry_after_seconds or 0)),
+        },
+        auto_resolve=True,
+    )
+    return {"kind": "quota_limited", "emitted": entry is not None, "mailed": False}

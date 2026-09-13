@@ -195,6 +195,118 @@ def resolve_aicoder_launch(
     )
 
 
+async def query_account_provider_quota(
+    provider: str,
+    *,
+    timeout: float = 5.0,
+    source_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Query AICoder's provider-owned quota detector without sending a model request.
+
+    AICoder owns provider-specific quota semantics. TriForce deliberately executes
+    that implementation in the AICoder source environment instead of duplicating
+    provider log parsing here. Detector failures are best-effort and never block a
+    direct provider call.
+    """
+    provider_name = str(provider or "").strip().lower()
+    if provider_name != "gemini":
+        return {
+            "provider": provider_name,
+            "quota_exhausted": False,
+            "quota_retry_after_seconds": 0,
+            "quota_reset_at": "",
+            "supported": False,
+        }
+
+    root = Path(
+        source_root
+        or os.environ.get("AICODER_SOURCE_ROOT")
+        or DEFAULT_AICODER_SOURCE_ROOT
+    ).expanduser().resolve(strict=False)
+    python = root / ".venv" / "bin" / "python"
+    module = root / "aicoder" / "account_providers.py"
+    if not python.is_file() or not module.is_file():
+        return {
+            "provider": provider_name,
+            "quota_exhausted": False,
+            "quota_retry_after_seconds": 0,
+            "quota_reset_at": "",
+            "supported": False,
+            "error": f"AICoder quota detector unavailable under {root}",
+        }
+
+    code = (
+        "import json; "
+        "from aicoder.account_providers import antigravity_quota_status; "
+        "print(json.dumps(antigravity_quota_status()))"
+    )
+    env = os.environ.copy()
+    existing_pythonpath = str(env.get("PYTHONPATH") or "").strip()
+    env["PYTHONPATH"] = str(root) + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
+    try:
+        process = await asyncio.create_subprocess_exec(
+            str(python), "-c", code,
+            cwd=str(root),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=max(0.5, float(timeout)))
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+            await process.communicate()
+        except Exception:
+            pass
+        return {
+            "provider": provider_name,
+            "quota_exhausted": False,
+            "quota_retry_after_seconds": 0,
+            "quota_reset_at": "",
+            "supported": True,
+            "error": "AICoder quota detector timed out",
+        }
+    except Exception as exc:
+        return {
+            "provider": provider_name,
+            "quota_exhausted": False,
+            "quota_retry_after_seconds": 0,
+            "quota_reset_at": "",
+            "supported": True,
+            "error": str(exc),
+        }
+
+    if process.returncode != 0:
+        return {
+            "provider": provider_name,
+            "quota_exhausted": False,
+            "quota_retry_after_seconds": 0,
+            "quota_reset_at": "",
+            "supported": True,
+            "error": stderr.decode("utf-8", errors="replace").strip()[:1000],
+        }
+    try:
+        payload = json.loads(stdout.decode("utf-8", errors="replace").strip())
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        return {
+            "provider": provider_name,
+            "quota_exhausted": False,
+            "quota_retry_after_seconds": 0,
+            "quota_reset_at": "",
+            "supported": True,
+            "error": f"invalid AICoder quota response: {exc}",
+        }
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "provider": provider_name,
+        "quota_exhausted": payload.get("quota_exhausted") is True,
+        "quota_retry_after_seconds": max(0, int(payload.get("quota_retry_after_seconds") or 0)),
+        "quota_reset_at": str(payload.get("quota_reset_at") or ""),
+        "supported": True,
+    }
+
+
 def parse_ndjson(lines: Iterable[str]) -> tuple[list[dict[str, Any]], list[str]]:
     events: list[dict[str, Any]] = []
     raw: list[str] = []
@@ -407,6 +519,7 @@ async def run_profile(
     prompt: str,
     *,
     timeout_override: int | None = None,
+    team_mode_override: str | None = None,
     runner: AICoderRunner | None = None,
     source_home: str | Path = "/home/zombie",
     instance_root: str | Path = DEFAULT_INSTANCE_ROOT,
@@ -424,6 +537,6 @@ async def run_profile(
         workspace=workspace,
         home=home,
         timeout=effective_timeout,
-        team_mode=str(profile.get("team_mode") or "") or None,
+        team_mode=(team_mode_override if team_mode_override is not None else str(profile.get("team_mode") or "") or None),
         system_prompt=str(profile.get("system_prompt") or ""),
     )

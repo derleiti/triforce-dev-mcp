@@ -18,7 +18,7 @@ def test_call_agent_routes_aicoder_runtime_without_starting_legacy_process(tmp_p
         agent_id="pilot", agent_type=AgentType.AICODER, name="Pilot", command=["/usr/bin/aicoder"], runtime="aicoder"
     ))
 
-    async def fake_run_profile(agent_id, message, timeout_override=None):
+    async def fake_run_profile(agent_id, message, timeout_override=None, team_mode_override=None):
         return AICoderRunResult(profile_id=agent_id, status="success", response="OK", exit_code=0, run_id="r1")
 
     async def forbidden_start(*args, **kwargs):
@@ -145,3 +145,129 @@ def test_initialize_reconciles_defaults_and_profiles_in_own_data_dir(tmp_path):
         assert json.loads(profile.read_text())["model"] == "mistral/mistral-medium-latest"
     finally:
         asyncio.run(controller.shutdown())
+
+
+def test_native_cli_profile_auto_routes_simple_task_direct_without_aicoder(tmp_path):
+    controller = AgentController(data_dir=str(tmp_path / "agents"))
+    controller._initialized = True
+    controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
+        agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
+        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        working_dir=str(tmp_path),
+    ))
+
+    class FakeProcess:
+        returncode = 0
+        async def communicate(self):
+            return b"DIRECT_OK", b""
+        def kill(self):
+            pass
+
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    async def forbidden_run_profile(*args, **kwargs):
+        raise AssertionError("simple task must not start AICoder")
+
+    with patch("app.services.tristar.agent_controller.asyncio.create_subprocess_exec", fake_create), \
+         patch("app.services.tristar.agent_controller.query_account_provider_quota", return_value={"quota_exhausted": False}), \
+         patch("app.services.tristar.agent_controller.run_profile", forbidden_run_profile):
+        result = asyncio.run(controller.call_agent("gemini-mcp", "lies README.md", timeout=45))
+
+    assert result["status"] == "success"
+    assert result["response"] == "DIRECT_OK"
+    assert result["routing"]["mode"] == "direct"
+
+
+def test_gemini_direct_print_timeout_is_not_reported_as_success(tmp_path):
+    controller = AgentController(data_dir=str(tmp_path / "agents"))
+    controller._initialized = True
+    controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
+        agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
+        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        working_dir=str(tmp_path),
+    ))
+
+    class FakeProcess:
+        returncode = 0
+        async def communicate(self):
+            return b"[agy] print timeout after 40s with turn in progress; returning partial output", b""
+        def kill(self):
+            pass
+
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    with patch("app.services.tristar.agent_controller.asyncio.create_subprocess_exec", fake_create), \
+         patch("app.services.tristar.agent_controller.query_account_provider_quota", return_value={"quota_exhausted": False}):
+        result = asyncio.run(controller.call_agent("gemini-mcp", "lies README.md", timeout=45))
+
+    assert result["status"] == "timeout"
+    assert "print timeout after 40s" in result["error"]
+    assert result["routing"]["mode"] == "direct"
+
+
+
+def test_gemini_direct_quota_preflight_fails_fast_without_starting_provider(tmp_path):
+    controller = AgentController(data_dir=str(tmp_path / "agents"))
+    controller._initialized = True
+    controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
+        agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
+        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        working_dir=str(tmp_path),
+    ))
+
+    async def forbidden_create(*args, **kwargs):
+        raise AssertionError("quota-limited provider must not be started")
+
+    quota = {
+        "quota_exhausted": True,
+        "quota_retry_after_seconds": 3600,
+        "quota_reset_at": "2026-09-12T12:00:00+02:00",
+    }
+    notification = {"kind": "quota_limited", "emitted": True, "mailed": False}
+    profile = {"id": "gemini-mcp", "model": "account:gemini/gemini-3.8-flash-high"}
+
+    with patch("app.services.tristar.agent_controller.query_account_provider_quota", return_value=quota), \
+         patch("app.services.tristar.agent_controller.load_profile", return_value=profile), \
+         patch("app.services.tristar.agent_controller.record_agent_quota_limited", return_value=notification) as record_quota, \
+         patch("app.services.tristar.agent_controller.asyncio.create_subprocess_exec", forbidden_create), \
+         patch("app.services.model_availability.availability_service.mark_quota_exhausted") as mark_quota:
+        result = asyncio.run(controller.call_agent("gemini-mcp", "lies README.md", timeout=45))
+
+    assert result["status"] == "error"
+    assert result["error_code"] == "quota_exhausted"
+    assert result["provider"] == "gemini"
+    assert result["model"] == "account:gemini/gemini-3.8-flash-high"
+    assert result["quota_retry_after_seconds"] == 3600
+    assert result["quota_reset_at"] == "2026-09-12T12:00:00+02:00"
+    assert result["routing"]["mode"] == "direct"
+    assert result["notification"]["kind"] == "quota_limited"
+    mark_quota.assert_called_once_with(
+        "account:gemini/gemini-3.8-flash-high",
+        "Gemini/Antigravity quota exhausted until 2026-09-12T12:00:00+02:00",
+        retry_after_seconds=3600,
+    )
+    record_quota.assert_awaited_once()
+
+def test_native_cli_profile_explicit_team_routes_aicoder_team_on(tmp_path):
+    controller = AgentController(data_dir=str(tmp_path / "agents"))
+    controller._initialized = True
+    controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
+        agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
+        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        working_dir=str(tmp_path),
+    ))
+    seen = {}
+
+    async def fake_run_profile(agent_id, message, **kwargs):
+        seen.update(kwargs)
+        return AICoderRunResult(profile_id=agent_id, status="success", response="TEAM_OK", exit_code=0)
+
+    with patch("app.services.tristar.agent_controller.run_profile", fake_run_profile), \
+         patch("app.services.tristar.agent_controller.record_aicoder_run", return_value={"kind":"","emitted":False,"mailed":False}):
+        result = asyncio.run(controller.call_agent("gemini-mcp", "team run: refaktor das Modul", timeout=45))
+
+    assert result["status"] == "success"
+    assert result["routing"]["mode"] == "team"
+    assert seen["team_mode_override"] == "on"

@@ -28,8 +28,9 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 
 from ...mcp.agent_instructions import build_agent_system_prompt
-from ..aicoder_runner import apply_profile_state, load_profile, prepare_instance_home, run_profile
-from ..aicoder_agent_events import record_aicoder_run
+from ..aicoder_runner import apply_profile_state, load_profile, prepare_instance_home, query_account_provider_quota, run_profile
+from ..aicoder_agent_events import record_agent_quota_limited, record_aicoder_run
+from ..aicoder_task_router import AgentExecutionMode, classify_agent_task
 
 logger = logging.getLogger("ailinux.tristar.agent_controller")
 
@@ -935,6 +936,7 @@ class AgentController:
         agent_id: str,
         message: str,
         timeout: int = 120,
+        execution_mode: str = "auto",
     ) -> Dict[str, Any]:
         """
         Sendet eine Nachricht an einen Agenten und wartet auf Antwort.
@@ -947,14 +949,27 @@ class AgentController:
         if not instance:
             raise ValueError(f"Agent not found: {agent_id}")
 
-        if instance.config.runtime == "aicoder" or instance.config.agent_type == AgentType.AICODER:
+        uses_aicoder_runtime = instance.config.runtime == "aicoder" or instance.config.agent_type == AgentType.AICODER
+        routing = classify_agent_task(
+            message,
+            requested_mode=execution_mode,
+            supports_direct=instance.config.agent_type != AgentType.AICODER,
+        )
+        direct_one_shot = uses_aicoder_runtime and routing.mode == AgentExecutionMode.DIRECT
+
+        if uses_aicoder_runtime and routing.mode != AgentExecutionMode.DIRECT:
             try:
                 instance.status = AgentStatus.RUNNING
                 from .idle_worker import lease_coordinator
                 workspace = str(instance.config.working_dir or "/home/zombie/triforce")
                 async with lease_coordinator.foreground(str(Path(workspace).resolve())):
                     async with self._aicoder_run_lock(agent_id):
-                        result = await run_profile(agent_id, message, timeout_override=timeout)
+                        result = await run_profile(
+                            agent_id,
+                            message,
+                            timeout_override=timeout,
+                            team_mode_override="on" if routing.mode == AgentExecutionMode.TEAM else "off",
+                        )
                 try:
                     notification = await record_aicoder_run(result)
                 except Exception as notify_exc:
@@ -962,6 +977,7 @@ class AgentController:
                     notification = {"kind": "", "emitted": False, "mailed": False, "error": str(notify_exc)}
                 payload = result.to_dict()
                 payload["notification"] = notification
+                payload["routing"] = {"mode": routing.mode.value, "score": routing.score, "reasons": list(routing.reasons)}
                 instance.last_error = result.error or None
                 instance.output_buffer.append(f">>> {message[:50]}...")
                 instance.output_buffer.append((result.response or result.error)[:500])
@@ -970,17 +986,68 @@ class AgentController:
             except Exception as exc:
                 instance.last_error = str(exc)
                 logger.error("AICoder profile %s failed: %s", agent_id, exc)
-                return {"agent_id": agent_id, "status": "error", "error": str(exc)}
+                return {
+                    "agent_id": agent_id, "status": "error", "error": str(exc),
+                    "routing": {"mode": routing.mode.value, "score": routing.score, "reasons": list(routing.reasons)},
+                }
             finally:
                 instance.status = AgentStatus.READY
 
-        if instance.status != AgentStatus.RUNNING and instance.config.agent_type != AgentType.CODEX:
+        direct_provider_model = ""
+        if direct_one_shot and instance.config.agent_type == AgentType.GEMINI:
+            try:
+                quota = await query_account_provider_quota("gemini")
+            except Exception as quota_exc:
+                logger.warning("Gemini quota preflight failed open for %s: %s", agent_id, quota_exc)
+                quota = {"quota_exhausted": False, "error": str(quota_exc)}
+            profile = load_profile(agent_id)
+            direct_provider_model = str(profile.get("model") or "account:gemini").strip() or "account:gemini"
+            if quota.get("quota_exhausted") is True:
+                model = direct_provider_model
+                retry_after = max(0, int(quota.get("quota_retry_after_seconds") or 0))
+                reset_at = str(quota.get("quota_reset_at") or "")
+                error_message = "Gemini/Antigravity quota exhausted" + (f" until {reset_at}" if reset_at else "")
+                try:
+                    from ..model_availability import availability_service
+                    availability_service.mark_quota_exhausted(
+                        model,
+                        error_message,
+                        retry_after_seconds=retry_after,
+                    )
+                except Exception as availability_exc:
+                    logger.warning("Failed to publish Gemini quota availability for %s: %s", agent_id, availability_exc)
+                try:
+                    notification = await record_agent_quota_limited(
+                        agent_id=agent_id,
+                        provider="gemini",
+                        model=model,
+                        reset_at=reset_at,
+                        retry_after_seconds=retry_after,
+                    )
+                except Exception as notify_exc:
+                    logger.warning("Gemini quota notification mapping failed for %s: %s", agent_id, notify_exc)
+                    notification = {"kind": "quota_limited", "emitted": False, "mailed": False, "error": str(notify_exc)}
+                instance.last_error = error_message
+                return {
+                    "agent_id": agent_id,
+                    "status": "error",
+                    "error_code": "quota_exhausted",
+                    "error": error_message,
+                    "provider": "gemini",
+                    "model": model,
+                    "quota_retry_after_seconds": retry_after,
+                    "quota_reset_at": reset_at,
+                    "notification": notification,
+                    "routing": {"mode": routing.mode.value, "score": routing.score, "reasons": list(routing.reasons)},
+                }
+
+        if not direct_one_shot and instance.status != AgentStatus.RUNNING and instance.config.agent_type != AgentType.CODEX:
             # Starte Agent wenn nicht laufend
             await self.start_agent(agent_id)
             await asyncio.sleep(3)  # Warte auf Start
             instance = self.agents.get(agent_id)
 
-        if not instance or (not instance.process and instance.config.agent_type != AgentType.CODEX):
+        if not direct_one_shot and (not instance or (not instance.process and instance.config.agent_type != AgentType.CODEX)):
             return {
                 "agent_id": agent_id,
                 "status": "error",
@@ -1065,12 +1132,34 @@ class AgentController:
                     instance.output_buffer = instance.output_buffer[-100:]
 
                 exit_code = process.returncode
+                # Antigravity currently exits 0 even when print mode itself timed
+                # out. Do not report that as a successful agent response; callers
+                # need a retry/fallback signal instead of an empty success.
+                if agent_type == AgentType.GEMINI and "[agy] print timeout after" in response:
+                    error_message = response or f"Antigravity print mode timed out after {timeout}s"
+                    instance.last_error = error_message[:500]
+                    return {
+                        "agent_id": agent_id,
+                        "status": "timeout",
+                        "error": error_message,
+                        "response": response,
+                        "exit_code": exit_code,
+                        "routing": {"mode": routing.mode.value, "score": routing.score, "reasons": list(routing.reasons)},
+                    }
+
                 if exit_code == 0:
+                    if agent_type == AgentType.GEMINI and direct_provider_model:
+                        try:
+                            from ..model_availability import availability_service
+                            availability_service.mark_success(direct_provider_model)
+                        except Exception as availability_exc:
+                            logger.warning("Failed to clear Gemini quota availability for %s: %s", agent_id, availability_exc)
                     return {
                         "agent_id": agent_id,
                         "status": "success",
                         "response": response,
                         "exit_code": exit_code,
+                        "routing": {"mode": routing.mode.value, "score": routing.score, "reasons": list(routing.reasons)},
                     }
 
                 error_message = response or f"Agent exited with code {exit_code}"
@@ -1081,6 +1170,7 @@ class AgentController:
                     "error": error_message,
                     "response": response,
                     "exit_code": exit_code,
+                    "routing": {"mode": routing.mode.value, "score": routing.score, "reasons": list(routing.reasons)},
                 }
 
             except asyncio.TimeoutError:
@@ -1089,6 +1179,7 @@ class AgentController:
                     "agent_id": agent_id,
                     "status": "timeout",
                     "error": f"Agent did not respond within {timeout}s",
+                    "routing": {"mode": routing.mode.value, "score": routing.score, "reasons": list(routing.reasons)},
                 }
 
         except Exception as e:

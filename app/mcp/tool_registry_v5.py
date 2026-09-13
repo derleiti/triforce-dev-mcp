@@ -588,6 +588,12 @@ V5_TOOLS: List[Dict[str, Any]] = [
                 },
                 "message": {"type": "string", "description": "Message/task to send"},
                 "timeout": {"type": "integer", "description": "Response timeout in seconds (default: 60)"},
+                "execution_mode": {
+                    "type": "string",
+                    "enum": ["auto", "direct", "aicoder", "team"],
+                    "description": "Execution routing. auto is direct-first and escalates only for complex tasks.",
+                    "default": "auto",
+                },
             },
             "required": ["agent_id", "message"],
         },

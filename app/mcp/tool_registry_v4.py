@@ -157,6 +157,12 @@ AGENT_TOOLS: List[Dict[str, Any]] = [
                 "agent": {"type": "string", "description": "Agent ID: claude, codex, gemini, opencode"},
                 "message": {"type": "string", "description": "Message to send"},
                 "timeout": {"type": "integer", "description": "Timeout seconds (default: 120)"},
+                "execution_mode": {
+                    "type": "string",
+                    "enum": ["auto", "direct", "aicoder", "team"],
+                    "description": "Execution routing override; auto prefers direct execution for small tasks.",
+                    "default": "auto",
+                },
             },
             "required": ["agent", "message"],
         },

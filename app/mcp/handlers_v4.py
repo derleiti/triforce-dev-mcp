@@ -402,8 +402,11 @@ class HandlerRegistry:
                 agent_id = params.get("agent_id") or params.get("agent")
                 message = params.get("message") or params.get("command")
                 timeout = params.get("timeout", 120)
+                execution_mode = params.get("execution_mode") or params.get("mode")
                 if not agent_id or not message:
                     return {"error": "agent_id and message required"}
+                if execution_mode:
+                    return await agent_controller.call_agent(agent_id, message, timeout, execution_mode=execution_mode)
                 return await agent_controller.call_agent(agent_id, message, timeout)
 
             async def handle_agent_broadcast(params):

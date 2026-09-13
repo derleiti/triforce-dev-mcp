@@ -133,11 +133,22 @@ class ModelAvailabilityService:
         logger.info(f"ModelAvailability: {len(self._excluded_models)} models excluded")
     
     def is_available(self, model_id: str) -> bool:
+        status = self._status.get(model_id)
         if model_id in self._excluded_models:
-            return False
+            # Dynamic exclusions must recover automatically when the provider's
+            # retry window expires. Otherwise a temporary quota event becomes a
+            # process-lifetime permanent ban until an administrator resets it.
+            if status and status.retry_after and datetime.now() >= status.retry_after:
+                self._excluded_models.discard(model_id)
+                # Expiry means "eligible for a fresh probe", not proven healthy.
+                # Removing the stale dynamic status restores the service's normal
+                # unknown-model policy (assume available until the next result).
+                self._status.pop(model_id, None)
+                status = None
+            else:
+                return False
         if model_id in KNOWN_WORKING:
             return True
-        status = self._status.get(model_id)
         if status:
             return status.is_available()
         return True  # Unknown = assume available
@@ -174,6 +185,31 @@ class ModelAvailabilityService:
             status.status = AvailabilityStatus.API_ERROR
             status.retry_after = datetime.now() + timedelta(hours=1)
     
+    def mark_quota_exhausted(
+        self,
+        model_id: str,
+        error_msg: str = "Quota exhausted",
+        *,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        """Mark quota exhaustion using the provider's reset window when known."""
+        if model_id not in self._status:
+            self._status[model_id] = ModelStatus(model_id=model_id)
+        status = self._status[model_id]
+        status.status = AvailabilityStatus.QUOTA_EXHAUSTED
+        status.last_check = datetime.now()
+        status.last_error = f"429: {str(error_msg)[:100]}"
+        status.error_count += 1
+        seconds = max(0, int(retry_after_seconds or 0))
+        cooldown = timedelta(seconds=seconds) if seconds else self._quota_cooldown
+        status.retry_after = datetime.now() + cooldown
+        self._excluded_models.add(model_id)
+        logger.warning(
+            "Model %s QUOTA EXHAUSTED; retry in %ss",
+            model_id,
+            int(cooldown.total_seconds()),
+        )
+
     def mark_success(self, model_id: str):
         if model_id not in self._status:
             self._status[model_id] = ModelStatus(model_id=model_id)
