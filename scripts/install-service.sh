@@ -56,7 +56,7 @@ if [[ "$MODE" == "source" ]]; then
     if [[ -f "$f" ]]; then source_unit="$f"; break; fi
   done
   [[ -n "$source_unit" ]] || { echo "No source-mode triforce.service found in $TRIFORCE_DIR" >&2; exit 1; }
-  rendered_unit=$(mktemp)
+  rendered_unit=$(mktemp --suffix=.service)
   trap 'rm -f "$rendered_unit"' EXIT
   python3 - "$source_unit" "$rendered_unit" "$TRIFORCE_DIR" <<'PYUNIT'
 from pathlib import Path
