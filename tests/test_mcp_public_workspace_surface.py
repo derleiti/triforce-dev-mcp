@@ -20,43 +20,43 @@ class FakeRequest:
 
 
 @pytest.mark.asyncio
-async def test_public_guest_gets_synced_non_admin_local_catalog():
+async def test_public_guest_defaults_local_capabilities_off_until_share_exists():
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
     by_name = {tool['name']: tool for tool in result['tools']}
     names = set(by_name)
 
-    # Canonical TriForce tools are mirrored automatically, plus workspace helpers.
+    # Safe/cloud discovery plus pairing bootstrap remains available.
     assert {'search', 'models', 'agent_start', 'memory_clear', 'service_control',
-            'shell', 'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
-            'workspace_status', 'workspace_pair', 'workspace_info', 'file_read',
-            'file_tree', 'file_edit', 'directory_create', 'workspace_clear'} <= names
+            'workspace_status', 'workspace_pair'} <= names
+
+    # No local resource is advertised before the client explicitly shared it.
+    assert {'shell', 'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
+            'workspace_info', 'file_read', 'file_tree', 'file_edit',
+            'directory_create', 'workspace_clear', 'computer_observe',
+            'computer_screenshot', 'clipboard_read', 'clipboard_write'}.isdisjoint(names)
 
     # Shared-service administration is intentionally absent from Local MCP.
     assert not any(name.startswith('mail_') for name in names)
     assert not any(name.startswith('wp_') for name in names)
     assert not any(name.startswith('flarum_') for name in names)
 
-    # Execution routing is explicit and cannot silently fall through to Hetzner.
-    assert by_name['shell']['x_execution'] == 'local_workspace'
-    assert by_name['file_ops']['x_execution'] == 'local_workspace'
-    # Shared canonical names keep exactly the canonical semantic schema; local
-    # execution is target metadata, not a second tool definition.
+    # Bootstrap tools remain canonical local contracts; server tools do not
+    # silently become host-local execution.
     from app.mcp.tool_registry_unified import get_canonical_all_tools
     canonical = {tool['name']: tool for tool in get_canonical_all_tools()}
-    assert by_name['file_ops']['inputSchema'] == canonical['file_ops']['inputSchema']
-    assert by_name['code_edit']['x_execution'] == 'local_workspace'
-    assert by_name['git']['x_execution'] == 'local_workspace'
+    assert by_name['workspace_pair']['inputSchema'] == canonical['workspace_pair']['inputSchema']
+    assert by_name['workspace_pair']['x_execution'] == 'local_workspace'
     assert by_name['models']['x_execution'] == 'triforce_server'
     assert by_name['service_control']['x_execution'] == 'triforce_server'
     assert by_name['service_control']['x_requires_admin'] is True
 
 
 @pytest.mark.asyncio
-async def test_internal_admin_catalog_keeps_admin_tools_and_adds_workspace_overlay():
+async def test_internal_admin_catalog_keeps_server_tools_but_local_overlay_defaults_off():
     result = await handle_tools_list({}, request=FakeRequest('bearer', True))
     names = {tool['name'] for tool in result['tools']}
-    assert {'workspace_status', 'workspace_pair', 'workspace_info', 'file_read', 'file_tree', 'file_edit'} <= names
-    assert 'shell' in names
+    assert {'workspace_status', 'workspace_pair', 'shell', 'git', 'code_edit'} <= names
+    assert {'workspace_info', 'file_read', 'file_tree', 'file_edit'}.isdisjoint(names)
 
 
 def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_uri():
@@ -268,3 +268,63 @@ def test_helper_surface_is_unified_and_branded():
     assert 'AILinux Helper 2.90.13' in html
     assert 'Mobile Workspace' not in html
     assert '/v1/mcp/helper/icon.png?v=29013' in html
+
+
+@pytest.mark.asyncio
+async def test_paired_read_only_discovery_intersects_capabilities_and_grants(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+
+    binding = {
+        'mode': 'read_only',
+        'capabilities': ['file_read', 'file_tree', 'file_edit', 'computer_observe'],
+        'connection': None,
+    }
+    monkeypatch.setattr(bridge, 'get_workspace_lease', lambda session_id: binding)
+
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'paired-read'))
+    by_name = {tool['name']: tool for tool in result['tools']}
+    names = set(by_name)
+
+    assert {'workspace_status', 'workspace_pair', 'file_read', 'file_tree', 'computer_observe'} <= names
+    assert by_name['file_read']['x_execution'] == 'local_workspace'
+    assert by_name['computer_observe']['x_execution'] == 'local_workspace'
+    # Announced capability alone cannot bypass the read-only workspace grant.
+    assert 'file_edit' not in names
+    assert {'computer_screenshot', 'clipboard_read', 'shell'}.isdisjoint(names)
+
+
+@pytest.mark.asyncio
+async def test_native_only_discovery_needs_no_workspace_grant(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+
+    binding = {
+        'mode': 'read_only',
+        'capabilities': ['shell', 'computer_observe', 'clipboard_read'],
+        'connection': None,
+    }
+    monkeypatch.setattr(bridge, 'get_workspace_lease', lambda session_id: binding)
+
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'native-only'))
+    by_name = {tool['name']: tool for tool in result['tools']}
+    names = set(by_name)
+
+    assert {'shell', 'computer_observe', 'clipboard_read'} <= names
+    assert by_name['shell']['x_execution'] == 'local_workspace'
+    assert {'workspace_info', 'file_read', 'file_edit'}.isdisjoint(names)
+
+
+@pytest.mark.asyncio
+async def test_write_workspace_discovery_exposes_only_announced_write_tools(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+
+    binding = {
+        'mode': 'write',
+        'capabilities': ['file_read', 'file_edit'],
+        'connection': None,
+    }
+    monkeypatch.setattr(bridge, 'get_workspace_lease', lambda session_id: binding)
+
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'paired-write'))
+    names = {tool['name'] for tool in result['tools']}
+    assert {'file_read', 'file_edit'} <= names
+    assert {'directory_create', 'workspace_clear', 'clipboard_write'}.isdisjoint(names)

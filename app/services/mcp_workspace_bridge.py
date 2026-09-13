@@ -12,11 +12,25 @@ import asyncio
 import hashlib
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request
 
 from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES
+from .share_manifest import (
+    CLIPBOARD_READ_TOOLS,
+    CLIPBOARD_WRITE_TOOLS,
+    COMPUTE_TOOLS,
+    DISPLAY_OBSERVE_TOOLS,
+    RESOURCE_CLIPBOARD,
+    RESOURCE_COMPUTE,
+    RESOURCE_DISPLAY,
+    RESOURCE_WORKSPACE,
+    WORKSPACE_READ_TOOLS,
+    WORKSPACE_WRITE_TOOLS,
+    build_share_manifest,
+    manifest_has_grant,
+)
 from .mcp_workspace_sessions import (
     claim_workspace_with_resume_token, get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
     resolve_web_pair_code, workspace_status as lease_status,
@@ -148,6 +162,49 @@ def workspace_affinity_id(request: Request | None, workspace_context: str = "") 
     return "openai-workspace-" + digest[:40]
 
 
+def _share_binding(request: Request | None) -> Optional[Dict[str, Any]]:
+    """Return the active logical share lease for discovery, if one exists."""
+    sid = workspace_affinity_id(request) or session_id(request)
+    return get_workspace_lease(sid) if sid else None
+
+
+def _binding_share_manifest(binding: Dict[str, Any]) -> Dict[str, Any]:
+    """Use the live manifest when available, otherwise rebuild grants from the persisted lease."""
+    connection = binding.get("connection")
+    live_manifest = getattr(connection, "share_manifest", None) if connection is not None else None
+    if isinstance(live_manifest, dict):
+        return live_manifest
+    return build_share_manifest({
+        "mode": binding.get("mode") or "read_only",
+        "capabilities": list(binding.get("capabilities") or []),
+    })
+
+
+def _local_tool_visible(name: str, binding: Optional[Dict[str, Any]]) -> bool:
+    """Project local discovery from announced capability AND its active share grant."""
+    if name in CONTROL_TOOLS:
+        return True
+    if not binding:
+        return False
+    capabilities = set(binding.get("capabilities") or [])
+    if name not in capabilities:
+        return False
+    manifest = _binding_share_manifest(binding)
+    if name in WORKSPACE_WRITE_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_WORKSPACE, "write")
+    if name in WORKSPACE_READ_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_WORKSPACE, "read")
+    if name in DISPLAY_OBSERVE_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_DISPLAY, "observe")
+    if name in CLIPBOARD_WRITE_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_CLIPBOARD, "write")
+    if name in CLIPBOARD_READ_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_CLIPBOARD, "read")
+    if name in COMPUTE_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_COMPUTE, "execute")
+    return False
+
+
 def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List[Dict[str, Any]]:
     """Overlay the persistent local-workspace surface on canonical TriForce tools.
 
@@ -156,6 +213,7 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
     omitted completely. Host/workspace-sensitive tool names are marked for local
     execution; server-side RBAC remains authoritative for online tools.
     """
+    binding = _share_binding(request)
     if is_public_guest(request):
         from app.mcp.tool_registry_unified import get_canonical_all_tools
         from app.utils.mcp_security import PRIVILEGED_TOOLS
@@ -167,6 +225,8 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             name = str(tool.get("name") or "")
             inventory = str(tool.get("x_inventory") or "misc")
             if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
+                continue
+            if name in LOCAL_TOOL_NAMES and not _local_tool_visible(name, binding):
                 continue
             cloned = deepcopy(tool)
             execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
@@ -181,8 +241,11 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             if isinstance(tool, dict) and str(tool.get("name") or "")
         }
     for cloned in canonical_workspace_tools():
+        name = str(cloned.get("name") or "")
+        if not _local_tool_visible(name, binding):
+            continue
         cloned["x_execution"] = "local_workspace"
-        merged[cloned["name"]] = cloned
+        merged[name] = cloned
     return list(merged.values())
 
 
