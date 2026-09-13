@@ -1133,15 +1133,20 @@ async def call_tool(tool_name: str, params: Dict[str, Any]) -> Any:
     Supports both old and new tool names via aliases.
     """
     try:
-        from app.utils.unified_logger import log_tool_call
+        from app.utils.unified_logger import log_tool_call, tool_result_error
     except ImportError:
         log_tool_call = None
+        tool_result_error = lambda result: None
     
     logger.info(f"TOOL_CALL_START | {tool_name} | params={list(params.keys())}")
     
     try:
         result = await handler_registry.call(tool_name, params)
-        logger.info(f"TOOL_CALL_OK | {tool_name} | result_type={type(result).__name__}")
+        result_error = tool_result_error(result)
+        if result_error:
+            logger.error(f"TOOL_CALL_RESULT_ERROR | {tool_name} | error={result_error}")
+        else:
+            logger.info(f"TOOL_CALL_OK | {tool_name} | result_type={type(result).__name__}")
         if log_tool_call:
             log_tool_call(tool_name, params, result=result)
         return result

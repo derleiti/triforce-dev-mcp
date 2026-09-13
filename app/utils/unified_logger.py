@@ -4,6 +4,7 @@ Zentrales Log für alle TriForce Komponenten
 Fix: Keine Duplikate durch propagate=False
 """
 
+import json
 import logging
 import os
 import sys
@@ -74,10 +75,31 @@ def setup_unified_logging():
     ailinux_logger.info("=" * 60)
     return str(UNIFIED_LOG_PATH)
 
+def tool_result_error(result):
+    """Return an error message when a successful handler call contains a structured failure."""
+    payload = result
+    if isinstance(result, str):
+        text = result.strip()
+        if not (text.startswith("{") and text.endswith("}")):
+            return None
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if error in (None, "", False):
+        return None
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("detail") or error)
+    return str(error)
+
 def log_tool_call(tool_name: str, params: dict, result=None, error=None):
     logger = logging.getLogger("ailinux.mcp.tools")
-    if error:
-        logger.error(f"TOOL_CALL | {tool_name} | ERROR: {error}")
+    structured_error = error or tool_result_error(result)
+    if structured_error:
+        logger.error(f"TOOL_CALL | {tool_name} | ERROR: {structured_error}")
     else:
         result_preview = str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
         logger.info(f"TOOL_CALL | {tool_name} | OK | {result_preview}")

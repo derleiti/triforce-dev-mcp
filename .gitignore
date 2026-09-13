@@ -260,3 +260,5 @@ data/n8n/crash.journal
 android_workspace/.gradle/
 android_workspace/**/build/
 .workspacebackup/
+
+!tests/test_tool_result_logging.py

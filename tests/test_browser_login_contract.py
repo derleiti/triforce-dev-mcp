@@ -135,3 +135,55 @@ async def test_android_app_link_browser_code_uses_fragment_and_pkce_exchange():
         )
     )
     assert login.email == "browser@example.test"
+
+
+@pytest.mark.asyncio
+async def test_mcp_browser_falls_back_to_installed_chrome_when_managed_binary_is_missing(monkeypatch):
+    from app.mcp import handlers_browser
+
+    class FakePage:
+        def is_closed(self):
+            return False
+
+    class FakeContext:
+        async def new_page(self):
+            return FakePage()
+
+    class FakeBrowser:
+        async def new_context(self, **kwargs):
+            return FakeContext()
+
+    class FakeChromium:
+        def __init__(self):
+            self.calls = []
+
+        async def launch(self, **kwargs):
+            self.calls.append(kwargs)
+            if "executable_path" not in kwargs:
+                raise RuntimeError("Executable doesn't exist at /missing/chromium")
+            return FakeBrowser()
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+    fake_pw = FakePlaywright()
+
+    class Starter:
+        async def start(self):
+            return fake_pw
+
+    monkeypatch.setattr(handlers_browser, "_browser", None)
+    monkeypatch.setattr(handlers_browser, "_page", None)
+    monkeypatch.setattr(
+        handlers_browser.shutil,
+        "which",
+        lambda name: "/usr/bin/google-chrome" if name == "google-chrome" else None,
+    )
+    import playwright.async_api
+    monkeypatch.setattr(playwright.async_api, "async_playwright", lambda: Starter())
+
+    page = await handlers_browser._ensure_browser()
+    assert isinstance(page, FakePage)
+    assert len(fake_pw.chromium.calls) == 2
+    assert fake_pw.chromium.calls[1]["executable_path"] == "/usr/bin/google-chrome"

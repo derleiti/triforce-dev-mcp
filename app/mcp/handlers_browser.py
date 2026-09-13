@@ -4,7 +4,7 @@ Allows AI agents to browse the web, read pages, fill forms, and take screenshots
 Brumo kann damit auch Akazienhonig bestellen.
 """
 from __future__ import annotations
-import asyncio, json, base64, os, time
+import asyncio, json, base64, os, shutil, time
 from typing import Any, Dict, Optional
 
 # Lazy-load playwright
@@ -20,10 +20,26 @@ async def _ensure_browser():
     try:
         from playwright.async_api import async_playwright
         pw = await async_playwright().start()
-        _browser = await pw.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
-        )
+        launch_args = ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+        try:
+            _browser = await pw.chromium.launch(headless=True, args=launch_args)
+        except Exception as exc:
+            # The Python package can be present while the Playwright-managed browser
+            # payload is not. Reuse an already installed system Chromium/Chrome
+            # instead of mutating the host or downloading packages at request time.
+            if "Executable doesn't exist" not in str(exc):
+                raise
+            executable = (
+                os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+                or shutil.which("google-chrome")
+                or shutil.which("chromium")
+                or shutil.which("chromium-browser")
+            )
+            if not executable:
+                raise
+            _browser = await pw.chromium.launch(
+                headless=True, executable_path=executable, args=launch_args
+            )
         context = await _browser.new_context(
             viewport={"width": 1280, "height": 800},
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 AILinux-Nova/1.0"
