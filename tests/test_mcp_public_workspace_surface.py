@@ -100,14 +100,14 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
-    assert 'AILinux Helper 2.90.2' in html
+    assert 'AILinux Helper 2.90.8' in html
     assert 'id="terminalBackend"' in html
     assert 'native.setShellBackend' in html
     assert "$('terminalBackend').onchange" in html
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
     assert '/v1/mcp/helper/android' in html
-    assert '/v1/mcp/helper/icon.png?v=2902' in html
+    assert '/v1/mcp/helper/icon.png?v=2908' in html
     assert '/v1/mcp/helper/linux-appimage' in html
     assert '/v1/mcp/helper/linux-deb' in html
     assert '/v1/mcp/helper/windows' in html
@@ -150,7 +150,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.2-browser'" in html
+    assert "EXECUTOR_VERSION='2.90.8-browser'" in html
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -187,8 +187,8 @@ def test_mobile_workspace_install_surface_and_pwa_contract():
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=2902' in html
-    assert "/v1/mcp/sw.js?v=2902" in html
+    assert '/v1/mcp/manifest.webmanifest?v=2908' in html
+    assert "/v1/mcp/sw.js?v=2908" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
     assert 'native foreground executor' in html
@@ -203,9 +203,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     assert manifest['start_url'] == '/v1/mcp'
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v2902" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.2')" in worker.body
-    assert b'ailinux-helper-v2902' in worker.body
+    assert b"ailinux-helper-v2908" in worker.body
+    assert b"caches.match('/v1/mcp?app=2.90.8')" in worker.body
+    assert b'ailinux-helper-v2908' in worker.body
     assert b'caches.delete' in worker.body
 
 
@@ -214,6 +214,6 @@ def test_helper_surface_is_unified_and_branded():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
     assert '<h1>AILinux Helper</h1>' in html
-    assert 'AILinux Helper 2.90.2' in html
+    assert 'AILinux Helper 2.90.8' in html
     assert 'Mobile Workspace' not in html
-    assert '/v1/mcp/helper/icon.png?v=2902' in html
+    assert '/v1/mcp/helper/icon.png?v=2908' in html
