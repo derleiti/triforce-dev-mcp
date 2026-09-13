@@ -27,8 +27,11 @@ BROWSER_READ_TOOLS = {
 BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {
     "file_edit", "directory_create", "workspace_clear", "code_edit", "shell",
 }
-READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS
-WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS
+DEVICE_READ_TOOLS = {"computer_observe", "computer_screenshot", "clipboard_read"}
+DEVICE_WRITE_TOOLS = {"clipboard_write"}
+DEVICE_TOOLS = DEVICE_READ_TOOLS | DEVICE_WRITE_TOOLS
+READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS | DEVICE_TOOLS
+WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS | DEVICE_TOOLS
 LOCAL_TOOL_NAMES = WRITE_TOOLS
 
 # Local MCP mirrors the canonical TriForce inventory automatically. These three
@@ -125,6 +128,59 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "max_results": {"type": "integer", "minimum": 1, "maximum": 500}},
             "required": ["pattern"]},
         "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "file_ops",
+        "description": (
+            "Local workspace file operations: read, write, append, list, find, size, delete or remove. "
+            "delete/remove requires Write access, creates a recovery backup first, supports recursive=true, "
+            "and protects the workspace root plus .workspacebackup."
+        ),
+        "inputSchema": {"type": "object", "properties": {
+            "workspace_token": {"type": "string"},
+            "action": {"type": "string", "enum": ["read", "write", "append", "list", "find", "size", "delete", "remove"]},
+            "path": {"type": "string"}, "content": {"type": "string"}, "pattern": {"type": "string"},
+            "query": {"type": "string"}, "recursive": {"type": "boolean", "default": False},
+            "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 500},
+            "max_entries": {"type": "integer", "minimum": 1, "maximum": 1000}},
+            "required": ["action", "path"]},
+        "annotations": {"readOnlyHint": False, "destructiveHint": True},
+    },
+    {
+        "name": "code_edit",
+        "description": "Edit source text inside the paired browser workspace. Requires Write access for mutations.",
+        "inputSchema": {"type": "object", "properties": {
+            "workspace_token": {"type": "string"}, "path": {"type": "string"},
+            "mode": {"type": "string", "enum": ["replace", "insert", "append", "delete"]},
+            "old_text": {"type": "string"}, "new_text": {"type": "string"},
+            "line": {"type": "integer", "minimum": 1}, "dry_run": {"type": "boolean", "default": False}},
+            "required": ["path", "mode"]},
+        "annotations": {"readOnlyHint": False},
+    },
+    {
+        "name": "computer_observe",
+        "description": "Observe the explicitly shared primary screen through AILinux Helper. Available only when the user enabled screen sharing in the native Helper.",
+        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "computer_screenshot",
+        "description": "Capture the explicitly shared primary screen through AILinux Helper. Available only when the user enabled screen sharing in the native Helper.",
+        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "clipboard_read",
+        "description": "Read the local clipboard through AILinux Helper only when the user explicitly enabled clipboard-read sharing.",
+        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "clipboard_write",
+        "description": "Write text to the local clipboard through AILinux Helper only when the user explicitly enabled clipboard-write sharing.",
+        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}, "text": {"type": "string", "maxLength": 1048576}}, "required": ["text"]},
+        "annotations": {"readOnlyHint": False},
     },
     {
         "name": "file_edit",
@@ -596,7 +652,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             }
 
     mode = str(binding.get("mode") or "read_only")
-    if mode != "write" and workspace_tool_requires_write(name, arguments):
+    if mode != "write" and name in BROWSER_WRITE_TOOLS and workspace_tool_requires_write(name, arguments):
         return _tool_error("WORKSPACE_READ_ONLY", f"Browser workspace is Read only; tool '{name}' requires Write mode.", tool=name)
 
     capabilities = set(binding.get("capabilities") or [])
