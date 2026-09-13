@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any, Dict
 
 from fastapi import APIRouter, status, Request
@@ -23,6 +24,33 @@ class ClientGPUInfoRequest(BaseModel):
     estimated_tflops: float = 0.0
 
 HEALTH_RESPONSE = {"ok": True, "status": "ok"}
+
+ANDROID_APP_PACKAGE = os.getenv("AILINUX_ANDROID_APP_PACKAGE", "me.ailinux.workspace")
+ANDROID_APP_CERT_SHA256 = os.getenv(
+    "AILINUX_ANDROID_SHA256_CERT_FINGERPRINT",
+    "3D:4B:5C:38:78:F1:95:08:53:AF:BF:20:A8:DF:F4:90:7A:BC:9C:8D:F1:D2:68:B3:F6:1E:16:DC:F4:9D:7E:21",
+)
+
+
+@router.get(
+    "/.well-known/assetlinks.json",
+    tags=["Android"],
+    summary="Android App Links association",
+    include_in_schema=False,
+)
+async def android_assetlinks():
+    """Publish the Digital Asset Links contract for the signed AILinux Helper."""
+    return JSONResponse(
+        content=[{
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": ANDROID_APP_PACKAGE,
+                "sha256_cert_fingerprints": [ANDROID_APP_CERT_SHA256],
+            },
+        }],
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get(
