@@ -82,6 +82,7 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "custom_binary": "execution",
     "custom_exec": "execution",
     "shell": "execution",
+    "compute_execute": "execution",
     "chat": "ai",
     "models": "ai",
     "specialist": "ai",
@@ -191,7 +192,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Workspace / device controls (one canonical pool; execution remains target-specific)
     "workspace_status", "workspace_pair", "workspace_info", "workspace_clear",
     "file_read", "file_tree", "code_read", "code_grep", "file_edit", "directory_create",
-    "computer_observe", "computer_screenshot", "clipboard_read", "clipboard_write",
+    "computer_observe", "computer_screenshot", "clipboard_read", "clipboard_write", "compute_execute",
     # Integrations
     "n8n_mcp_call",
 })

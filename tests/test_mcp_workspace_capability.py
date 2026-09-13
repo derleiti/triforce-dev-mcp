@@ -1010,3 +1010,23 @@ async def test_display_execution_requires_active_display_grant():
     assert result['isError'] is True
     assert result['structuredContent']['code'] == 'WORKSPACE_DISPLAY_GRANT_REQUIRED'
     assert conn.calls == []
+
+
+@pytest.mark.asyncio
+async def test_compute_execution_requires_explicit_compute_grant():
+    from app.services import mcp_workspace_bridge as bridge
+
+    conn = DummyConnection('compute-no-grant')
+    conn.share_manifest = {
+        'version': 1,
+        'grants': [
+            {'resource': 'workspace', 'action': 'read'},
+            {'resource': 'workspace', 'action': 'write'},
+        ],
+    }
+    sessions.bind_workspace('session-compute', conn, mode='write', capabilities=['compute_execute'])
+    req = DummyRequest('session-compute')
+    result = await bridge.call_public_local_tool(req, 'compute_execute', {'command': 'true'})
+    assert result['isError'] is True
+    assert result['structuredContent']['code'] == 'WORKSPACE_COMPUTE_GRANT_REQUIRED'
+    assert conn.calls == []

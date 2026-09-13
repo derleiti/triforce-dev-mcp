@@ -50,7 +50,7 @@ DEVICE_READ_TOOLS = {"computer_observe", "computer_screenshot", "clipboard_read"
 DEVICE_WRITE_TOOLS = {"clipboard_write"}
 DEVICE_TOOLS = DEVICE_READ_TOOLS | DEVICE_WRITE_TOOLS
 READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS | DEVICE_TOOLS
-WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS | DEVICE_TOOLS
+WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS | DEVICE_TOOLS | set(COMPUTE_TOOLS)
 LOCAL_TOOL_NAMES = WRITE_TOOLS
 
 # Local MCP mirrors the canonical TriForce inventory automatically. These three
@@ -680,6 +680,14 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         return _tool_error(
             "WORKSPACE_DISPLAY_GRANT_REQUIRED",
             "The paired helper has not granted display observation for this workspace.",
+            tool=name,
+        )
+    if name in COMPUTE_TOOLS and not manifest_has_grant(
+        _binding_share_manifest(binding), RESOURCE_COMPUTE, "execute"
+    ):
+        return _tool_error(
+            "WORKSPACE_COMPUTE_GRANT_REQUIRED",
+            "The paired helper has not granted disposable compute execution for this session.",
             tool=name,
         )
 

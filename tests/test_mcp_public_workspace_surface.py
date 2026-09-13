@@ -147,7 +147,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "$('downloadApkBtn')" not in html
     assert "$('mobileNote')" not in html
     # Compute prefers the hardened helper broker but keeps the native fallback.
-    assert "if(nativeHelper&&typeof nativeHelper.runCompute==='function')" in html
+    assert "tool==='compute_execute'" in html
+    assert "typeof nativeHelper.runCompute!=='function'" in html
     assert 'if(native)return result(await runNativeShell(args))' in html
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
@@ -299,7 +300,7 @@ async def test_native_only_discovery_needs_no_workspace_grant(monkeypatch):
 
     binding = {
         'mode': 'read_only',
-        'capabilities': ['shell', 'computer_observe', 'clipboard_read'],
+        'capabilities': ['compute_execute', 'computer_observe', 'clipboard_read'],
         'connection': None,
     }
     monkeypatch.setattr(bridge, 'get_workspace_lease', lambda session_id: binding)
@@ -308,8 +309,8 @@ async def test_native_only_discovery_needs_no_workspace_grant(monkeypatch):
     by_name = {tool['name']: tool for tool in result['tools']}
     names = set(by_name)
 
-    assert {'shell', 'computer_observe', 'clipboard_read'} <= names
-    assert by_name['shell']['x_execution'] == 'local_workspace'
+    assert {'compute_execute', 'computer_observe', 'clipboard_read'} <= names
+    assert by_name['compute_execute']['x_execution'] == 'local_workspace'
     assert {'workspace_info', 'file_read', 'file_edit'}.isdisjoint(names)
 
 
