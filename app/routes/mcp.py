@@ -116,14 +116,13 @@ def _mcp_instructions_for_request(request: Request) -> str:
 def _workspace_setup_html() -> str:
     return r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AILinux Workspace · TriForce MCP</title><link rel="icon" type="image/png" href="/v1/mcp/helper/icon.png?v=2890"><link rel="apple-touch-icon" href="/v1/mcp/helper/icon.png?v=2890"><link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=2890"><meta name="theme-color" content="#0d1117"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="AILinux Workspace">
+<title>AILinux Helper · TriForce MCP</title><link rel="icon" type="image/png" href="/v1/mcp/helper/icon.png?v=2900"><link rel="apple-touch-icon" href="/v1/mcp/helper/icon.png?v=2900"><link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=2900"><meta name="theme-color" content="#0d1117"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="AILinux Helper">
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0}main{max-width:860px;margin:5vh auto;padding:24px}section{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:22px;margin:16px 0}h1{font-size:2rem;margin:.25rem 0}h2{margin-top:0}p{line-height:1.5;color:#b8c1cc}.muted{color:#8b949e}.ok{color:#63d471}.warn{color:#e3b341}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{background:#238636;color:#fff;border:0;border-radius:8px;padding:11px 16px;font-weight:650;cursor:pointer}button.secondary{background:#30363d}button:disabled{opacity:.45;cursor:not-allowed}input[type=text],textarea{width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:11px;border-radius:8px}textarea{min-height:76px;resize:vertical}code,.mono{font-family:ui-monospace,SFMono-Regular,monospace}.pair{font-size:1.05rem;letter-spacing:.04em}.pill{display:inline-block;border:1px solid #1f6feb;background:#1f6feb22;color:#79c0ff;padding:5px 10px;border-radius:999px}.hidden{display:none}.status{font-weight:650}.choice{padding:9px 12px;border:1px solid #30363d;border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.drop{margin-top:10px;border-style:dashed;text-align:center}@media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head><body><main>
-<span class="pill">AILinux · TriForce MCP</span><h1>AILinux Workspace</h1>
+<span class="pill">AILinux · TriForce MCP</span><h1>AILinux Helper</h1>
 <p>The selected folder stays on this device. Selecting a folder does not enumerate or analyze it. Use the native Android helper for a persistent foreground executor, or install this page as a web app on Android/iOS for automatic resume when the OS suspends it.</p>
-<section id="mobilePanel" class="hidden"><h2>Mobile Workspace</h2><p id="mobileText" class="muted"></p><div class="row"><button id="openAppBtn" class="hidden">Open Android helper</button><button id="downloadApkBtn" class="secondary hidden">Download Android APK</button><button id="installPwaBtn" class="secondary hidden">Install web app</button></div><p id="mobileNote" class="muted"></p></section>
-<section id="desktopPanel"><h2>AILinux Helper 2.89.0</h2><p class="muted">One cross-platform helper for persistent local AILinux features. Desktop stays connected in the tray; Android keeps the native foreground executor active after the UI is closed. Connection state and reconnect controls remain visible through the platform notification/tray UI.</p><div class="row"><a href="/v1/mcp/helper/android"><button>Android APK</button></a><a href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a href="/v1/mcp/helper/windows"><button class="secondary">Windows</button></a><a href="/v1/mcp/helper/macos"><button class="secondary">macOS</button></a></div><p class="muted">iPhone/iPad uses the durable lease and resumes the transport when iOS allows the app to run; iOS does not permit an arbitrary MCP WebSocket to run permanently after suspension or force-quit. Legacy Workspace downloads remain compatible.</p></section>
+<section id="helperPanel"><div class="row"><img src="/v1/mcp/helper/icon.png?v=2900" width="64" height="64" alt="AILinux Helper icon" style="border-radius:14px"><div><h2 style="margin-bottom:4px">AILinux Helper 2.90.0</h2><span class="pill">Persistent local MCP companion</span></div></div><p id="helperText" class="muted">One cross-platform helper for persistent local AILinux features. The local executor survives normal UI close where the operating system permits it, with connection state and reconnect controls in notification/tray UI.</p><div id="helperActions" class="row"><button id="openAppBtn" class="hidden">Open AILinux Helper</button><a id="androidDownload" class="hidden" href="/v1/mcp/helper/android"><button>Android APK</button></a><button id="installPwaBtn" class="secondary hidden">Install web app</button><a id="linuxAppImage" href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a id="linuxDeb" href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a id="windowsDownload" href="/v1/mcp/helper/windows"><button class="secondary">Windows</button></a><a id="macDownload" href="/v1/mcp/helper/macos"><button class="secondary">macOS</button></a></div><p id="helperNote" class="muted">The browser/PWA remains the zero-install fallback. Legacy Workspace URLs stay compatible.</p></section>
 <section><h2>1 · Share workspace</h2>
 <div class="grid"><label class="choice"><input type="radio" name="mode" value="read_only" checked> Read only</label><label class="choice"><input id="writeMode" type="radio" name="mode" value="write"> Write</label></div>
 <div class="row" style="margin-top:14px"><button id="chooseBtn">Choose local folder</button><button id="openChromeBtn" class="secondary hidden">Open in Chrome</button><span id="folderName" class="muted">No folder shared</span></div>
@@ -142,7 +141,7 @@ const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tre
 const WRITE_TOOLS=['file_edit','directory_create','workspace_clear','code_edit'];
 const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
 const MAX_TEXT=2*1024*1024;
-const EXECUTOR_VERSION='2.86.6-browser';
+const EXECUTOR_VERSION='2.90.0-browser';
 const urlPair=(new URLSearchParams(location.search).get('pair_code')||'').trim().toUpperCase();let pairCode=urlPair||sessionStorage.getItem('tf_pair_code')||'',rootHandle=null,rootEntry=null,ws=null,workspaceMode=sessionStorage.getItem('tf_workspace_mode')||'read_only',capabilities=[],heartbeatTimer=null,watchdogTimer=null,reconnectTimer=null,reconnectAttempt=0,manualDisconnect=false,lastPongAt=0,workspaceAttached=false,resumeToken='',toolQueue=Promise.resolve(),wakeLockSentinel=null,wakeLockWanted=localStorage.getItem('tf_workspace_wake_lock')==='1',connectPromise=null;if(urlPair){sessionStorage.setItem('tf_pair_code',urlPair);try{history.replaceState({},document.title,location.pathname)}catch{}}
 const directPicker=typeof window.showDirectoryPicker==='function';
 const android=/Android/i.test(navigator.userAgent),ios=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1),firefox=/Firefox\//i.test(navigator.userAgent);let deferredInstallPrompt=null;
@@ -151,7 +150,7 @@ const dropHandleCap=typeof DataTransferItem!=='undefined'&&typeof DataTransferIt
 const dropEntryCap=typeof DataTransferItem!=='undefined'&&(typeof DataTransferItem.prototype.getAsEntry==='function'||typeof DataTransferItem.prototype.webkitGetAsEntry==='function');
 if(!directPicker){$('writeMode').disabled=true;if(android)$('openChromeBtn').classList.remove('hidden');$('browserNote').textContent=(android?'Android: ':'')+(firefox?'Firefox: ':'')+'this browser does not expose showDirectoryPicker(), so full lazy Read/Write workspace selection is unavailable. '+(android?'Open this page in Chrome/Chromium to share a folder lazily with Read/Write access. ':'Use a Chromium browser with File System Access support. Desktop drag-and-drop may still provide lazy read-only access.');}else{$('browserNote').textContent='Direct directory handles are available. Choose Read only or Write, then choose the folder. No file list is built during selection.';}
 $('browserCaps').textContent='Origin: '+location.origin+' · secure='+((window.isSecureContext)?'yes':'no')+' · directory-picker='+(directPicker?'yes':'no')+' · persistent-handle='+(persistentHandleStore?'yes':'no')+' · drop-handle='+(dropHandleCap?'yes':'no')+' · drop-entry='+(dropEntryCap?'yes':'no')+' · wake-lock='+(('wakeLock' in navigator)?'yes':'no')+' · android='+(android?'yes':'no')+' · ios='+(ios?'yes':'no')+' · firefox='+(firefox?'yes':'no');$('wakeLockToggle').checked=wakeLockWanted;
-function setupMobileUi(){if(!android&&!ios)return;$('mobilePanel').classList.remove('hidden');if(android){$('mobileText').textContent='Recommended: run the native AILinux Workspace helper. Its foreground service keeps the MCP executor independent from Chrome tab suspension.';$('openAppBtn').classList.remove('hidden');$('downloadApkBtn').classList.remove('hidden');$('mobileNote').textContent='The browser workspace remains available as a zero-install fallback.';}else{$('mobileText').textContent='Install this page as a web app for a persistent workspace shell with automatic resume. iOS may still suspend background networking.';$('mobileNote').textContent='On iPhone/iPad, use Share → Add to Home Screen if the install prompt is not shown.';}if('serviceWorker' in navigator)navigator.serviceWorker.register('/v1/mcp/sw.js?v=2890',{scope:'/v1/mcp',updateViaCache:'none'}).catch(()=>{});}
+function setupMobileUi(){const linux=/Linux/i.test(navigator.platform||'')&&!android,mac=/Mac/i.test(navigator.platform||'')&&!ios,win=/Win/i.test(navigator.platform||'');if(android){$('openAppBtn').classList.remove('hidden');$('androidDownload').classList.remove('hidden');$('linuxAppImage').classList.add('hidden');$('linuxDeb').classList.add('hidden');$('windowsDownload').classList.add('hidden');$('macDownload').classList.add('hidden');$('helperText').textContent='Android uses the native foreground executor so the workspace can remain active after the UI is closed. Connection state and reconnect/disconnect actions stay in the system notification.';}else if(ios){$('linuxAppImage').classList.add('hidden');$('linuxDeb').classList.add('hidden');$('windowsDownload').classList.add('hidden');$('macDownload').classList.add('hidden');$('helperText').textContent='On iPhone/iPad install this page as the AILinux Helper web app. The durable lease survives transport suspension and reconnects when iOS allows the app to resume.';$('helperNote').textContent='iOS may suspend background networking and cannot guarantee an arbitrary WebSocket after force-quit.';}else if(linux){$('windowsDownload').classList.add('hidden');$('macDownload').classList.add('hidden');}else if(win){$('linuxAppImage').classList.add('hidden');$('linuxDeb').classList.add('hidden');$('macDownload').classList.add('hidden');}else if(mac){$('linuxAppImage').classList.add('hidden');$('linuxDeb').classList.add('hidden');$('windowsDownload').classList.add('hidden');}if('serviceWorker' in navigator)navigator.serviceWorker.register('/v1/mcp/sw.js?v=2900',{scope:'/v1/mcp',updateViaCache:'none'}).catch(()=>{});}
 setupMobileUi();
 let lastStatusText='';function status(text,cls=''){if(text===lastStatusText&&$('status').className==='status '+cls)return;lastStatusText=text;$('status').textContent=text;$('status').className='status '+cls;}
 function executorLifecycle(event,extra={}){if(!ws||ws.readyState!==WebSocket.OPEN)return;try{ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/lifecycle',params:{event,visibility:document.visibilityState,hidden:document.hidden,online:navigator.onLine,platform:navigator.platform||'browser',ts:Date.now(),...extra}}))}catch{}}
@@ -418,36 +417,44 @@ async def create_browser_workspace_handoff_ticket(request: Request) -> JSONRespo
 
 @public_router.get("/mcp/workspace/handoff", tags=["MCP"], summary="Native app handoff landing page")
 async def browser_workspace_handoff_landing() -> HTMLResponse:
-    html = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='theme-color' content='#0d1117'><title>AILinux Workspace Handoff</title><style>body{font-family:system-ui;background:#0d1117;color:#e6edf3;margin:0}main{max-width:680px;margin:10vh auto;padding:28px}button{padding:12px 18px;border:0;border-radius:9px;background:#238636;color:#fff;font-weight:700}a{color:#79c0ff}code{display:block;padding:12px;background:#161b22;border-radius:8px;margin:16px 0}</style></head><body><main><h1>Open AILinux Workspace</h1><p>The handoff is a short-lived one-time ticket. The durable workspace credential is never placed in this URL.</p><code id='code'></code><p><button id='open'>Open Android helper</button></p><p><a href='/v1/mcp/workspace/android.apk'>Download Android APK</a> · <a href='/v1/mcp'>Browser / iOS web app</a></p></main><script data-cfasync='false'>const p=new URLSearchParams(location.hash.slice(1)),code=p.get('code')||'';document.getElementById('code').textContent=code||'No handoff code';const open=()=>{if(!code)return;location.href='ailinux-workspace://handoff?code='+encodeURIComponent(code)};document.getElementById('open').onclick=open;if(code&&/Android/i.test(navigator.userAgent))setTimeout(open,100);</script></body></html>"""
+    html = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='theme-color' content='#0d1117'><title>AILinux Workspace Handoff</title><style>body{font-family:system-ui;background:#0d1117;color:#e6edf3;margin:0}main{max-width:680px;margin:10vh auto;padding:28px}button{padding:12px 18px;border:0;border-radius:9px;background:#238636;color:#fff;font-weight:700}a{color:#79c0ff}code{display:block;padding:12px;background:#161b22;border-radius:8px;margin:16px 0}</style></head><body><main><h1>Open AILinux Workspace</h1><p>The handoff is a short-lived one-time ticket. The durable workspace credential is never placed in this URL.</p><code id='code'></code><p><button id='open'>Open Android helper</button></p><p><a href='/v1/mcp/workspace/android.apk'>Download Android APK</a> · <a href='/v1/mcp'>Browser / iOS web app</a></p></main><script data-cfasync='false'>const p=new URLSearchParams(location.hash.slice(1)),code=p.get('code')||'';document.getElementById('code').textContent=code||'No handoff code';const open=()=>{if(!code)return;location.href='ailinux-helper://handoff?code='+encodeURIComponent(code)};document.getElementById('open').onclick=open;if(code&&/Android/i.test(navigator.userAgent))setTimeout(open,100);</script></body></html>"""
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 @public_router.get("/mcp/workspace/android.apk", tags=["MCP"], summary="Download AILinux Android workspace helper")
 async def download_android_workspace_helper() -> Response:
-    apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/triforce/releases/android/AILinux-Workspace-latest.apk")
+    apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/triforce/releases/helper/AILinux-Helper-latest.apk")
     if not os.path.isfile(apk_path):
         return JSONResponse(
-            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.86.6"},
+            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.0"},
             status_code=404,
             headers={"Cache-Control": "no-store"},
         )
     return FileResponse(
         apk_path,
         media_type="application/vnd.android.package-archive",
-        filename="AILinux-Workspace-2.86.6.apk",
+        filename="AILinux-Helper-2.90.0-android.apk",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+@public_router.get("/mcp/helper/icon.png", tags=["MCP"], summary="AILinux Helper app icon")
+async def ailinux_helper_icon() -> Response:
+    icon = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/triforce/releases/helper")) / "AILinux-Helper-icon.png"
+    if not icon.is_file():
+        raise HTTPException(status_code=404, detail="AILinux Helper icon unavailable")
+    return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=86400, immutable"})
 
 
 @public_router.get("/mcp/helper/{platform}", tags=["MCP"], summary="Download current AILinux Helper")
 async def download_ailinux_helper(platform: str):
     release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/triforce/releases/helper"))
     artifacts = {
-        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.89.0-android.apk", "application/vnd.android.package-archive"),
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.89.0-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.89.0-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.89.0-windows-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.89.0-macos.dmg", "application/x-apple-diskimage"),
+        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.0-android.apk", "application/vnd.android.package-archive"),
+        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.0-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.0-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.0-windows-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.0-macos.dmg", "application/x-apple-diskimage"),
     }
     spec = artifacts.get(platform)
     if not spec:
@@ -455,18 +462,18 @@ async def download_ailinux_helper(platform: str):
     source_name, download_name, media_type = spec
     artifact = release_root / source_name
     if not artifact.is_file():
-        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.89.0", "repository": "ailinux-helper"})
+        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.0", "repository": "ailinux-helper"})
     return FileResponse(artifact, filename=download_name, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
 @public_router.get("/mcp/workspace/desktop/{platform}", tags=["MCP"], summary="Download AILinux desktop workspace helper")
 async def download_desktop_workspace_helper(platform: str) -> Response:
-    root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/triforce/releases/desktop")
+    root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/triforce/releases/helper")
     artifacts = {
-        "linux-appimage": ("AILinux-Workspace-latest.AppImage", "AILinux-Workspace-2.86.6-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Workspace-latest.deb", "AILinux-Workspace-2.86.6-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Workspace-latest.exe", "AILinux-Workspace-2.86.6-windows-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Workspace-latest.dmg", "AILinux-Workspace-2.86.6-macos.dmg", "application/x-apple-diskimage"),
+        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.0-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.0-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.0-windows-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.0-macos.dmg", "application/x-apple-diskimage"),
     }
     item = artifacts.get(platform.lower())
     if not item:
@@ -474,29 +481,29 @@ async def download_desktop_workspace_helper(platform: str) -> Response:
     source, filename, media_type = item
     path = os.path.join(root, source)
     if not os.path.isfile(path):
-        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.86.6", "workflow": "workspace-desktop-helper.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.90.0", "workflow": "workspace-desktop-helper.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
     return FileResponse(path, media_type=media_type, filename=filename, headers={"Cache-Control": "no-cache"})
 
 
 @public_router.get("/mcp/manifest.webmanifest", tags=["MCP"], summary="AILinux workspace PWA manifest")
 async def workspace_pwa_manifest() -> JSONResponse:
     return JSONResponse({
-        "name": "AILinux Workspace",
-        "short_name": "AILinux Workspace",
+        "name": "AILinux Helper",
+        "short_name": "AILinux Helper",
         "id": "/v1/mcp",
         "start_url": "/v1/mcp",
         "scope": "/v1/mcp",
         "display": "standalone",
         "background_color": "#0d1117",
         "theme_color": "#0d1117",
-        "description": "TriForce local workspace executor and connection manager",
-        "icons": [{"src": "/v1/mcp/helper/icon.png?v=2890", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+        "description": "AILinux cross-platform local MCP companion and workspace executor",
+        "icons": [{"src": "/v1/mcp/helper/icon.png?v=2900", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
     }, media_type="application/manifest+json", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store"})
 
 
 @public_router.get("/mcp/sw.js", tags=["MCP"], summary="AILinux workspace PWA service worker")
 async def workspace_pwa_service_worker() -> Response:
-    script = """'use strict';const CACHE='ailinux-helper-v2890';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.89.0')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.89.0'))))});"""
+    script = """'use strict';const CACHE='ailinux-helper-v2900';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.0')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.0'))))});"""
     return Response(script, media_type="application/javascript", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store", "Service-Worker-Allowed": "/v1/mcp"})
 
 
