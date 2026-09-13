@@ -72,7 +72,7 @@ def _category(name: str, inventory: str) -> str:
         return "share.clipboard"
     if name in {"computer_observe", "computer_screenshot"}:
         return "display.capture"
-    if name == "shell":
+    if name in {"shell", "compute_execute"}:
         return "compute.exec"
     if name.startswith("service_") or name in {"restart", "hot_reload"}:
         return "service.control"
@@ -140,6 +140,7 @@ def _required_capabilities(name: str) -> List[str]:
         "computer_screenshot": ["computer_screenshot"],
         "clipboard_read": ["clipboard_read"],
         "clipboard_write": ["clipboard_write"],
+        "compute_execute": ["compute_execute"],
     }
     return list(workspace_caps.get(name, []))
 

@@ -76,7 +76,7 @@ def test_write_granted_with_write_tools():
 def test_native_only_share_without_workspace():
     manifest = build_share_manifest({
         "access_mode": "off",
-        "capabilities": ["clipboard_read", "computer_observe", "shell"],
+        "capabilities": ["clipboard_read", "computer_observe", "compute_execute"],
         "resources": {"native": {
             "compute": {"available": True, "runtime": "docker"},
             "mcp": {"advertise": True},
@@ -149,3 +149,82 @@ def test_bump_revision_is_non_destructive():
     assert updated["revision"] == 2
     assert manifest["revision"] == 1
     assert updated["capabilities"] == manifest["capabilities"]
+
+
+def test_generic_shell_never_implies_compute_execute_grant():
+    manifest = build_share_manifest({
+        "capabilities": ["shell"],
+        "resources": {"native": {"compute": {"advertise": True, "available": True}}},
+    })
+    assert manifest_resource(manifest, RESOURCE_COMPUTE)["enabled"] is False
+    assert manifest_has_grant(manifest, RESOURCE_COMPUTE, "execute") is False
+
+
+
+def test_compute_metadata_is_normalized_only_with_explicit_compute_capability():
+    native_compute = {
+        "advertise": True,
+        "available": True,
+        "runtime": "docker",
+        "resource_id": "docker-zombie-pc",
+        "node_id": "zombie-pc",
+        "cpu_cores": 2,
+        "memory_mb": 2048,
+        "gpu": "",
+        "vram_mb": 0,
+        "models": ["qwen3"],
+        "capabilities": ["container"],
+        "max_concurrent": 1,
+        "load": 0.25,
+        "healthy": True,
+    }
+    enabled = build_share_manifest({
+        "capabilities": ["compute_execute"],
+        "resources": {"native": {"compute": native_compute}},
+    })
+    compute = manifest_resource(enabled, RESOURCE_COMPUTE)
+    assert compute["enabled"] is True
+    assert compute["resource_id"] == "docker-zombie-pc"
+    assert compute["node_id"] == "zombie-pc"
+    assert compute["cpu_cores"] == 2
+    assert compute["memory_mb"] == 2048
+    assert compute["models"] == ["qwen3"]
+    assert compute["capabilities"] == ["container"]
+    assert compute["max_concurrent"] == 1
+    assert compute["load"] == 0.25
+    assert compute["healthy"] is True
+
+    disabled = build_share_manifest({
+        "capabilities": [],
+        "resources": {"native": {"compute": native_compute}},
+    })
+    hidden = manifest_resource(disabled, RESOURCE_COMPUTE)
+    assert hidden["enabled"] is False
+    assert hidden["available"] is False
+    assert "node_id" not in hidden
+    assert "resource_id" not in hidden
+    assert "models" not in hidden
+
+
+def test_compute_metadata_is_bounded_before_entering_manifest():
+    manifest = build_share_manifest({
+        "capabilities": ["compute_execute"],
+        "resources": {"native": {"compute": {
+            "available": True,
+            "cpu_cores": 999999,
+            "memory_mb": -50,
+            "vram_mb": -1,
+            "max_concurrent": 99999,
+            "load": 99,
+            "models": ["x" * 500] * 100,
+            "capabilities": ["container"] * 100,
+        }}},
+    })
+    compute = manifest_resource(manifest, RESOURCE_COMPUTE)
+    assert compute["cpu_cores"] == 4096.0
+    assert compute["memory_mb"] == 1
+    assert compute["vram_mb"] == 0
+    assert compute["max_concurrent"] == 1024
+    assert compute["load"] == 1.0
+    assert len(compute["models"]) <= 32
+    assert all(len(item) <= 128 for item in compute["models"])

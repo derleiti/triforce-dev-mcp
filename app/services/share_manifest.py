@@ -85,7 +85,7 @@ WORKSPACE_WRITE_TOOLS = frozenset({
 DISPLAY_OBSERVE_TOOLS = frozenset({"computer_observe", "computer_screenshot"})
 CLIPBOARD_READ_TOOLS = frozenset({"clipboard_read"})
 CLIPBOARD_WRITE_TOOLS = frozenset({"clipboard_write"})
-COMPUTE_TOOLS = frozenset({"shell", "compute_exec"})
+COMPUTE_TOOLS = frozenset({"compute_execute"})
 
 
 def normalize_visibility(value: Any) -> str:
@@ -129,6 +129,28 @@ def _resource(kind: str, enabled: bool, **detail: Any) -> Dict[str, Any]:
     return item
 
 
+def _bounded_number(value: Any, default: float, minimum: float, maximum: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(maximum, max(minimum, number))
+
+
+def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    return int(_bounded_number(value, float(default), float(minimum), float(maximum)))
+
+
+def _short_text(value: Any, limit: int = 128) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def _string_list(value: Any, limit: int = 32) -> List[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return sorted({_short_text(item, 128) for item in value if _short_text(item, 128)})[:limit]
+
+
 def build_share_manifest(
     params: Any,
     *,
@@ -168,6 +190,25 @@ def build_share_manifest(
     display_observe = bool(capability_set & DISPLAY_OBSERVE_TOOLS)
     compute_enabled = bool(capability_set & COMPUTE_TOOLS)
     compute_native = _as_dict(native.get("compute"))
+    compute_detail: Dict[str, Any] = {
+        "runtime": _short_text(compute_native.get("runtime") or "docker", 32),
+        "ephemeral": True,
+        "available": compute_enabled and compute_native.get("available") is True,
+    }
+    if compute_enabled:
+        compute_detail.update({
+            "resource_id": _short_text(compute_native.get("resource_id"), 128),
+            "node_id": _short_text(compute_native.get("node_id"), 128),
+            "cpu_cores": _bounded_number(compute_native.get("cpu_cores"), 1.0, 0.1, 4096.0),
+            "memory_mb": _bounded_int(compute_native.get("memory_mb"), 512, 1, 16 * 1024 * 1024),
+            "gpu": _short_text(compute_native.get("gpu"), 256),
+            "vram_mb": _bounded_int(compute_native.get("vram_mb"), 0, 0, 16 * 1024 * 1024),
+            "models": _string_list(compute_native.get("models")),
+            "capabilities": _string_list(compute_native.get("capabilities")),
+            "max_concurrent": _bounded_int(compute_native.get("max_concurrent"), 1, 1, 1024),
+            "load": _bounded_number(compute_native.get("load"), 0.0, 0.0, 1.0),
+            "healthy": compute_native.get("healthy") is True,
+        })
     device_shared = _as_dict(native.get("resources")).get("advertise") is True
     mcp_shared = _as_dict(native.get("mcp")).get("advertise") is True
 
@@ -186,13 +227,7 @@ def build_share_manifest(
         ),
         # Control is never derived; observing must not imply driving the host.
         _resource(RESOURCE_DISPLAY, display_observe, observe=display_observe, control=False),
-        _resource(
-            RESOURCE_COMPUTE,
-            compute_enabled,
-            runtime=str(compute_native.get("runtime") or "docker"),
-            ephemeral=True,
-            available=compute_native.get("available") is True,
-        ),
+        _resource(RESOURCE_COMPUTE, compute_enabled, **compute_detail),
         _resource(RESOURCE_MCP, mcp_shared, discover=mcp_shared, invoke=False),
         _resource(RESOURCE_DEVICE, device_shared, advertise=device_shared),
     ]
