@@ -12,8 +12,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class ProtocolClient extends WebSocketListener {
-    interface Listener { void onState(String state); void onResumeToken(String token); }
-    static final String VERSION="2.86.6-android";
+    interface Listener { void onState(String state); void onResumeToken(String token); void onPairCode(String code); }
+    static final String VERSION="2.86.7-android";
     static final String BASE="https://api.ailinux.me";
     private static final String TAG="AILinuxWorkspace";
     private final Context context; private final StateStore state; private final Listener listener;
@@ -57,8 +57,27 @@ final class ProtocolClient extends WebSocketListener {
             return;
         }
         String pair=state.pairCode();
-        if(pair!=null&&!pair.isEmpty()){openSocket("pair_code",pair);return;}
-        listener.onState("Open a ChatGPT workspace link or enter a pair code");
+        if(pair!=null&&!pair.isEmpty()){listener.onPairCode(pair);openSocket("pair_code",pair);return;}
+        createPairTicket();
+    }
+    private void createPairTicket(){
+        listener.onState("Creating one-time workspace pair code…");
+        http.newCall(new Request.Builder().url(BASE+"/v1/mcp/workspace/pair-ticket").post(RequestBody.create(new byte[0],null)).build()).enqueue(new Callback(){
+            public void onFailure(Call c,IOException e){scheduleReconnect("Pair ticket failed");}
+            public void onResponse(Call c,Response r)throws IOException{
+                try(Response x=r){
+                    if(!x.isSuccessful()){scheduleReconnect("Pair ticket rejected: "+x.code());return;}
+                    ResponseBody responseBody=x.body();
+                    if(responseBody==null){scheduleReconnect("Pair ticket returned no body");return;}
+                    String code=new JSONObject(responseBody.string()).optString("pair_code","").trim().toUpperCase();
+                    if(code.isEmpty()){scheduleReconnect("Pair ticket returned no code");return;}
+                    state.setPairCode(code);
+                    listener.onPairCode(code);
+                    listener.onState("Waiting for AI pairing · "+code);
+                    openSocket("pair_code",code);
+                }catch(Exception e){scheduleReconnect("Pair ticket error");}
+            }
+        });
     }
     private static String enc(String value){try{return URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(Exception e){throw new IllegalArgumentException("URL encoding failed",e);}}
     private void openSocket(String key,String code){String url="wss://api.ailinux.me/v1/mcp/node/connect?mode=workspace&"+key+"="+enc(code)+"&machine_id=android&client_version="+enc(VERSION);ws=http.newWebSocket(new Request.Builder().url(url).build(),this);}

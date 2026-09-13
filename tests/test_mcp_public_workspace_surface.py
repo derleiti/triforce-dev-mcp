@@ -167,6 +167,8 @@ def test_mobile_workspace_install_surface_and_pwa_contract():
     assert 'id="mobilePanel"' in html
     assert '/v1/mcp/workspace/android.apk' in html
     assert 'package=me.ailinux.workspace' in html
+    assert 'intent://pair' in html
+    assert 'scheme=ailinux-workspace' in html
     assert '/v1/mcp/manifest.webmanifest' in html
     assert "/v1/mcp/sw.js" in html
     assert "beforeinstallprompt" in html
