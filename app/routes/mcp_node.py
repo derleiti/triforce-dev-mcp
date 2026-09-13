@@ -604,7 +604,7 @@ async def websocket_connect(
                         capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
                     )
                     logger.info("Local workspace resumed | lease=%s client=%s mode=%s", str(binding.get("lease_id") or "")[:12], client_id, binding["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True, "resume_token": binding.get("resume_token", resume_token)}})
                 elif workspace_pair_kind == "reconnect" and paired_mcp_session:
                     from app.services.mcp_workspace_sessions import reconnect_web_workspace
                     binding = reconnect_web_workspace(

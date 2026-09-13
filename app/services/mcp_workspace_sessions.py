@@ -617,7 +617,13 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
 
     current = get_workspace(session_id)
     if current and current.get("reconnect_pair_key") == key:
-        return current
+        # A repeated claim is idempotent, but callers still need the durable
+        # credential. bind_workspace intentionally does not persist raw tokens
+        # in the session binding, so re-attach it from the owning lease.
+        result = dict(current)
+        if resume_token:
+            result["resume_token"] = resume_token
+        return result
 
     aliases.add(session_id)
     lease_id = str(item.get("lease_id") or uuid.uuid4().hex)
@@ -662,6 +668,10 @@ def claim_workspace_with_resume_token(token: str, session_id: str) -> dict[str, 
         reconnect_pair_key=key, lease_id=str(item.get("lease_id") or uuid.uuid4().hex),
     )
     _persist_lease(item)
+    # The caller already proved possession of this token. Returning it makes
+    # rebind/status flows idempotent without persisting the raw secret in the
+    # session binding itself.
+    binding["resume_token"] = str(token)
     return binding
 
 

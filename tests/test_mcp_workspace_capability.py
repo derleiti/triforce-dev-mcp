@@ -526,6 +526,28 @@ def test_resume_token_restores_lease_after_process_state_loss(monkeypatch):
     assert sessions.workspace_status('chatgpt-new')['transport_state'] == 'online'
 
 
+
+def test_repeated_pair_claim_keeps_returning_durable_token():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('idempotent-token-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'same-transport')
+    second = sessions.claim_waiting_workspace(code, 'same-transport')
+    assert first['resume_token']
+    assert second['resume_token'] == first['resume_token']
+
+
+def test_resume_token_claim_returns_proven_durable_token(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('token-return-browser')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'transport-A')
+    token = first['resume_token']
+    rebound = sessions.claim_workspace_with_resume_token(token, 'transport-B')
+    assert rebound['resume_token'] == token
+
 def test_pair_code_stays_short_lived_after_durable_lease_created(monkeypatch):
     code = sessions.create_web_pair_code()
     conn = DummyConnection('pair-expiry-browser')

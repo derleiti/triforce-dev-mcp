@@ -62,3 +62,12 @@ def test_android_pair_code_field_is_stable_copy_paste_surface():
     assert 'Copy code' in activity and 'Paste code' in activity
     assert 'pair.hasFocus()||pair.hasSelection()' in activity
     assert 'lastTransportState' in activity
+
+
+def test_android_reconnect_is_single_flight():
+    protocol=text("app/src/main/java/me/ailinux/workspace/ProtocolClient.java")
+    assert 'AtomicBoolean connecting' in protocol
+    assert 'ScheduledFuture<?> reconnectFuture' in protocol
+    assert 'if(socket!=ws)return' in protocol
+    assert 'if(f!=null&&!f.isDone())return' in protocol
+    assert 'cancelReconnect()' in protocol
