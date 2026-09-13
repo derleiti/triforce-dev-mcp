@@ -159,3 +159,29 @@ def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
     assert "removeEntry(name,{recursive:true})" in html
     assert "NotSupportedError" in html
     assert "workspace_clear" in html
+
+
+def test_mobile_workspace_install_surface_and_pwa_contract():
+    from app.routes.mcp import _workspace_setup_html
+    html = _workspace_setup_html()
+    assert 'id="mobilePanel"' in html
+    assert '/v1/mcp/workspace/android.apk' in html
+    assert 'package=me.ailinux.workspace' in html
+    assert '/v1/mcp/manifest.webmanifest' in html
+    assert "/v1/mcp/sw.js" in html
+    assert "beforeinstallprompt" in html
+    assert 'Add to Home Screen' in html
+    assert 'foreground service keeps the MCP executor independent from Chrome tab suspension' in html
+
+
+@pytest.mark.asyncio
+async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell():
+    from app.routes.mcp import workspace_pwa_manifest, workspace_pwa_service_worker
+    manifest_response = await workspace_pwa_manifest()
+    manifest = __import__('json').loads(manifest_response.body)
+    assert manifest['name'] == 'AILinux Workspace'
+    assert manifest['start_url'] == '/v1/mcp'
+    assert manifest['display'] == 'standalone'
+    worker = await workspace_pwa_service_worker()
+    assert b"ailinux-workspace-v2866" in worker.body
+    assert b"caches.match('/v1/mcp')" in worker.body
