@@ -98,6 +98,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "'file_ops'" in html
     assert "'code_edit'" in html
     assert 'Selecting a folder does not enumerate or analyze it' in html
+    assert "let lastStatusText=''" in html
+    assert 'aria-live="polite"' in html
     assert 'Desktop Helper' in html
     assert '/v1/mcp/workspace/desktop/linux-appimage' in html
     assert '/v1/mcp/workspace/desktop/linux-deb' in html

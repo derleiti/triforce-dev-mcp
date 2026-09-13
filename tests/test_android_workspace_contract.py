@@ -53,3 +53,12 @@ def test_android_pair_code_is_stable_copy_paste_ui():
     assert 'Pair code copied.' in activity
     assert 'Pair code pasted.' in activity
     assert 'Native Android routes local shares directly through the foreground MCP executor' in activity
+
+
+def test_android_pair_code_field_is_stable_copy_paste_surface():
+    activity = (ROOT / "android_workspace/app/src/main/java/me/ailinux/workspace/MainActivity.java").read_text()
+    assert 'setTextIsSelectable(true)' in activity
+    assert 'setSelectAllOnFocus(true)' in activity
+    assert 'Copy code' in activity and 'Paste code' in activity
+    assert 'pair.hasFocus()||pair.hasSelection()' in activity
+    assert 'lastTransportState' in activity
