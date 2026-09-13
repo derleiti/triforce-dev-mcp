@@ -112,6 +112,12 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert '/v1/mcp/helper/linux-deb' in html
     assert '/v1/mcp/helper/windows' in html
     assert '/v1/mcp/helper/macos' in html
+    assert "function detectedHelperOs()" in html
+    assert "return 'unknown'" in html
+    assert "unknown:HELPER_DOWNLOAD_IDS" in html
+    assert "showHelperDownloads(downloads[os]||HELPER_DOWNLOAD_IDS)" in html
+    assert "Operating system not recognized reliably" in html
+    assert "Android APK, Linux AppImage/.deb, Windows and macOS downloads are all available" in html
     assert "mode:workspaceMode==='write'?'readwrite':'read'" in html
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert 'legacyEntries' in html
