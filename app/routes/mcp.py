@@ -4054,6 +4054,8 @@ import asyncio
 from typing import Dict, Any as TypingAny
 from datetime import datetime as dt_datetime
 
+MCP_REQUEST_BODY_TIMEOUT_SECONDS = float(os.getenv("MCP_REQUEST_BODY_TIMEOUT_SECONDS", "30"))
+
 # ============================================================================
 # MCP Session Management for Cursor-compatible SSE Transport
 # ============================================================================
@@ -4656,6 +4658,28 @@ async def _process_mcp_request(
         }
 
 
+async def _read_mcp_json_body(request: Request, log: logging.Logger, session_id: Optional[str]) -> TypingAny:
+    """Read one MCP JSON body with a bounded wait and traceable failure mode."""
+    trace_id = str(getattr(request.state, "trace_id", "") or "")
+    try:
+        body = await asyncio.wait_for(request.json(), timeout=MCP_REQUEST_BODY_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        log.warning(
+            "MCP_REQUEST_BODY_TIMEOUT | trace=%s | session=%s | timeout_s=%s",
+            trace_id or "none",
+            session_id or "none",
+            MCP_REQUEST_BODY_TIMEOUT_SECONDS,
+        )
+        raise
+    log.info(
+        "MCP_REQUEST_BODY_OK | trace=%s | session=%s | body_type=%s",
+        trace_id or "none",
+        session_id or "none",
+        type(body).__name__,
+    )
+    return body
+
+
 @router.post("/mcp", tags=["MCP"], summary="Unified MCP endpoint (Streamable HTTP + Legacy)")
 @router.post("/mcp/", tags=["MCP"], summary="Unified MCP endpoint (Streamable HTTP + Legacy)")
 @public_router.post("/mcp/service", tags=["MCP"], summary="Authenticated MCP service bridge endpoint")
@@ -4701,10 +4725,37 @@ async def mcp_unified_endpoint(request: Request):
 
     wants_streaming = "text/event-stream" in accept_header
 
-    _log.info(f"MCP_UNIFIED | IP: {client_ip} | Session: {session_id or 'none'} | Accept: {accept_header}")
+    trace_id = str(getattr(request.state, "trace_id", "") or "")
+    _log.info(
+        "MCP_UNIFIED | IP: %s | Session: %s | Trace: %s | Accept: %s",
+        client_ip,
+        session_id or "none",
+        trace_id or "none",
+        accept_header,
+    )
     try:
-        body = await request.json()
+        body = await _read_mcp_json_body(request, _log, session_id)
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32008,
+                    "message": "Request body timeout",
+                    "data": "MCP request body was not received completely before the server timeout",
+                },
+                "id": None,
+            },
+            status_code=408,
+            headers={"X-Trace-ID": trace_id} if trace_id else None,
+        )
     except Exception as e:
+        _log.warning(
+            "MCP_REQUEST_BODY_INVALID | trace=%s | session=%s | error=%s",
+            trace_id or "none",
+            session_id or "none",
+            type(e).__name__,
+        )
         return JSONResponse(
             content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error", "data": str(e)}, "id": None},
             status_code=400
