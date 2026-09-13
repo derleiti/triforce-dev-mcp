@@ -1,0 +1,10 @@
+[Unit]
+Description=Restore TriForce operator-selected source service
+Documentation=https://ailinux.me/docs/triforce
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/zombie/triforce/scripts/triforce-source-recover.sh
+TimeoutStartSec=60

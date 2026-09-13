@@ -1,0 +1,37 @@
+[Unit]
+Description=TriForce independent source recovery webhook
+Documentation=https://ailinux.me/docs/triforce
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target wg-quick@wg0.service
+ConditionPathExists=/etc/triforce/source-mode.enabled
+ConditionPathExists=/etc/triforce/recovery-token
+
+[Service]
+Type=simple
+Environment=TRIFORCE_RECOVERY_PORT=9191
+ExecStart=/usr/bin/python3 /home/zombie/triforce/packaging/triforce-recovery-listener.py
+Restart=on-failure
+RestartSec=5
+User=root
+Group=root
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/zombie/triforce /etc/triforce
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
+CapabilityBoundingSet=
+AmbientCapabilities=
+IPAddressDeny=any
+IPAddressAllow=10.10.0.0/24
+
+[Install]
+WantedBy=multi-user.target
