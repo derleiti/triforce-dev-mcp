@@ -16,5 +16,8 @@ final class StateStore {
     String pairCode() { return prefs.getString("pair_code", ""); }
     void setResumeToken(String token) { prefs.edit().putString("resume_token", token == null ? "" : token).apply(); }
     String resumeToken() { return prefs.getString("resume_token", ""); }
+    /** Terminal release: the AI gets a shell only after the user hands it over explicitly. */
+    void setShellReleased(boolean released) { prefs.edit().putBoolean("shell_released", released).apply(); }
+    boolean shellReleased() { return prefs.getBoolean("shell_released", false); }
     void clearCredentials() { prefs.edit().remove("pair_code").remove("resume_token").apply(); }
 }
