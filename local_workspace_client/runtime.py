@@ -5,7 +5,6 @@ import fnmatch
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -17,7 +16,7 @@ from .shell_backends import ShellUnavailable, build_shell_plan, shell_backend_st
 
 IGNORE_NAMES = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
 READ_TOOLS = {"workspace_info", "file_read", "file_tree", "code_read", "code_tree", "code_search", "code_grep", "git"}
-WRITE_TOOLS = READ_TOOLS | {"file_edit", "directory_create", "workspace_clear", "shell", "binary_exec", "task_runner", "lint", "test"}
+WRITE_TOOLS = READ_TOOLS | {"file_edit", "directory_create", "workspace_clear", "shell"}
 
 
 def _result(text: str, error: bool = False, **structured: Any) -> dict[str, Any]:
@@ -193,7 +192,7 @@ class WorkspaceRuntime:
         """
         tools = set(WRITE_TOOLS if self.writable else READ_TOOLS)
         if not bool(shell_backend_status(self.root).get("released")):
-            tools -= {"shell", "task_runner", "binary_exec", "lint", "test"}
+            tools.discard("shell")
         return tools
 
     def execute(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -277,18 +276,10 @@ class WorkspaceRuntime:
                     if not old or text.count(old) != 1: raise ValueError("old_text must match exactly once")
                     path.write_text(text.replace(old, str(args.get("new_text") or ""), 1), encoding="utf-8")
                 return _result(f"updated {self.display(path)}; backup={backup}", False, backup=str(backup))
-            if tool in {"shell", "task_runner"}:
+            if tool == "shell":
                 backup = backup_workspace(self.root, tool=tool)
-                text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), int(args.get("timeout") or (300 if tool == "task_runner" else 120)))
+                text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), int(args.get("timeout") or 120))
                 return _result(text + f"\nbackup={backup}", err, backup=str(backup))
-            if tool == "binary_exec":
-                program = str(args.get("program") or "").strip(); arguments = args.get("arguments") or []
-                if not program or not isinstance(arguments, list) or not all(isinstance(x, str) for x in arguments): raise ValueError("program and string arguments are required")
-                command = " ".join([shlex.quote(program), *(shlex.quote(x) for x in arguments)])
-                backup = backup_workspace(self.root, tool=tool)
-                text, err = self._sandbox(command, str(args.get("work_dir") or "."), int(args.get("timeout") or 120)); return _result(text + f"\nbackup={backup}", err, backup=str(backup))
-            if tool in {"lint", "test"}:
-                text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), 180); return _result(text, err)
         except Exception as exc:
             return _result(f"{tool} error: {exc}", True)
         return _result(f"unsupported workspace tool: {tool}", True)

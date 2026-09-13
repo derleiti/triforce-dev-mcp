@@ -41,7 +41,8 @@ def test_read_only_blocks_writes_and_write_mode_edits():
 def test_tool_sets_and_fixed_public_mcp_url():
     assert 'shell' not in READ_TOOLS
     assert 'file_edit' not in READ_TOOLS
-    assert {'shell', 'file_edit', 'test'} <= WRITE_TOOLS
+    assert {'shell', 'file_edit'} <= WRITE_TOOLS
+    assert {'task_runner', 'binary_exec', 'lint', 'test'}.isdisjoint(WRITE_TOOLS)
     url = node_url('https://api.ailinux.me', 'ABCD-1234-EF56')
     assert url.startswith('wss://api.ailinux.me/v1/mcp/node/connect?')
     assert 'mode=workspace' in url

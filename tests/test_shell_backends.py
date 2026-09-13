@@ -92,13 +92,15 @@ def test_capabilities_hide_execution_tools_when_not_released(tmp_path, clean_env
     clean_env.setenv(sb.ENV_RELEASE, "off")
     tools = WorkspaceRuntime(tmp_path, writable=True).available_tools()
     assert "file_edit" in tools
-    for blocked in ("shell", "task_runner", "binary_exec", "lint", "test"):
-        assert blocked not in tools
+    assert "shell" not in tools
+    assert {"task_runner", "binary_exec", "lint", "test"}.isdisjoint(WorkspaceRuntime(tmp_path, writable=True).available_tools())
 
 
-def test_capabilities_expose_shell_when_released(tmp_path, clean_env):
+def test_capabilities_expose_only_shell_execution_primitive_when_released(tmp_path, clean_env):
     clean_env.setenv(sb.ENV_RELEASE, "on")
-    assert "shell" in WorkspaceRuntime(tmp_path, writable=True).available_tools()
+    tools = WorkspaceRuntime(tmp_path, writable=True).available_tools()
+    assert "shell" in tools
+    assert {"task_runner", "binary_exec", "lint", "test"}.isdisjoint(tools)
 
 
 def test_read_only_workspace_never_executes(tmp_path, clean_env):
