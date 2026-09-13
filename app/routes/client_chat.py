@@ -23,6 +23,7 @@ from ..services.user_tiers import (
 from ..services.model_registry import OPENROUTER_FREE_ROUTER, registry
 from ..services.provider_chat import chat_completion, normalize_tools
 from ..services.model_availability import availability_service
+from ..mcp.agent_instructions import merge_system_policy
 
 logger = logging.getLogger("ailinux.client_chat")
 
@@ -832,6 +833,16 @@ async def client_chat(
         messages.append({"role": "user", "content": request.message})
     else:
         raise HTTPException(400, "Either 'message' or 'messages' is required")
+
+    # AILinux client-mode policy is mandatory and cannot be replaced by a caller
+    # supplied system prompt. Merge all existing system content behind it.
+    caller_system = "\n\n".join(
+        str(item.get("content") or "")
+        for item in messages
+        if item.get("role") == "system" and isinstance(item.get("content"), str)
+    ).strip()
+    messages = [item for item in messages if item.get("role") != "system"]
+    messages.insert(0, {"role": "system", "content": merge_system_policy(caller_system, mode="client")})
 
     for item in messages:
         _validate_chat_content(item.get("content"))

@@ -78,3 +78,31 @@ async def test_existing_admin_bearer_still_gets_full_access(monkeypatch):
     assert await mcp_auth.require_mcp_auth(request) == 'oauth_client'
     assert request.state.mcp_auth_method == 'bearer'
     assert request.state.mcp_auth_full_access is True
+
+
+@pytest.mark.asyncio
+async def test_bearer_workspace_subject_comes_only_from_trusted_token_metadata(monkeypatch):
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_USER', 'user')
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_PASS', 'pass')
+    monkeypatch.setattr(mcp_auth, 'is_valid_token', lambda token: token == 'bridge-token')
+    monkeypatch.setattr(mcp_auth, '_token_has_full_mcp_access', lambda _token: False)
+    monkeypatch.setattr(mcp_auth, 'get_token_metadata', lambda _token: {
+        'user': 'nova-telegram-bridge',
+        'client_id': 'nova-telegram-bridge-mcp',
+        'workspace_subject': 'server-issued-stable-subject',
+    })
+    request = _build_request('/v1/mcp', '172.18.0.5', {
+        'Authorization': 'Bearer bridge-token',
+        'X-TriForce-Workspace-Subject': 'attacker-controlled-value',
+    })
+    assert await mcp_auth.require_mcp_auth(request) == 'oauth_client'
+    assert request.state.mcp_auth_user == 'nova-telegram-bridge'
+    assert request.state.mcp_auth_client_id == 'nova-telegram-bridge-mcp'
+    assert request.state.mcp_workspace_subject == 'server-issued-stable-subject'
+    assert request.state.mcp_auth_full_access is False
+
+
+def test_service_mcp_alias_is_not_public_guest():
+    from app.utils.mcp_auth import _is_public_guest_mcp_path
+    assert _is_public_guest_mcp_path("/v1/mcp") is True
+    assert _is_public_guest_mcp_path("/v1/mcp/service") is False

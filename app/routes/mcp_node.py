@@ -46,8 +46,13 @@ class ClientConnection:
         self.user_id = user_id
         self.websocket = websocket
         self.tier = tier
-        self.connected_at = datetime.now()
-        self.last_seen = datetime.now()
+        now = datetime.now()
+        self.connected_at = now
+        self.last_seen = now
+        self.last_inbound_at = now
+        self.last_app_ping_at: Optional[datetime] = None
+        self.last_app_pong_at: Optional[datetime] = None
+        self.last_client_ping_at: Optional[datetime] = None
         self.pending_requests: Dict[str, asyncio.Future] = {}
         self.pending_request_stages: Dict[str, str] = {}
         self.supported_tools: List[str] = []
@@ -136,8 +141,41 @@ class ClientConnection:
 CONNECTED_CLIENTS: Dict[str, ClientConnection] = {}
 
 # Heartbeat-Timeout: Clients die länger als X Sekunden kein Ping gesendet haben werden entfernt
-HEARTBEAT_TIMEOUT_SECONDS = 90  # 90 Sekunden ohne Ping = disconnect
-HEARTBEAT_CHECK_INTERVAL = 30   # Alle 30 Sekunden prüfen
+HEARTBEAT_TIMEOUT_SECONDS = 90  # Standard client timeout
+WORKSPACE_HEARTBEAT_TIMEOUT_SECONDS = 300  # Mobile browser tabs may be throttled in background
+HEARTBEAT_CHECK_INTERVAL = 20   # Also drives server-originated application pings
+
+
+def _classify_disconnect(code: Optional[int], inactive_seconds: float) -> str:
+    """Name the likely cause of a socket loss instead of logging a bare code.
+
+    Uvicorn reports every transport-level loss as 1005 because the peer never
+    completed a closing handshake. Correlating the code with the age of the last
+    inbound frame separates a reaped keepalive from a real browser close.
+    """
+    if code in (1000, 1001):
+        return "browser_close"
+    if code == 1012:
+        return "backend_restart"
+    if code == 4002:
+        return "client_watchdog"
+    if code == 4005:
+        return "browser_freeze"
+    if code in (4003, 4004):
+        return "workspace_revoke"
+    if code == 1006:
+        return "network_reset"
+    if code == 1005:
+        try:
+            from app.config import get_settings
+            pong_deadline = float(get_settings().ws_ping_timeout)
+        except Exception:
+            pong_deadline = 20.0
+        if inactive_seconds >= pong_deadline:
+            return "transport_ping_timeout"
+        return "transport_lost"
+    return "unknown"
+
 
 _heartbeat_task = None
 
@@ -150,13 +188,25 @@ async def _heartbeat_monitor():
         now = datetime.now()
         stale_clients = {}
         
+        seen_connections = set()
         for client_id, conn in list(CONNECTED_CLIENTS.items()):
-            # Zeit seit letztem Lebenszeichen
+            marker = id(conn)
+            if marker in seen_connections:
+                continue
+            seen_connections.add(marker)
+
             inactive_seconds = (now - conn.last_seen).total_seconds()
-            
-            if inactive_seconds > HEARTBEAT_TIMEOUT_SECONDS:
-                stale_clients[id(conn)] = conn
-                logger.warning(f"Client {client_id} inactive for {inactive_seconds:.0f}s, marking as stale")
+            timeout_seconds = WORKSPACE_HEARTBEAT_TIMEOUT_SECONDS if conn.mode == "workspace" else HEARTBEAT_TIMEOUT_SECONDS
+            if inactive_seconds > timeout_seconds:
+                stale_clients[marker] = conn
+                logger.warning("Client %s inactive for %.0fs (limit=%ss, mode=%s), marking as stale", client_id, inactive_seconds, timeout_seconds, conn.mode)
+                continue
+
+            try:
+                await conn.websocket.send_json({"jsonrpc": "2.0", "method": "ping", "params": {"server_ts": now.timestamp()}})
+                conn.last_app_ping_at = now
+            except Exception:
+                stale_clients[marker] = conn
         
         # Stale Clients entfernen
         for conn in stale_clients.values():
@@ -174,11 +224,20 @@ async def _heartbeat_monitor():
 
 
 def start_heartbeat_monitor():
-    """Startet den Heartbeat-Monitor (einmal beim App-Start aufrufen)"""
+    """Start the MCP node heartbeat monitor once per application process."""
     global _heartbeat_task
     if _heartbeat_task is None or _heartbeat_task.done():
         _heartbeat_task = asyncio.create_task(_heartbeat_monitor())
         logger.info("Heartbeat monitor started")
+
+
+def stop_heartbeat_monitor():
+    """Cancel the heartbeat monitor during application shutdown."""
+    global _heartbeat_task
+    task = _heartbeat_task
+    _heartbeat_task = None
+    if task is not None and not task.done():
+        task.cancel()
 
 
 # =============================================================================
@@ -349,17 +408,26 @@ async def websocket_connect(
     is_telemetry_only = mode == "telemetry"
     is_workspace_node = mode == "workspace"
     pair_code = str(websocket.query_params.get("pair_code") or "").strip().upper()
+    handoff_code = str(websocket.query_params.get("handoff_code") or "").strip().upper()
     resume_token = ""
+    handoff_context: dict[str, Any] = {}
     paired_mcp_session = None
     workspace_pair_kind = "invalid"
     if is_workspace_node:
         try:
-            from app.services.mcp_workspace_sessions import consume_workspace_resume_ticket, pair_code_kind
-            resume_token = consume_workspace_resume_ticket(pair_code)
-            if resume_token:
-                workspace_pair_kind = "resume"
+            from app.services.mcp_workspace_sessions import (
+                consume_workspace_handoff_ticket, consume_workspace_resume_ticket, pair_code_kind,
+            )
+            if handoff_code:
+                handoff_context = consume_workspace_handoff_ticket(handoff_code)
+                if handoff_context:
+                    workspace_pair_kind = "handoff"
             else:
-                workspace_pair_kind, paired_mcp_session = pair_code_kind(pair_code)
+                resume_token = consume_workspace_resume_ticket(pair_code)
+                if resume_token:
+                    workspace_pair_kind = "resume"
+                else:
+                    workspace_pair_kind, paired_mcp_session = pair_code_kind(pair_code)
         except Exception:
             workspace_pair_kind, paired_mcp_session = "invalid", None
         if workspace_pair_kind == "invalid":
@@ -404,9 +472,10 @@ async def websocket_connect(
     
     # Ownership and tier come from authenticated server state, never query claims.
     if is_workspace_node:
+        workspace_credential_id = handoff_code or pair_code
         resolved_user_id = (
             f"workspace:{paired_mcp_session[:12]}" if paired_mcp_session
-            else f"workspace:web:{pair_code.replace('-', '')[:12].lower()}"
+            else f"workspace:web:{workspace_credential_id.replace('-', '')[:12].lower()}"
         )
     else:
         resolved_user_id = payload.get("sub") or client_id
@@ -454,10 +523,13 @@ async def websocket_connect(
             if not isinstance(data, dict):
                 logger.warning("Ignoring non-object MCP message from %s", client_id)
                 continue
-            # Any valid application message proves the peer is alive. Browser
-            # clients additionally send an explicit 10s ping because mobile
-            # proxies/background policies can otherwise reap an idle socket.
-            connection.last_seen = datetime.now()
+            # Any valid application message proves the peer is alive. Keep
+            # inbound activity separate from server-originated heartbeats so
+            # disconnect diagnostics can distinguish an idle browser from a
+            # transport that vanished despite recent client traffic.
+            inbound_now = datetime.now()
+            connection.last_seen = inbound_now
+            connection.last_inbound_at = inbound_now
 
             # Response auf Tool-Call?
             if "result" in data or "error" in data or ("id" in data and "method" not in data):
@@ -490,7 +562,40 @@ async def websocket_connect(
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": False, "error": "client_workspace_tool must be advertised first"}})
                     continue
                 share = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
-                if workspace_pair_kind == "resume" and resume_token:
+                if workspace_pair_kind == "handoff" and handoff_context:
+                    from app.services.mcp_workspace_sessions import complete_workspace_handoff
+                    binding = complete_workspace_handoff(
+                        handoff_context, connection,
+                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
+                        task=str(share.get("task") or ""),
+                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                    )
+                    previous_connection = binding.pop("previous_connection", None)
+                    logger.info(
+                        "Local workspace handed off | lease=%s target=%s client=%s mode=%s",
+                        str(binding.get("lease_id") or "")[:12], binding.get("handoff_target"), client_id, binding["mode"],
+                    )
+                    await websocket.send_json({
+                        "jsonrpc": "2.0", "method": "workspace/shared",
+                        "params": {
+                            "ok": True, "state": "connected", "access_mode": binding["mode"],
+                            "mode": binding["mode"], "waiting_for_session": False,
+                            "reconnected": True, "handoff": True,
+                            "resume_token": binding.get("resume_token", ""),
+                        },
+                    })
+                    if previous_connection is not None and previous_connection is not connection and not bool(getattr(previous_connection, "closed", True)):
+                        old_ws = getattr(previous_connection, "websocket", None)
+                        if old_ws is not None:
+                            try:
+                                await old_ws.send_json({
+                                    "jsonrpc": "2.0", "method": "workspace/handoff_complete",
+                                    "params": {"ok": True, "lease_id": binding.get("lease_id", ""), "target": binding.get("handoff_target", "app")},
+                                })
+                                await old_ws.close(code=4004, reason="workspace handed off")
+                            except Exception:
+                                pass
+                elif workspace_pair_kind == "resume" and resume_token:
                     from app.services.mcp_workspace_sessions import reconnect_workspace_with_resume_token
                     binding = reconnect_workspace_with_resume_token(
                         resume_token, connection,
@@ -543,6 +648,18 @@ async def websocket_connect(
                         client_id, request_id[:12], tool_name, stage,
                     )
 
+            elif data.get("method") == "workspace/lifecycle" and is_workspace_node:
+                params = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
+                logger.info(
+                    "WS_LIFECYCLE | client=%s event=%s visibility=%s hidden=%s online=%s platform=%s",
+                    client_id,
+                    str(params.get("event") or "unknown")[:32],
+                    str(params.get("visibility") or "")[:32],
+                    bool(params.get("hidden")),
+                    bool(params.get("online", True)),
+                    str(params.get("platform") or "")[:64],
+                )
+
             elif data.get("method") == "workspace/revoke" and is_workspace_node:
                 from app.services.mcp_workspace_sessions import unbind_connection
                 unbind_connection(connection)
@@ -576,13 +693,34 @@ async def websocket_connect(
 
             # Heartbeat
             elif data.get("method") == "ping":
+                connection.last_client_ping_at = inbound_now
                 await websocket.send_json({"jsonrpc": "2.0", "method": "pong", "params": data.get("params", {})})
             elif data.get("method") == "pong":
-                # last_seen was refreshed above; no response needed.
-                pass
+                connection.last_app_pong_at = inbound_now
 
     except WebSocketDisconnect as exc:
-        logger.info("Client disconnected: %s code=%s", client_id, getattr(exc, "code", None))
+        code = getattr(exc, "code", None)
+        now = datetime.now()
+        inactive = (now - connection.last_seen).total_seconds()
+        session_age = (now - connection.connected_at).total_seconds()
+        app_ping_age = ((now - connection.last_app_ping_at).total_seconds() if connection.last_app_ping_at else -1.0)
+        app_pong_age = ((now - connection.last_app_pong_at).total_seconds() if connection.last_app_pong_at else -1.0)
+        client_ping_age = ((now - connection.last_client_ping_at).total_seconds() if connection.last_client_ping_at else -1.0)
+        logger.info(
+            "WS_CONTROL disconnect | client=%s mode=%s code=%s cause=%s session_age=%.1fs "
+            "last_inbound_age=%.1fs last_app_ping_age=%.1fs last_app_pong_age=%.1fs "
+            "last_client_ping_age=%.1fs pending_stages=%s",
+            client_id,
+            connection.mode,
+            code,
+            _classify_disconnect(code, inactive),
+            session_age,
+            inactive,
+            app_ping_age,
+            app_pong_age,
+            client_ping_age,
+            sorted(set(connection.pending_request_stages.values())) or "none",
+        )
     except Exception as e:
         logger.error(f"WebSocket error for {client_id}: {e}")
     finally:

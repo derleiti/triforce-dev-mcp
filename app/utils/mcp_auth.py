@@ -225,6 +225,15 @@ def get_persistent_tokens() -> Dict[str, Dict[str, Any]]:
     return _PERSISTENT_TOKENS
 
 
+def get_token_metadata(token: str) -> Dict[str, Any]:
+    """Return trusted server-side metadata for a persistent bearer token."""
+    if not token:
+        return {}
+    _load_persistent_tokens()
+    data = _PERSISTENT_TOKENS.get(token)
+    return dict(data) if isinstance(data, dict) else {}
+
+
 # Canonical MCP scopes advertised via discovery metadata (RFC 8414/9728).
 # "mcp" is the always-granted base scope; the granular scopes gate privileged
 # tool visibility (see _token_has_full_mcp_access).
@@ -341,8 +350,14 @@ def _unauthorized(detail: str, www_auth: str = "Bearer") -> HTTPException:
 
 
 def create_token(user: str = "oauth_client", client_id: str = None,
-                 scope: str = "mcp", expires_days: int = _DEFAULT_TOKEN_EXPIRY_DAYS) -> str:
-    """Create a new bearer token."""
+                 scope: str = "mcp", expires_days: int = _DEFAULT_TOKEN_EXPIRY_DAYS,
+                 workspace_subject: str | None = None) -> str:
+    """Create a new bearer token.
+
+    ``workspace_subject`` is trusted server-side metadata used to keep one
+    logical local-workspace identity stable while MCP transport sessions and
+    bearer credentials are rotated. It is never accepted from request headers.
+    """
     token = secrets.token_urlsafe(32)
     metadata = {
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -351,6 +366,8 @@ def create_token(user: str = "oauth_client", client_id: str = None,
         "client_id": client_id,
         "scope": scope,
     }
+    if workspace_subject:
+        metadata["workspace_subject"] = str(workspace_subject)[:256]
     add_token(token, metadata)
     logger.info(f"TOKEN_CREATED | User: {user} | Client: {client_id} | Expires: {expires_days}d")
     return token
@@ -517,6 +534,7 @@ async def require_mcp_auth(request: Request) -> str:
         request.state.mcp_auth_method = "public_guest"
         request.state.mcp_auth_full_access = False
         request.state.mcp_auth_client_id = None
+        request.state.mcp_workspace_subject = None
         logger.debug("AUTH_OK | IP: %s | Method: public_guest", client_ip)
         return "public_guest"
     
@@ -527,9 +545,12 @@ async def require_mcp_auth(request: Request) -> str:
     # Method 0: query parameter fallback for MCP clients that drop headers
     if query_token:
         if is_valid_token(query_token):
-            request.state.mcp_auth_user = "oauth_client"
+            metadata = get_token_metadata(query_token)
+            request.state.mcp_auth_user = str(metadata.get("user") or "oauth_client")
             request.state.mcp_auth_method = "query"
             request.state.mcp_auth_full_access = _token_has_full_mcp_access(query_token)
+            request.state.mcp_auth_client_id = metadata.get("client_id")
+            request.state.mcp_workspace_subject = metadata.get("workspace_subject")
             logger.debug(
                 "AUTH_OK | IP: %s | Method: query-param | FullAccess: %s",
                 client_ip, request.state.mcp_auth_full_access,
@@ -542,9 +563,12 @@ async def require_mcp_auth(request: Request) -> str:
     if auth_header.lower().startswith("bearer "):
         token = auth_header[7:].strip()
         if is_valid_token(token):
-            request.state.mcp_auth_user = "oauth_client"
+            metadata = get_token_metadata(token)
+            request.state.mcp_auth_user = str(metadata.get("user") or "oauth_client")
             request.state.mcp_auth_method = "bearer"
             request.state.mcp_auth_full_access = _token_has_full_mcp_access(token)
+            request.state.mcp_auth_client_id = metadata.get("client_id")
+            request.state.mcp_workspace_subject = metadata.get("workspace_subject")
             logger.debug(
                 "AUTH_OK | IP: %s | Method: bearer | FullAccess: %s",
                 client_ip, request.state.mcp_auth_full_access,
@@ -562,6 +586,7 @@ async def require_mcp_auth(request: Request) -> str:
             request.state.mcp_authority_source = authority_source
             request.state.mcp_auth_full_access = authority_role in {"human_owner", "human_admin"}
             request.state.mcp_auth_client_id = jwt_payload.get("client_id")
+            request.state.mcp_workspace_subject = None
             logger.debug(
                 "AUTH_OK | IP: %s | Method: jwt | User: %s | FullAccess: %s",
                 client_ip, user, request.state.mcp_auth_full_access,

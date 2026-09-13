@@ -72,6 +72,12 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'Workspace pairing expired. Creating a fresh pairing ID' in html
     assert 'function startHeartbeat()' in html
     assert 'watchdogTimer' in html
+    assert 'connectPromise=null' in html
+    assert 'if(connectPromise)return connectPromise' in html
+    assert 'finally{connectPromise=null}' in html
+    assert "if(urlPair){resumeToken='';pairCode=urlPair}" in html
+    assert 'savedResumeToken' in html
+    assert 'savedJoinCode' in html
     assert 'workspace/paired' in html
     assert 'workspace/detached' in html
     assert 'Workspace connected and AI-reachable.' in html
@@ -85,13 +91,13 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'async function removeEntryCompat(parent,name,recursive=false)' in html
     assert 'await parent.removeEntry(name);' in html
     assert "action==='delete'||action==='remove'" in html
-    assert "removeEntry(name,{recursive})" not in html
+    assert "removeEntry(name,{recursive:true})" in html
     assert "ws.close(4000,'heartbeat timeout')" not in html
     assert "ws.close(4000,'stale after background')" not in html
     assert 'async function codeEdit(args)' in html
     assert "'file_ops'" in html
     assert "'code_edit'" in html
-    assert 'Nothing has been enumerated' in html
+    assert 'Selecting a folder does not enumerate or analyze it' in html
     assert "mode:workspaceMode==='write'?'readwrite':'read'" in html
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert 'legacyEntries' in html
@@ -114,7 +120,9 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "const persistentHandleStore='indexedDB' in window" in html
     assert 'directory handle did not survive IndexedDB round-trip' in html
     assert 'isSameEntry' in html
-    assert 'Folder handle shared and persistence verified.' in html
+    assert 'Folder shared. Starting sandbox executor automatically' in html
+    assert 'await connect();' in html
+    assert 'id="connectBtn" class="secondary hidden"' in html
     assert 'Saved directory handle restored · permission=' in html
     assert '&resume_token=' not in html
     assert 'data-cfasync="false"' in html
@@ -125,6 +133,15 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "deleteWorkspaceState('resumeToken')" in html
     assert "loadWorkspaceState('workspaceMode')" in html
     assert '/v1/mcp/workspace/resume-ticket' in html
+    assert 'handoffBtn' in html
+    assert '/v1/mcp/workspace/handoff-ticket' in html
+    assert 'workspace/handoff_complete' in html
+    assert "EXECUTOR_VERSION='2.86.6-browser'" in html
+    assert "document.addEventListener('freeze'" in html
+    assert "document.addEventListener('resume'" in html
+    assert "method:'workspace/lifecycle'" in html
+    assert "ws.close(4005,'page freeze')" in html
+    assert "if(pairCode&&!urlPair)" in html
     assert '__PAIR_CODE__' not in html
     assert 'persistent workspace session' in html
     assert "saveWorkspaceState('resumeToken'" in html
@@ -134,3 +151,11 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'this Join ID remains valid until disconnect or workspace replacement.' in html
     assert "resume_token" in html
     assert "resumeToken" in html
+
+
+def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
+    from app.routes.mcp import _workspace_setup_html
+    html = _workspace_setup_html()
+    assert "removeEntry(name,{recursive:true})" in html
+    assert "NotSupportedError" in html
+    assert "workspace_clear" in html

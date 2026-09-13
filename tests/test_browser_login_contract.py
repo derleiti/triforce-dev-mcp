@@ -99,3 +99,39 @@ def test_app_redirect_rejects_non_loopback_and_unknown_apps():
         client_auth._validate_browser_app_redirect("ailinux-ai-coder", "https://evil.example/callback")
     with pytest.raises(client_auth.HTTPException):
         client_auth._validate_browser_app_redirect("unknown-app", "http://127.0.0.1:49152/callback")
+
+
+def test_app_redirect_accepts_exact_verified_https_app_link_only():
+    expected = "https://api.ailinux.me/v1/auth/browser/app-callback/ailinux-client"
+    assert client_auth._validate_browser_app_redirect("ailinux-client", expected) == expected
+    with pytest.raises(client_auth.HTTPException):
+        client_auth._validate_browser_app_redirect(
+            "ailinux-client", "https://api.ailinux.me/v1/auth/browser/app-callback/ailinux-ai-coder"
+        )
+    with pytest.raises(client_auth.HTTPException):
+        client_auth._validate_browser_app_redirect("ailinux-client", expected + "?next=x")
+
+
+@pytest.mark.asyncio
+async def test_android_app_link_browser_code_uses_fragment_and_pkce_exchange():
+    verifier = "z" * 64
+    state = "android-state-" + "x" * 32
+    redirect = "https://api.ailinux.me/v1/auth/browser/app-callback/ailinux-client"
+    token = client_auth.create_jwt_token("browser-source", "pro", email="browser@example.test")
+    issued = await client_auth.create_browser_code(
+        client_auth.BrowserCodeRequest(
+            purpose="app", app_id="ailinux-client", redirect_uri=redirect,
+            code_challenge=_challenge(verifier), state=state,
+        ),
+        authorization=f"Bearer {token}",
+    )
+    assert issued["handoff_url"].startswith(redirect + "#code=")
+    assert "&state=" in issued["handoff_url"]
+    assert "?code=" not in issued["handoff_url"]
+    login = await client_auth.exchange_browser_code(
+        client_auth.BrowserCodeExchangeRequest(
+            code=issued["code"], purpose="app", app_id="ailinux-client",
+            redirect_uri=redirect, code_verifier=verifier,
+        )
+    )
+    assert login.email == "browser@example.test"

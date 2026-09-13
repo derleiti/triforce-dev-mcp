@@ -26,6 +26,7 @@ RECONNECT_TTL_SECONDS = 2 * 60 * 60
 LEASE_TTL_SECONDS = 30 * 24 * 60 * 60
 MAX_WEB_PAIR_TICKETS = 2048
 RESUME_TICKET_TTL_SECONDS = 60
+HANDOFF_TICKET_TTL_SECONDS = 90
 REDIS_LEASE_PREFIX = "triforce:workspace:lease:"
 REDIS_RESUME_PREFIX = "triforce:workspace:resume:"
 REDIS_ALIAS_PREFIX = "triforce:workspace:alias:"
@@ -46,6 +47,10 @@ _RESUME_INDEX: dict[str, str] = {}
 # One-shot WebSocket reconnect tickets. Values contain the raw resume token only
 # in process memory for at most 60 seconds so long-lived credentials never enter URLs/logs.
 _RESUME_TICKETS: dict[str, dict[str, Any]] = {}
+# One-shot browser -> native app transfer tickets. These deliberately rotate
+# the durable resume credential only after the target executor proves it can
+# connect and advertise the workspace tool.
+_HANDOFF_TICKETS: dict[str, dict[str, Any]] = {}
 
 
 def _pair_key(code: str) -> str:
@@ -203,6 +208,128 @@ def consume_workspace_resume_ticket(code: str) -> str:
         return ""
     token = str(item.get("resume_token") or "")
     return token if resolve_resume_token(token) else ""
+
+
+def create_workspace_handoff_ticket(token: str, *, target: str = "app") -> str:
+    """Mint a short-lived one-shot code for transferring a lease to another executor.
+
+    The durable resume token never enters the App Link. The ticket is consumed only
+    when the target WebSocket connects, and the durable credential is rotated only
+    after the target sends ``workspace/share`` successfully.
+    """
+    item = _load_lease_by_resume(token)
+    if not item or _expired(item):
+        raise ValueError("Invalid or expired workspace resume token")
+    now = time.time()
+    for key, ticket in list(_HANDOFF_TICKETS.items()):
+        if float(ticket.get("expires_at") or 0) <= now:
+            _HANDOFF_TICKETS.pop(key, None)
+    code = _new_code()
+    _HANDOFF_TICKETS[_pair_key(code)] = {
+        "resume_token": str(token),
+        "lease_id": str(item.get("lease_id") or ""),
+        "source_connection_id": item.get("connection_id"),
+        "target": str(target or "app")[:64],
+        "expires_at": now + HANDOFF_TICKET_TTL_SECONDS,
+    }
+    return code
+
+
+def consume_workspace_handoff_ticket(code: str) -> dict[str, Any]:
+    """Consume a handoff code exactly once without rotating credentials yet."""
+    item = _HANDOFF_TICKETS.pop(_pair_key(code), None)
+    if not item or float(item.get("expires_at") or 0) <= time.time():
+        return {}
+    token = str(item.get("resume_token") or "")
+    lease = _load_lease_by_resume(token)
+    if not lease or _expired(lease):
+        return {}
+    if str(item.get("lease_id") or "") and str(lease.get("lease_id") or "") != str(item.get("lease_id") or ""):
+        return {}
+    return dict(item)
+
+
+def _rotate_workspace_resume_token(item: dict[str, Any]) -> str:
+    """Invalidate the previous durable browser credential and mint a new owner token."""
+    old_hash = str(item.get("resume_hash") or "")
+    key = _RESUME_INDEX.get(old_hash) if old_hash else None
+    if not key:
+        for candidate_key, candidate in _WEB_PAIR.items():
+            if candidate is item:
+                key = candidate_key
+                break
+    new_token = _new_resume_token()
+    new_hash = _resume_key(new_token)
+    if old_hash:
+        _RESUME_INDEX.pop(old_hash, None)
+        client = _redis_client()
+        if client is not None:
+            try:
+                client.delete(REDIS_RESUME_PREFIX + old_hash)
+            except Exception:
+                pass
+    item["resume_hash"] = new_hash
+    item["resume_token"] = new_token
+    if key:
+        _RESUME_INDEX[new_hash] = key
+    return new_token
+
+
+def complete_workspace_handoff(
+    handoff: dict[str, Any], connection: Any, *, mode: str, task: str = "",
+    capabilities: list[str] | None = None,
+) -> dict[str, Any]:
+    """Atomically move executor ownership to a target connection and rotate resume auth."""
+    token = str(handoff.get("resume_token") or "")
+    item = _load_lease_by_resume(token)
+    if not item or _expired(item):
+        raise ValueError("Invalid or expired workspace handoff")
+    expected_lease = str(handoff.get("lease_id") or "")
+    if expected_lease and str(item.get("lease_id") or "") != expected_lease:
+        raise ValueError("Workspace handoff lease changed")
+
+    previous_connection = item.get("connection") if _connection_live(item) else None
+    aliases = {str(x) for x in (item.get("paired_session_ids") or []) if str(x)}
+    legacy = str(item.get("paired_session_id") or "")
+    if legacy:
+        aliases.add(legacy)
+    normalized_mode = normalize_workspace_access_mode(mode)
+    if normalize_workspace_access_mode(item.get("mode")) != "write":
+        normalized_mode = "read_only"
+    now = time.time()
+    new_resume_token = _rotate_workspace_resume_token(item)
+    key = _RESUME_INDEX.get(str(item.get("resume_hash") or ""))
+    if not key:
+        raise ValueError("Workspace handoff lease is unavailable")
+    item.update({
+        "connection": connection,
+        "connection_id": id(connection),
+        "client_id": str(getattr(connection, "client_id", "")),
+        "mode": normalized_mode,
+        "task": str(task or item.get("task") or "")[:4000],
+        "capabilities": sorted({str(x) for x in (capabilities or item.get("capabilities") or []) if str(x)}),
+        "expires_at": now + LEASE_TTL_SECONDS,
+        "helper_connected_at": now,
+        "paired_session_ids": sorted(aliases),
+    })
+    result = None
+    for alias in sorted(aliases):
+        bound = bind_workspace(
+            alias, connection, mode=normalized_mode, task=item["task"],
+            capabilities=item["capabilities"], reconnect_pair_key=key,
+            lease_id=str(item.get("lease_id") or uuid.uuid4().hex),
+        )
+        result = result or bound
+    _persist_lease(item)
+    result = result or {
+        "session_id": "", "connection": connection, "mode": normalized_mode,
+        "task": item["task"], "capabilities": list(item["capabilities"]),
+        "lease_id": str(item.get("lease_id") or ""), "reconnect_pair_key": key,
+    }
+    result["resume_token"] = new_resume_token
+    result["previous_connection"] = previous_connection
+    result["handoff_target"] = str(handoff.get("target") or "app")
+    return result
 
 
 

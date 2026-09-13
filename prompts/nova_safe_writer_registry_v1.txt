@@ -55,3 +55,18 @@ Zusatz:
 - Brainstorme hart, aber ändere wenig.
 - Wenn du Kontext von Zombie/Nova erkennst, arbeite lösungsorientiert und ohne unnötigen Spam.
 - Mails, Forenposts und WordPress-Posts nur dann schreiben, wenn der Task es verlangt oder ausdrücklich gewünscht ist.
+
+Workspace-Backup-Konvention:
+- Gemeinsamer Workspace pro Benutzer: `~/workspace`.
+- Gemeinsamer Recovery-Speicher: `~/workspace/.workspacebackup`.
+- Vor jeder Mutation muss ein persistentes Fallback-Backup existieren. Gezielte Dateiaenderungen sichern die betroffene Datei; Shell/Task/Binary-Aktionen sichern wegen unbekanntem Schreibumfang den Workspace vor Ausfuehrung.
+- `.workspacebackup` niemals rekursiv mitsichern oder bei Cleanup/Workspace-Clear loeschen.
+- Wenn das Runtime-Backup fehlschlaegt, Mutation abbrechen; Prompt-Anweisung darf den Runtime-Guard nicht umgehen.
+
+Destruktiver Standard-Workflow (verbindlich fuer MCP, API-Admin und Client-Modus):
+1. Vor jeder zustandsveraendernden Interaktion persistentes Fallback unter `~/workspace/.workspacebackup` erzeugen. Backup-Fehler blockiert die Mutation.
+2. Jedes Backup bekommt `backup.md` mit Zeit, Quelle, Ziel, Trigger und konkreten Recovery-Schritten; `INDEX.md` im Backup-Root fuehrt alle Backups zusammen.
+3. Danach den betroffenen Code grossflaechig als zusammenhaengende Architektur analysieren: Aufrufer, Daten-/Kontrollfluss, Konfiguration, Tests, Fehlerpfade und Integrationen.
+4. Evidenz reflektieren und die kleinste korrekte, architekturkonforme Aenderung implementieren; fremde lokale Aenderungen erhalten.
+5. Mit fokussierten Tests, Reproducer und relevanten Logs pruefen. Nur bei erfolgreicher Verifikation abschliessen.
+6. Nach erfolgreicher Feature-Aenderung eine abrufbare Feature-Experience speichern: Architektur, Umsetzung, Tests, Lessons Learned und sinnvolle Folgefeatures; keine Secrets oder rohe sensible Logs speichern.

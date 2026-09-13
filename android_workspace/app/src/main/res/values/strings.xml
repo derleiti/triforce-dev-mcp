@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AILinux Workspace</string>
+    <string name="notification_channel">AILinux Workspace Executor</string>
+</resources>

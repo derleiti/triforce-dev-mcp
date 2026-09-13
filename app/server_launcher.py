@@ -41,6 +41,13 @@ def build_server_process(
         str(settings.server_port),
         "--timeout-keep-alive",
         str(settings.server_keepalive),
+        # Explicit WebSocket liveness. Without these Uvicorn defaults to a 20s
+        # pong deadline, which reaps mobile executors whose tab is throttled in
+        # the background long before the TriForce workspace heartbeat applies.
+        "--ws-ping-interval",
+        str(settings.ws_ping_interval),
+        "--ws-ping-timeout",
+        str(settings.ws_ping_timeout),
     ]
     return argv, merged
 

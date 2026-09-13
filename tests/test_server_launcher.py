@@ -36,3 +36,25 @@ def test_launcher_argv_contains_no_secret_values(tmp_path: Path):
     cfg.write_text("MCP_OAUTH_PASS=very-secret-value\n")
     argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
     assert "very-secret-value" not in " ".join(argv)
+
+
+def test_launcher_pins_websocket_liveness_defaults(tmp_path: Path):
+    """Uvicorn's own 20s pong deadline must never decide executor liveness."""
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text("TRIFORCE_API_PORT=19121\n")
+    argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
+    interval = float(argv[argv.index("--ws-ping-interval") + 1])
+    timeout = float(argv[argv.index("--ws-ping-timeout") + 1])
+    assert interval == 20.0
+    assert timeout == 240.0
+    # The transport must outlive a throttled mobile tab but stay below the
+    # workspace heartbeat, which owns logical executor liveness.
+    assert interval < timeout < 300.0
+
+
+def test_launcher_websocket_liveness_is_configurable(tmp_path: Path):
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text("TRIFORCE_WS_PING_INTERVAL=25\nTRIFORCE_WS_PING_TIMEOUT=180\n")
+    argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
+    assert float(argv[argv.index("--ws-ping-interval") + 1]) == 25.0
+    assert float(argv[argv.index("--ws-ping-timeout") + 1]) == 180.0

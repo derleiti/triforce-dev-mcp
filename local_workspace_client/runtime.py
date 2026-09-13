@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .backups import backup_directory_creation, backup_file, backup_workspace, shared_backup_root
+
 IGNORE_NAMES = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
 READ_TOOLS = {"workspace_info", "file_read", "file_tree", "code_read", "code_tree", "code_search", "code_grep", "git"}
 WRITE_TOOLS = READ_TOOLS | {"file_edit", "directory_create", "workspace_clear", "shell", "binary_exec", "task_runner", "lint", "test"}
@@ -34,6 +36,8 @@ class WorkspaceRuntime:
         self.root = self.root.expanduser().resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError(f"workspace is not a directory: {self.root}")
+        # Establish the shared per-user recovery store on first workspace startup.
+        shared_backup_root()
 
     @property
     def mode(self) -> str:
@@ -211,21 +215,44 @@ class WorkspaceRuntime:
             if tool == "git":
                 text, err = self._git(args); return _result(text, err)
             if tool == "directory_create":
-                path = self.resolve(args.get("path"), must_exist=False); path.mkdir(parents=True, exist_ok=False); return _result(f"created {self.display(path)}")
+                path = self.resolve(args.get("path"), must_exist=False)
+                if path.exists():
+                    raise FileExistsError(self.display(path))
+                backup = backup_directory_creation(self.root, path, tool=tool)
+                path.mkdir(parents=True, exist_ok=False)
+                return _result(f"created {self.display(path)}; backup={backup}", False, backup=str(backup))
             if tool == "workspace_clear":
                 if str(args.get("confirm") or "") != "DELETE_ALL":
                     raise ValueError("workspace_clear requires confirm=DELETE_ALL")
+                backup = backup_workspace(self.root, tool=tool)
                 removed = 0
+                protected_backup_root = shared_backup_root().resolve(strict=False)
+                def remove_except_backup(path: Path) -> bool:
+                    resolved = path.resolve(strict=False)
+                    if resolved == protected_backup_root:
+                        return False
+                    try:
+                        protected_backup_root.relative_to(resolved)
+                    except ValueError:
+                        if path.is_dir() and not path.is_symlink():
+                            shutil.rmtree(path)
+                        else:
+                            path.unlink()
+                        return True
+                    for nested in list(path.iterdir()):
+                        remove_except_backup(nested)
+                    return False
+
                 for child in list(self.root.iterdir()):
-                    if child.is_dir() and not child.is_symlink():
-                        shutil.rmtree(child)
-                    else:
-                        child.unlink()
-                    removed += 1
-                return _result(f"cleared workspace root; removed {removed} top-level entries", False, removed=removed, root_preserved=True)
+                    if remove_except_backup(child):
+                        removed += 1
+                return _result(f"cleared workspace root; removed {removed} top-level entries; backup={backup}", False, removed=removed, root_preserved=True, backup=str(backup))
             if tool == "file_edit":
                 path = self.resolve(args.get("path"), must_exist=False)
                 operation = str(args.get("operation") or "")
+                if operation not in {"create", "write", "append", "replace"}:
+                    raise ValueError("operation must be create, write, append or replace")
+                backup = backup_file(self.root, path, tool=f"{tool}-{operation}")
                 if operation == "create":
                     if path.exists(): raise FileExistsError(self.display(path))
                     path.parent.mkdir(parents=True, exist_ok=True); path.write_text(str(args.get("content") or ""), encoding="utf-8")
@@ -239,17 +266,17 @@ class WorkspaceRuntime:
                     old = str(args.get("old_text") or "")
                     if not old or text.count(old) != 1: raise ValueError("old_text must match exactly once")
                     path.write_text(text.replace(old, str(args.get("new_text") or ""), 1), encoding="utf-8")
-                else:
-                    raise ValueError("operation must be create, write, append or replace")
-                return _result(f"updated {self.display(path)}")
+                return _result(f"updated {self.display(path)}; backup={backup}", False, backup=str(backup))
             if tool in {"shell", "task_runner"}:
+                backup = backup_workspace(self.root, tool=tool)
                 text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), int(args.get("timeout") or (300 if tool == "task_runner" else 120)))
-                return _result(text, err)
+                return _result(text + f"\nbackup={backup}", err, backup=str(backup))
             if tool == "binary_exec":
                 program = str(args.get("program") or "").strip(); arguments = args.get("arguments") or []
                 if not program or not isinstance(arguments, list) or not all(isinstance(x, str) for x in arguments): raise ValueError("program and string arguments are required")
                 command = " ".join([shlex.quote(program), *(shlex.quote(x) for x in arguments)])
-                text, err = self._sandbox(command, str(args.get("work_dir") or "."), int(args.get("timeout") or 120)); return _result(text, err)
+                backup = backup_workspace(self.root, tool=tool)
+                text, err = self._sandbox(command, str(args.get("work_dir") or "."), int(args.get("timeout") or 120)); return _result(text + f"\nbackup={backup}", err, backup=str(backup))
             if tool in {"lint", "test"}:
                 text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), 180); return _result(text, err)
         except Exception as exc:

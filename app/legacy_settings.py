@@ -6,6 +6,8 @@ compose/site data remains in the legacy tree and is intentionally not copied.
 """
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass, asdict
 from io import StringIO
 from pathlib import Path
@@ -15,12 +17,49 @@ from dotenv import dotenv_values
 
 from .settings_store import SECRET_ENV_KEYS, load_snapshot, save_updates, settings_inventory
 
-LEGACY_CANDIDATES = (
-    Path("/home/zombie/triforce-legacy/config/triforce.env"),
-    Path("/home/zombie/triforce-legacy/.env"),
-    Path("/home/zombie/triforce/config/triforce.env"),
-    Path("/home/zombie/triforce/.env"),
-)
+def _owner_home() -> Path:
+    """Home directory of the invoking user, not of a polkit/sudo root shell."""
+    sudo_user = str(os.environ.get("SUDO_USER", "")).strip()
+    if sudo_user:
+        try:
+            import pwd
+
+            return Path(pwd.getpwnam(sudo_user).pw_dir)
+        except Exception:
+            pass
+    try:
+        return Path.home()
+    except Exception:
+        return Path("/root")
+
+
+def legacy_candidates() -> tuple[Path, ...]:
+    """Legacy dotenv locations, resolved at runtime.
+
+    These used to be absolute developer paths, which compiled the build host's
+    home directory into the standalone Control Center binary. Deriving them here
+    keeps the same lookup on an upgraded host without shipping that path.
+    """
+    roots: list[Path] = []
+    explicit = str(os.environ.get("TRIFORCE_LEGACY_ROOT", "")).strip()
+    if explicit:
+        roots.append(Path(explicit).expanduser())
+    home = _owner_home()
+    roots.extend([home / "triforce-legacy", home / "triforce"])
+    try:
+        from .paths import PROJECT_ROOT
+
+        roots.append(PROJECT_ROOT)
+    except Exception:
+        pass
+
+    candidates: list[Path] = []
+    for root in roots:
+        for relative in ("config/triforce.env", ".env"):
+            candidate = root / relative
+            if candidate not in candidates:
+                candidates.append(candidate)
+    return tuple(candidates)
 
 # These are not yet represented by the canonical Pydantic settings model, but
 # current 2.85 runtime modules still read them directly from the environment.
@@ -65,7 +104,7 @@ class LegacyImportPlan:
 
 
 def find_legacy_source() -> Path | None:
-    for path in LEGACY_CANDIDATES:
+    for path in legacy_candidates():
         if path.is_file():
             return path
     return None

@@ -12,7 +12,7 @@ import asyncio
 import re
 from typing import Any, Dict, List
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from .mcp_workspace_sessions import (
     claim_workspace_with_resume_token, get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
@@ -130,7 +130,7 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "file_edit",
         "description": (
             "Create or modify a UTF-8 text file inside the paired browser workspace. "
-            "Available only when the user granted browser Write access."
+            "Available only when the user granted browser Write access. The local runtime creates a persistent fallback backup before mutation."
         ),
         "inputSchema": {"type": "object", "properties": {
             "workspace_token": {"type": "string"}, "path": {"type": "string"},
@@ -141,17 +141,24 @@ _TOOL_SCHEMAS: List[Dict[str, Any]] = [
     },
     {
         "name": "directory_create",
-        "description": "Create a directory inside the paired browser workspace when Write access is enabled.",
+        "description": "Create a directory inside the paired browser workspace when Write access is enabled. The local runtime records a persistent pre-change fallback.",
         "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "workspace_token": {"type": "string"}}, "required": ["path"]},
         "annotations": {"readOnlyHint": False},
     },
     {
         "name": "workspace_clear",
-        "description": "Delete every file and subdirectory inside the paired browser workspace while preserving the workspace root itself. Requires Write access and confirm=DELETE_ALL.",
+        "description": "Delete every file and subdirectory inside the paired browser workspace while preserving the workspace root itself. Requires Write access and confirm=DELETE_ALL. A full fallback snapshot is created first and the shared backup store is protected.",
         "inputSchema": {"type": "object", "properties": {"confirm": {"type": "string", "enum": ["DELETE_ALL"]}, "workspace_token": {"type": "string"}}, "required": ["confirm"]},
         "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
     },
 ]
+
+for _workspace_tool_schema in _TOOL_SCHEMAS:
+    _props = _workspace_tool_schema.setdefault("inputSchema", {}).setdefault("properties", {})
+    _props.setdefault("workspace_context", {
+        "type": "string",
+        "description": "Optional non-secret workspace context selector supplied by an authenticated bridge.",
+    })
 
 
 def is_public_guest(request: Request | None) -> bool:
@@ -164,22 +171,37 @@ def session_id(request: Request | None) -> str:
     return str(getattr(state, "mcp_session_id", "") or "")
 
 
-def workspace_affinity_id(request: Request | None) -> str:
-    """Stable workspace identity for one OpenAI connector transport context.
+def authenticated_workspace_subject(request: Request | None) -> str:
+    """Return only server-asserted workspace identity metadata from valid auth."""
+    state = getattr(request, "state", None) if request is not None else None
+    return str(getattr(state, "mcp_workspace_subject", "") or "").strip()
 
-    Both high-entropy OpenAI headers are required.  Using x-openai-subject alone
-    would be stable but too broad: separate chats/transports owned by the same
-    connector subject could accidentally inherit one local workspace lease.
+
+def workspace_affinity_id(request: Request | None, workspace_context: str = "") -> str:
+    """Return a stable lease alias independent of ephemeral MCP transports.
+
+    Authenticated bridge/service credentials may carry a server-side
+    ``workspace_subject``.  A non-secret workspace_context then isolates several
+    Telegram chats behind one connector credential.  Public/OpenAI connectors
+    retain their existing transport-scoped affinity behavior.
     """
     if request is None:
         return ""
+    import hashlib
+
+    auth_subject = authenticated_workspace_subject(request)
+    if auth_subject:
+        context = str(workspace_context or "").strip()[:256]
+        material = auth_subject + ("\0" + context if context else "")
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+        return "auth-workspace-" + digest[:40]
+
     headers = getattr(request, "headers", {})
     ua = str(headers.get("user-agent") or "").lower()
     subject = str(headers.get("x-openai-subject") or "").strip()
     transport = str(headers.get("x-openai-session") or "").strip()
     if not subject or not transport or "openai-mcp" not in ua:
         return ""
-    import hashlib
     digest = hashlib.sha256((subject + "\0" + transport).encode("utf-8")).hexdigest()
     return "openai-workspace-" + digest[:40]
 
@@ -326,7 +348,7 @@ async def wait_for_workspace_executor(
     for the resume transport instead of failing immediately.
     """
     lease_id = str(binding.get("lease_id") or "")
-    affinity_sid = workspace_affinity_id(request) or session_id(request)
+    affinity_sid = str(binding.get("session_id") or "") or workspace_affinity_id(request) or session_id(request)
     deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout))
     current = binding
     while asyncio.get_running_loop().time() < deadline:
@@ -357,8 +379,17 @@ def should_route_tool_locally(request: Request | None, name: str) -> bool:
         return False
     if is_public_guest(request):
         return True
+    if authenticated_workspace_subject(request):
+        return True
     sid = workspace_affinity_id(request) or session_id(request)
     return bool(sid and get_workspace_lease(sid))
+
+
+_EXECUTION_TIMEOUT_TEXT = (
+    "The local executor started the tool call but did not return a final result "
+    "before the timeout. The operation is not retried automatically because a write "
+    "may already have completed. Check workspace state before retrying."
+)
 
 
 def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
@@ -420,9 +451,11 @@ def _workspace_id_from_legacy_arguments(arguments: Dict[str, Any]) -> str:
     return ""
 
 
-async def _claim_workspace_for_session(request: Request, workspace_id: str) -> Dict[str, Any]:
+async def _claim_workspace_for_session(
+    request: Request, workspace_id: str, workspace_context: str = ""
+) -> Dict[str, Any]:
     sid = session_id(request)
-    affinity_sid = workspace_affinity_id(request)
+    affinity_sid = workspace_affinity_id(request, workspace_context)
     effective_sid = affinity_sid or sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
     try:
         from app.services.mcp_workspace_sessions import claim_waiting_workspace
@@ -458,6 +491,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     arguments = dict(arguments or {})
     workspace_token = str(arguments.pop("workspace_token", "") or "").strip()
     workspace_id = str(arguments.pop("workspace_id", "") or "").strip().upper()
+    workspace_context = str(arguments.pop("workspace_context", "") or "").strip()[:256]
 
     if name == "workspace_pair":
         code = str(arguments.get("code") or "").strip().upper()
@@ -467,7 +501,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         # initialize a session but omit Mcp-Session-Id on later tools/call POSTs.
         # Bind those calls to a logical lease session keyed only by the secret pair
         # code; never infer identity from IP, User-Agent or another shared signal.
-        effective_sid = workspace_affinity_id(request) or sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
+        effective_sid = workspace_affinity_id(request, workspace_context) or sid or f"workspace-lease-{__import__('uuid').uuid4().hex}"
         try:
             from app.services.mcp_workspace_sessions import claim_waiting_workspace
             binding = claim_waiting_workspace(code, effective_sid)
@@ -491,7 +525,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
                 pass
         return _workspace_binding_response(binding, token=str(binding.get("resume_token") or ""))
 
-    affinity_sid = workspace_affinity_id(request)
+    affinity_sid = workspace_affinity_id(request, workspace_context)
     binding = get_workspace_lease(affinity_sid) if affinity_sid else None
     if binding is None and sid:
         binding = get_workspace_lease(sid)
@@ -514,11 +548,11 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if not workspace_id and name in (BROWSER_READ_TOOLS | BROWSER_WRITE_TOOLS):
         legacy_workspace_id = _workspace_id_from_legacy_arguments(arguments)
         if legacy_workspace_id and (resolve_web_pair_code(legacy_workspace_id) or binding is None):
-            return await _claim_workspace_for_session(request, legacy_workspace_id)
+            return await _claim_workspace_for_session(request, legacy_workspace_id, workspace_context)
 
     if name == "workspace_status":
         if workspace_id:
-            return await _claim_workspace_for_session(request, workspace_id)
+            return await _claim_workspace_for_session(request, workspace_id, workspace_context)
 
         if binding:
             return _workspace_binding_response(binding, token=workspace_token)
@@ -585,6 +619,22 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             "client_workspace_tool",
             {"tool": name, "arguments": arguments, "mode": mode},
             timeout=180.0,
+        )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        return _tool_error(
+            "WORKSPACE_EXECUTION_UNCERTAIN", _EXECUTION_TIMEOUT_TEXT,
+            tool=name, retryable=False, execution_started=True, detail=str(exc),
+        )
+    except HTTPException as exc:
+        # ClientConnection.send_tool_call reports a tool timeout as HTTP 504
+        # instead of a TimeoutError. The call still reached the executor, so it
+        # must reach the caller as uncertain rather than as a transport failure.
+        if exc.status_code != 504:
+            raise
+        return _tool_error(
+            "WORKSPACE_EXECUTION_UNCERTAIN", _EXECUTION_TIMEOUT_TEXT,
+            tool=name, retryable=False, execution_started=True,
+            detail=str(getattr(exc, "detail", "") or "tool call timed out"),
         )
     except (ConnectionError, RuntimeError) as exc:
         if bool(getattr(connection, "closed", False)):

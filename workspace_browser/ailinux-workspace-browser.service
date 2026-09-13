@@ -1,0 +1,19 @@
+[Unit]
+Description=AILinux Workspace Browser Executor
+Documentation=https://api.ailinux.me/v1/mcp
+After=graphical-session.target network-online.target
+Wants=network-online.target
+ConditionPathExists=/run/user/1000/wayland-0
+
+[Service]
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=ELECTRON_OZONE_PLATFORM_HINT=auto
+ExecStart=/home/zombie/.local/bin/ailinux-workspace-browser --background
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

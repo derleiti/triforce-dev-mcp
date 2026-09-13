@@ -53,3 +53,10 @@ Agent workspace rules: edit tracked source/docs only; keep runtime data, local e
 - Before deleting files, search active imports/references with `grep -R` and run `python3 -m compileall app -q`.
 - `app/routes_sd3.py` and `app/routes_vision.py` are active while `app/main.py` imports them; do not classify them as dead code solely because similar modules exist under `app/routes/`.
 - Back up production data outside the repository before cleanup. Suggested local scratch location: `/home/zombie/triforce-backup-cleanup/`.
+
+## Shared Workspace Recovery Policy
+- Canonical per-user workspace root: `~/workspace` (override: `AILINUX_WORKSPACE_ROOT`).
+- Canonical cross-app fallback store: `~/workspace/.workspacebackup` (override: `AILINUX_WORKSPACE_BACKUP_ROOT`).
+- Before every mutating workspace interaction, create a fallback backup. Targeted edits back up the affected path; shell/task/binary operations with unknown write scope snapshot the workspace before execution.
+- Never place recovery backups inside Git history, never delete them as part of normal success cleanup, and never recursively back up `.workspacebackup` itself.
+- Prompt guidance is advisory; runtime backup enforcement is authoritative. If a required backup fails, block the mutation.

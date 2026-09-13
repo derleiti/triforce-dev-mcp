@@ -11,6 +11,7 @@ Stand: 2025-12-13
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
@@ -774,19 +775,32 @@ async def _get_browser_redis():
     return _browser_redis
 
 
+_BROWSER_APP_HTTPS_REDIRECTS = {
+    app_id: f"https://api.ailinux.me/v1/auth/browser/app-callback/{app_id}"
+    for app_id in _BROWSER_APP_IDS
+}
+
+
 def _validate_browser_app_redirect(app_id: str, redirect_uri: str) -> str:
     from urllib.parse import urlparse
     app_id = (app_id or "").strip()
+    value = (redirect_uri or "").strip()
     if app_id not in _BROWSER_APP_IDS:
         raise HTTPException(400, "Unsupported AILinux app")
-    parsed = urlparse((redirect_uri or "").strip())
-    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1"}:
-        raise HTTPException(400, "App redirect_uri must use an HTTP loopback address")
-    if not parsed.port or not (1024 <= int(parsed.port) <= 65535):
-        raise HTTPException(400, "App redirect_uri requires a non-privileged loopback port")
-    if parsed.username or parsed.password or parsed.fragment:
+    parsed = urlparse(value)
+    if parsed.username or parsed.password or parsed.fragment or parsed.query:
         raise HTTPException(400, "Invalid app redirect_uri")
-    return redirect_uri.strip()
+
+    if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1"}:
+        if not parsed.port or not (1024 <= int(parsed.port) <= 65535):
+            raise HTTPException(400, "App redirect_uri requires a non-privileged loopback port")
+        return value
+
+    expected = _BROWSER_APP_HTTPS_REDIRECTS.get(app_id)
+    if parsed.scheme == "https" and value == expected:
+        return value
+
+    raise HTTPException(400, "App redirect_uri must use loopback HTTP or the verified AILinux HTTPS App Link")
 
 
 def _validate_pkce_challenge(challenge: str, method: str) -> str:
@@ -878,7 +892,28 @@ async def create_browser_code(request: BrowserCodeRequest, authorization: str = 
         })
 
     code = await _store_browser_code(record)
-    return {"ok": True, "code": code, "expires_in": _BROWSER_CODE_TTL, "state": record.get("state", "")}
+    response = {"ok": True, "code": code, "expires_in": _BROWSER_CODE_TTL, "state": record.get("state", "")}
+    if request.purpose == "app":
+        from urllib.parse import quote
+        # Native HTTPS App Links carry the short-lived authorization code in the
+        # fragment so a browser fallback/proxy never receives it. Desktop loopback
+        # callbacks keep query parameters because a local HTTP listener cannot see
+        # URL fragments.
+        separator = "#" if redirect_uri.startswith("https://") else "?"
+        response["handoff_url"] = (
+            f"{redirect_uri}{separator}code={quote(code, safe='')}"
+            f"&state={quote(str(record.get('state') or ''), safe='')}"
+        )
+    return response
+
+
+@router.get("/browser/app-callback/{app_id}")
+async def browser_app_callback_fallback(app_id: str):
+    """Fallback when no installed app claims the verified HTTPS App Link."""
+    if app_id not in _BROWSER_APP_IDS:
+        raise HTTPException(404, "Unknown AILinux app")
+    html = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='referrer' content='no-referrer'><title>AILinux App Login</title></head><body><main><h1>AILinux app login handoff</h1><p>No verified AILinux app claimed this link. Return to the app and retry the login handoff.</p><p>The one-time login code remains only in the URL fragment and was not sent to this server.</p><button onclick='history.back()'>Back</button></main></body></html>"""
+    return HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 @router.post("/browser/exchange", response_model=UserLoginResponse)

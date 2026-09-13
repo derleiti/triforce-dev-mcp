@@ -79,3 +79,23 @@ def test_workspace_session_state_roundtrip(monkeypatch):
         assert client._load_state(root)['resume_token'] == 'secret'
         client._clear_state(root)
         assert not state_path.exists()
+
+
+def test_mutating_file_edit_creates_shared_fallback(monkeypatch):
+    with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as backups:
+        root = Path(temp)
+        target = root / 'x.txt'
+        target.write_text('before', encoding='utf-8')
+        monkeypatch.setenv('AILINUX_WORKSPACE_BACKUP_ROOT', backups)
+        runtime = WorkspaceRuntime(root, writable=True)
+        result = runtime.execute('file_edit', {'path': 'x.txt', 'operation': 'write', 'content': 'after'})
+        assert result['isError'] is False
+        backup = Path(result['structuredContent']['backup'])
+        assert backup.is_dir()
+        assert (backup / 'files' / 'x.txt').read_text(encoding='utf-8') == 'before'
+        backup_doc = (backup / 'backup.md').read_text(encoding='utf-8')
+        assert 'Source workspace' in backup_doc
+        assert 'Recovery' in backup_doc
+        index = Path(backups) / 'INDEX.md'
+        assert str(backup) in index.read_text(encoding='utf-8')
+        assert target.read_text(encoding='utf-8') == 'after'

@@ -1,5 +1,5 @@
 # TriForce Backend Version
-VERSION = "2.86.2"
+VERSION = "2.86.4"
 
 from functools import lru_cache
 from typing import Dict, List, Optional, Literal
@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     server_host: str = Field("127.0.0.1", validation_alias="TRIFORCE_BIND_HOST")
     server_port: int = Field(9100, ge=1, le=65535, validation_alias="TRIFORCE_API_PORT")
     server_keepalive: int = Field(75, ge=5, le=600, validation_alias="TRIFORCE_KEEPALIVE")
+    # WebSocket transport liveness. The interval keeps proxy/NAT paths warm,
+    # the timeout must survive mobile background pauses and stay below the
+    # workspace heartbeat so TriForce decides executor liveness, not Uvicorn.
+    ws_ping_interval: float = Field(20.0, ge=0, le=600, validation_alias="TRIFORCE_WS_PING_INTERVAL")
+    ws_ping_timeout: float = Field(240.0, ge=1, le=900, validation_alias="TRIFORCE_WS_PING_TIMEOUT")
     deployment_mode: Literal["server", "node"] = Field("server", validation_alias="TRIFORCE_DEPLOYMENT_MODE")
 
     # Episodic history is optional and separate from curated TriForce memory.

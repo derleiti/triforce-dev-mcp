@@ -1,3 +1,13 @@
+triforce-backend (1:2.86.4-1) noble; urgency=medium
+
+  * Harden browser workspace reconnects after Android/background suspension.
+  * Add server-originated workspace heartbeat and opt-in Screen Wake Lock.
+  * Add one-shot browser-to-app workspace handoff with resume-key rotation.
+  * Add HTTPS App-Link landing flow without exposing the durable resume token.
+  * Bump browser workspace runtime to 2.86.4-browser.
+
+ -- AILinux <admin@ailinux.me>  Sun, 13 Sep 2026 00:35:00 +0200
+
 triforce-backend (1:2.86.2-9) noble; urgency=medium
 
   * Packaging: recognize the known 2.86.0 legacy prerm that destroys source

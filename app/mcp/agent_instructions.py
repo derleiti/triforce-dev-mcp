@@ -21,6 +21,33 @@ Operating rules:
 Canonical MCP endpoint: /v1/mcp. Discover the current client-visible tool inventory with tools/list; use prompts/list or other discovery methods only when they are relevant to the task.
 """
 
+
+DESTRUCTIVE_WORKFLOW_POLICY = """Destructive/mutating workflow standard:
+- Before ANY state-changing interaction, create a persistent fallback under the shared per-user recovery root (default `~/workspace/.workspacebackup`). The backup must exist before the mutation starts; backup failure blocks the mutation.
+- Every backup directory must contain `backup.md` with timestamp, source workspace/path, trigger, backed-up target and explicit recovery steps. The shared root keeps an `INDEX.md` pointing to every backup. Never recursively back up or delete `.workspacebackup`.
+- After backup and before implementation, inspect the relevant change surface as one coherent architecture slice: callers, data/control flow, configuration, tests, failure paths and integration boundaries. Do not patch from one isolated snippet when surrounding code can materially affect correctness.
+- Reflect on the evidence, then implement the smallest correct change that fits the full architecture and preserves unrelated work.
+- Run focused tests plus relevant logs/reproducer after the change. Success requires executable verification of the original acceptance condition, not only a clean edit.
+- At successful completion, capture a reusable feature-experience summary: what changed, architecture touched, verification, lessons and plausible next features. Store it only in the runtime's approved memory mechanism; never persist secrets or raw sensitive tool output.
+"""
+
+
+def build_runtime_policy(mode: str = "mcp") -> str:
+    mode_name = str(mode or "mcp").strip().lower()
+    prefix = {
+        "admin": "Runtime mode: ADMIN. Administrative authority is still bounded by exposed tools, approvals and least privilege.",
+        "client": "Runtime mode: CLIENT. Client-visible tools and permissions are the complete authority boundary; never infer admin access.",
+        "mcp": "Runtime mode: MCP. The live MCP tool inventory and schemas are the complete authority boundary.",
+    }.get(mode_name, f"Runtime mode: {mode_name.upper()}.")
+    return prefix + "\n\n" + DESTRUCTIVE_WORKFLOW_POLICY.strip()
+
+
+def merge_system_policy(system_prompt: str | None, *, mode: str) -> str:
+    """Prepend non-bypassable AILinux runtime policy to caller-provided instructions."""
+    base = build_runtime_policy(mode)
+    supplied = str(system_prompt or "").strip()
+    return base if not supplied else base + "\n\nCaller-provided instructions:\n" + supplied
+
 TASK_RUNNER_GUIDANCE = (
     "Execute compound system tasks locally or on a registered federation node when a more "
     "specific typed tool cannot express the operation. Payload encoding is a transport option only. "
@@ -37,7 +64,7 @@ BINARY_EXEC_GUIDANCE = (
 )
 
 def build_mcp_instructions() -> str:
-    return MCP_CORE_INSTRUCTIONS.strip()
+    return (MCP_CORE_INSTRUCTIONS.strip() + "\n\n" + build_runtime_policy("mcp")).strip()
 
 
 WORK_EXECUTION_QUESTIONS = (

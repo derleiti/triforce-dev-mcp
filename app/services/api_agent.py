@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.mcp.agent_instructions import merge_system_policy
+
 logger = logging.getLogger("ailinux.api_agent")
 
 # ── Provider configs ──────────────────────────────────────────────
@@ -266,10 +268,10 @@ async def run_text_model(
     if not provider:
         return {"status": "error", "model": model, "response": f"Invalid model: {model}"}
 
-    messages: List[Dict[str, str]] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": task})
+    messages: List[Dict[str, str]] = [
+        {"role": "system", "content": merge_system_policy(system_prompt, mode="admin")},
+        {"role": "user", "content": task},
+    ]
 
     try:
         if base_url is None:
@@ -317,13 +319,13 @@ async def run_api_agent(
     tool_schemas = _build_tool_schemas(tool_names)
     tools_called = []
 
-    if not system_prompt:
-        system_prompt = (
-            "Du bist Nova, ein autonomer KI-Agent von AILinux. "
-            "Du hast Zugriff auf Tools um Aufgaben auszuführen. "
-            "WICHTIG: Nutze die verfügbaren Tools aktiv — rufe sie auf statt zu raten. "
-            "Wenn du fertig bist, antworte mit dem Ergebnis."
-        )
+    default_agent_prompt = (
+        "Du bist Nova, ein autonomer KI-Agent von AILinux. "
+        "Du hast Zugriff auf Tools um Aufgaben auszuführen. "
+        "WICHTIG: Nutze die verfügbaren Tools aktiv — rufe sie auf statt zu raten. "
+        "Wenn du fertig bist, antworte mit dem Ergebnis."
+    )
+    system_prompt = merge_system_policy(system_prompt or default_agent_prompt, mode="admin")
 
     messages = [
         {"role": "system", "content": system_prompt},

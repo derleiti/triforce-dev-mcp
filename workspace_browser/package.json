@@ -1,0 +1,14 @@
+{
+  "name": "@ailinux/workspace-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal Chromium executor shell for TriForce browser workspaces",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "44.3.0"
+  }
+}

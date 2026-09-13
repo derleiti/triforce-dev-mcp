@@ -33,6 +33,7 @@ def clear_state(monkeypatch):
     sessions._WEB_PAIR.clear()
     sessions._RESUME_INDEX.clear()
     sessions._RESUME_TICKETS.clear()
+    sessions._HANDOFF_TICKETS.clear()
     monkeypatch.setattr(sessions, '_redis_client', lambda: None)
     yield
     sessions._SESSION_PAIR.clear()
@@ -41,6 +42,7 @@ def clear_state(monkeypatch):
     sessions._WEB_PAIR.clear()
     sessions._RESUME_INDEX.clear()
     sessions._RESUME_TICKETS.clear()
+    sessions._HANDOFF_TICKETS.clear()
 
 
 def test_pairing_code_is_session_scoped_and_consumed_on_bind():
@@ -568,6 +570,42 @@ def test_resume_ticket_is_one_shot_and_does_not_expose_resume_token():
     assert sessions.consume_workspace_resume_ticket(ticket) == ''
 
 
+def test_app_handoff_is_one_shot_and_rotates_resume_owner():
+    code = sessions.create_web_pair_code()
+    browser = DummyConnection('browser-owner')
+    sessions.register_waiting_workspace(code, browser, mode='write', capabilities=['file_read'])
+    bound = sessions.claim_waiting_workspace(code, 'session-A')
+    old_token = bound['resume_token']
+    handoff_code = sessions.create_workspace_handoff_ticket(old_token, target='android')
+
+    handoff = sessions.consume_workspace_handoff_ticket(handoff_code)
+    assert handoff['target'] == 'android'
+    assert sessions.consume_workspace_handoff_ticket(handoff_code) == {}
+
+    app = DummyConnection('android-app')
+    moved = sessions.complete_workspace_handoff(
+        handoff, app, mode='write', capabilities=['file_read']
+    )
+    new_token = moved['resume_token']
+    assert moved['previous_connection'] is browser
+    assert new_token and new_token != old_token
+    assert sessions.resolve_resume_token(old_token) is None
+    assert sessions.resolve_resume_token(new_token) is not None
+    assert sessions.get_workspace('session-A')['client_id'] == 'android-app'
+
+
+def test_uncompleted_handoff_does_not_revoke_browser_resume_token():
+    code = sessions.create_web_pair_code()
+    browser = DummyConnection('browser-owner')
+    sessions.register_waiting_workspace(code, browser, mode='read_only', capabilities=['file_read'])
+    bound = sessions.claim_waiting_workspace(code, 'session-A')
+    token = bound['resume_token']
+    handoff_code = sessions.create_workspace_handoff_ticket(token, target='android')
+    assert handoff_code
+    assert sessions.resolve_resume_token(token) is not None
+    assert sessions.get_workspace('session-A')['client_id'] == 'browser-owner'
+
+
 def test_persisted_mcp_alias_restores_lease_without_workspace_token(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
@@ -742,3 +780,108 @@ async def test_disconnect_during_local_call_is_not_retried(monkeypatch):
     assert result['structuredContent']['code'] == 'WORKSPACE_EXECUTION_UNCERTAIN'
     assert result['structuredContent']['retryable'] is False
     assert len(conn.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_authenticated_bridge_workspace_context_survives_transport_churn_and_isolates_chats():
+    from app.services.mcp_workspace_bridge import workspace_affinity_id
+
+    class BridgeRequest:
+        def __init__(self, transport: str):
+            self.state = SimpleNamespace(
+                mcp_auth_method='bearer',
+                mcp_session_id=transport,
+                mcp_workspace_subject='telegram-bridge-subject-1',
+            )
+            self.headers = {}
+
+    first_transport = BridgeRequest('mcp-A')
+    replacement_transport = BridgeRequest('mcp-B')
+    owner_context = 'telegram-chat-owner'
+    group_context = 'telegram-chat-group'
+
+    assert workspace_affinity_id(first_transport, owner_context) == workspace_affinity_id(replacement_transport, owner_context)
+    assert workspace_affinity_id(first_transport, owner_context) != workspace_affinity_id(first_transport, group_context)
+
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('telegram-browser')
+    sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
+    paired = await call_public_local_tool(
+        first_transport, 'workspace_status',
+        {'workspace_id': code, 'workspace_context': owner_context},
+    )
+    assert paired['structuredContent']['ok'] is True
+
+    resumed = await call_public_local_tool(
+        replacement_transport, 'workspace_status',
+        {'workspace_context': owner_context},
+    )
+    assert resumed['structuredContent']['lease_id'] == paired['structuredContent']['lease_id']
+
+    isolated = await call_public_local_tool(
+        replacement_transport, 'workspace_status',
+        {'workspace_context': group_context},
+    )
+    assert isolated['structuredContent']['code'] == 'WORKSPACE_REQUIRED'
+
+
+def test_authenticated_workspace_affinity_does_not_expose_subject_or_context():
+    from app.services.mcp_workspace_bridge import workspace_affinity_id
+    req = SimpleNamespace(
+        state=SimpleNamespace(mcp_workspace_subject='secret-bridge-subject', mcp_auth_method='bearer'),
+        headers={},
+    )
+    value = workspace_affinity_id(req, 'telegram-chat-123')
+    assert value.startswith('auth-workspace-')
+    assert 'secret-bridge-subject' not in value
+    assert 'telegram-chat-123' not in value
+
+
+@pytest.mark.asyncio
+async def test_destructive_tool_timeout_is_reported_as_uncertain():
+    """A timed-out destructive call must never surface as a plain transport error.
+
+    ClientConnection.send_tool_call converts asyncio timeouts into
+    HTTPException(504), so the bridge has to recognise that shape as well or the
+    caller loses the 'a write may already have happened' warning.
+    """
+    from fastapi import HTTPException
+
+    from app.services import mcp_workspace_bridge as bridge
+
+    class TimingOutConnection(DummyConnection):
+        async def send_tool_call(self, name, args, timeout=0):
+            self.calls.append((name, args, timeout))
+            raise HTTPException(504, f'Client timeout für Tool: {name}')
+
+    conn = TimingOutConnection('slow-executor')
+    sessions.bind_workspace('session-T', conn, mode='write', capabilities=['workspace_clear'])
+    req = DummyRequest('session-T')
+    result = await bridge.call_public_local_tool(req, 'workspace_clear', {'confirm': 'DELETE_ALL'})
+    structured = result['structuredContent']
+    assert result['isError'] is True
+    assert structured['code'] == 'WORKSPACE_EXECUTION_UNCERTAIN'
+    assert structured['retryable'] is False
+    assert structured['execution_started'] is True
+    assert len(conn.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_plain_timeout_error_is_reported_as_uncertain():
+    from app.services import mcp_workspace_bridge as bridge
+
+    class TimeoutErrorConnection(DummyConnection):
+        async def send_tool_call(self, name, args, timeout=0):
+            self.calls.append((name, args, timeout))
+            raise TimeoutError('no result')
+
+    conn = TimeoutErrorConnection('slow-executor-2')
+    sessions.bind_workspace('session-T2', conn, mode='write', capabilities=['file_edit'])
+    req = DummyRequest('session-T2')
+    result = await bridge.call_public_local_tool(
+        req, 'file_edit', {'path': 'x.txt', 'operation': 'write', 'content': 'x'}
+    )
+    structured = result['structuredContent']
+    assert structured['code'] == 'WORKSPACE_EXECUTION_UNCERTAIN'
+    assert structured['retryable'] is False
+    assert structured['execution_started'] is True

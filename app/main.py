@@ -228,6 +228,13 @@ async def lifespan(app: FastAPI):
         # import logging (centralized)
         logger.warning(f"Failed to start MCP Brain: {e}")
 
+    # Start MCP node heartbeat monitor for browser/desktop executors.
+    try:
+        from .routes.mcp_node import start_heartbeat_monitor
+        start_heartbeat_monitor()
+    except Exception as e:
+        logger.warning(f"Failed to start MCP node heartbeat monitor: {e}")
+
     # Start optional MCP WebSocket mesh. Existing installs retain the historical
     # default; fresh package config explicitly sets MCP_WS_ENABLED=false.
     if settings.mcp_ws_enabled:
@@ -281,6 +288,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Clean up resources on shutdown
+    try:
+        from .routes.mcp_node import stop_heartbeat_monitor
+        stop_heartbeat_monitor()
+    except Exception:
+        pass
     await registry.stop_periodic_refresh()
 
     # Stop TriForce Central Logger
