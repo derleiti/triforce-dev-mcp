@@ -7,6 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import okhttp3.*;
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -25,11 +26,42 @@ final class ProtocolClient extends WebSocketListener {
     ProtocolClient(Context context, Listener listener){this.context=context.getApplicationContext();this.state=new StateStore(context);this.listener=listener;}
     void setHandoffCode(String code){handoffCode=code==null?"":code.trim().toUpperCase();}
     void start(){stopped.set(false);connect();}
-    void stop(boolean revoke){stopped.set(true);WebSocket s=ws;if(s!=null){if(revoke)s.send(new JSONObject().put("jsonrpc","2.0").put("method","workspace/revoke").put("params",new JSONObject()).toString());s.close(1000,"user disconnect");}ws=null;listener.onState("Disconnected");}
+    void stop(boolean revoke){stopped.set(true);WebSocket s=ws;if(s!=null){if(revoke){try{s.send(new JSONObject().put("jsonrpc","2.0").put("method","workspace/revoke").put("params",new JSONObject()).toString());}catch(Exception ignored){}}s.close(1000,"user disconnect");}ws=null;if(revoke)state.clearCredentials();listener.onState("Disconnected");}
 
     private JSONArray capabilities(){JSONArray out=new JSONArray();for(int i=0;i<readCaps.length();i++)out.put(readCaps.optString(i));if("write".equals(state.mode())){out.put("file_edit").put("directory_create").put("workspace_clear").put("code_edit");}return out;}
-    private void connect(){if(stopped.get())return;if(state.tree()==null){listener.onState("Choose a workspace folder first");return;}try{workspace=new SafWorkspace(context,state.tree(),"write".equals(state.mode()));}catch(Exception e){listener.onState("Workspace unavailable: "+e.getMessage());return;}listener.onState("Connecting executor…"); if(!handoffCode.isEmpty()){openSocket("handoff_code",handoffCode);return;}String resume=state.resumeToken();if(resume!=null&&!resume.isEmpty()){RequestBody body=RequestBody.create(new JSONObject().put("resume_token",resume).toString(),MediaType.parse("application/json"));http.newCall(new Request.Builder().url(BASE+"/v1/mcp/workspace/resume-ticket").post(body).build()).enqueue(new Callback(){public void onFailure(Call c,IOException e){scheduleReconnect("Resume ticket failed");}public void onResponse(Call c,Response r)throws IOException{try(Response x=r){if(!x.isSuccessful()){scheduleReconnect("Resume rejected: "+x.code());return;}String code=new JSONObject(x.body().string()).optString("pair_code","");if(code.isEmpty())scheduleReconnect("Resume returned no ticket");else openSocket("pair_code",code);}catch(Exception e){scheduleReconnect("Resume error");}}});return;}String pair=state.pairCode();if(pair!=null&&!pair.isEmpty()){openSocket("pair_code",pair);return;}listener.onState("Open a ChatGPT workspace link or enter a pair code");}
-    private void openSocket(String key,String code){String url="wss://api.ailinux.me/v1/mcp/node/connect?mode=workspace&"+key+"="+HttpUrl.encode(code)+"&machine_id=android&client_version="+HttpUrl.encode(VERSION);ws=http.newWebSocket(new Request.Builder().url(url).build(),this);}
+    private void connect(){
+        if(stopped.get())return;
+        if(state.tree()==null){listener.onState("Choose a workspace folder first");return;}
+        try{workspace=new SafWorkspace(context,state.tree(),"write".equals(state.mode()));}
+        catch(Exception e){listener.onState("Workspace unavailable: "+e.getMessage());return;}
+        listener.onState("Connecting executor…");
+        if(!handoffCode.isEmpty()){openSocket("handoff_code",handoffCode);return;}
+        String resume=state.resumeToken();
+        if(resume!=null&&!resume.isEmpty()){
+            final RequestBody body;
+            try{body=RequestBody.create(new JSONObject().put("resume_token",resume).toString(),MediaType.parse("application/json"));}
+            catch(Exception e){listener.onState("Could not prepare resume request");return;}
+            http.newCall(new Request.Builder().url(BASE+"/v1/mcp/workspace/resume-ticket").post(body).build()).enqueue(new Callback(){
+                public void onFailure(Call c,IOException e){scheduleReconnect("Resume ticket failed");}
+                public void onResponse(Call c,Response r)throws IOException{
+                    try(Response x=r){
+                        if(x.code()==403){state.clearCredentials();listener.onState("Saved workspace lease expired · open a fresh pair link");return;}
+                        if(!x.isSuccessful()){scheduleReconnect("Resume rejected: "+x.code());return;}
+                        ResponseBody responseBody=x.body();
+                        if(responseBody==null){scheduleReconnect("Resume returned no body");return;}
+                        String code=new JSONObject(responseBody.string()).optString("pair_code","");
+                        if(code.isEmpty())scheduleReconnect("Resume returned no ticket");else openSocket("pair_code",code);
+                    }catch(Exception e){scheduleReconnect("Resume error");}
+                }
+            });
+            return;
+        }
+        String pair=state.pairCode();
+        if(pair!=null&&!pair.isEmpty()){openSocket("pair_code",pair);return;}
+        listener.onState("Open a ChatGPT workspace link or enter a pair code");
+    }
+    private static String enc(String value){try{return URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(Exception e){throw new IllegalArgumentException("URL encoding failed",e);}}
+    private void openSocket(String key,String code){String url="wss://api.ailinux.me/v1/mcp/node/connect?mode=workspace&"+key+"="+enc(code)+"&machine_id=android&client_version="+enc(VERSION);ws=http.newWebSocket(new Request.Builder().url(url).build(),this);}
     @Override public void onOpen(WebSocket socket,Response response){reconnectAttempt=0;listener.onState("Transport connected");}
     @Override public void onMessage(WebSocket socket,String text){try{JSONObject msg=new JSONObject(text);String method=msg.optString("method","");if("connected".equals(method)){sendHello(socket);return;}if("workspace/shared".equals(method)||"workspace/paired".equals(method)){JSONObject p=msg.optJSONObject("params");if(p!=null&&p.optBoolean("ok",true)){String token=p.optString("resume_token","");if(!token.isEmpty()){state.setResumeToken(token);state.setPairCode("");handoffCode="";listener.onResumeToken(token);}listener.onState("Workspace connected · "+state.mode());}return;}if("workspace/detached".equals(method)){listener.onState("AI detached · lease retained");return;}if("ping".equals(method)){socket.send(new JSONObject().put("jsonrpc","2.0").put("method","pong").put("params",msg.optJSONObject("params")==null?new JSONObject():msg.optJSONObject("params")).toString());return;}if("tools/call".equals(method)){tools.submit(()->handleToolCall(socket,msg));}}
         catch(Exception e){Log.e(TAG,"protocol message",e);listener.onState("Protocol error: "+e.getMessage());}}
