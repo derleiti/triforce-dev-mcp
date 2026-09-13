@@ -51,3 +51,18 @@ test('trusted MCP origin can write clipboard and request wake lock', () => {
   assert.match(source, /screen-wake-lock/);
   assert.match(source, /trustedPermissions\.has\(permission\) && isTrustedDocument/);
 });
+
+test('the native bridge is preloaded and gated behind a user prompt', () => {
+  assert.match(source, /preload: path\.join\(__dirname, 'preload\.js'\)/);
+  assert.match(source, /registerNativeBridge/);
+  assert.match(source, /ailinux:shell-release/);
+  assert.match(source, /dialog\.showMessageBox/);
+  assert.match(source, /dialog\.showOpenDialog/);
+  assert.match(source, /fromTrustedFrame/);
+});
+
+test('connection details surface as a notification and in the tray', () => {
+  assert.match(source, /showConnectionNotification/);
+  assert.match(source, /new Notification\(/);
+  assert.match(source, /tray\.setToolTip/);
+});

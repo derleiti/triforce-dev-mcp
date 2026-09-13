@@ -1,6 +1,8 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, nativeImage, powerSaveBlocker, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, powerSaveBlocker, session, shell } = require('electron');
+const path = require('node:path');
+const shellBackends = require('./shell_backends');
 
 const APP_NAME = 'AILinux Workspace';
 const START_URL = 'https://api.ailinux.me/v1/mcp';
@@ -126,6 +128,7 @@ function createWindow() {
     backgroundColor: '#0d0f12',
     autoHideMenuBar: true,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       partition: SESSION_PARTITION,
       nodeIntegration: false,
       contextIsolation: true,
@@ -179,6 +182,7 @@ if (!gotLock) {
     app.setAsDefaultProtocolClient(PROTOCOL);
     pendingDeepLink = targetFromArgv(process.argv) || pendingDeepLink;
     powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    registerNativeBridge();
     createWindow();
     createTray();
   });
@@ -197,4 +201,101 @@ if (!gotLock) {
   });
 }
 
-module.exports = { safeTarget, targetFromArgv, isTrustedDocument };
+/**
+ * Native bridge for the web app.
+ *
+ * The renderer may ask for a terminal; it can never grant one. Every release
+ * goes through an explicit dialog plus a folder the user picks by hand, and
+ * commands are confined to that folder.
+ */
+function fromTrustedFrame(event) {
+  try {
+    return isTrustedDocument(event.senderFrame.url);
+  } catch {
+    return false;
+  }
+}
+
+function broadcastShellState(state) {
+  try {
+    window?.webContents?.send('ailinux:shell-changed', state);
+  } catch { /* window already gone */ }
+  refreshTrayState(state);
+}
+
+function refreshTrayState(state) {
+  if (!tray) return;
+  const line = state && state.released
+    ? `Terminal: ${state.label} \u00b7 ${state.workspace}`
+    : 'Terminal: not released';
+  tray.setToolTip(`${APP_NAME} \u00b7 ${PLATFORM_LABEL}\n${line}`);
+}
+
+function showConnectionNotification(details) {
+  if (!Notification.isSupported()) return false;
+  const state = shellBackends.status();
+  const lines = [];
+  if (details && details.workspace) lines.push(`Workspace: ${details.workspace}`);
+  if (details && details.mode) lines.push(`Access: ${details.mode}`);
+  if (details && details.pairCode) lines.push(`Pair ID: ${details.pairCode}`);
+  lines.push(state.released ? `Terminal: ${state.label}` : 'Terminal: not released');
+  new Notification({ title: `${APP_NAME} connected`, body: lines.join('\n'), silent: true }).show();
+  return true;
+}
+
+function registerNativeBridge() {
+  ipcMain.handle('ailinux:shell-status', (event) => {
+    if (!fromTrustedFrame(event)) return { error: 'untrusted frame' };
+    return shellBackends.status();
+  });
+
+  ipcMain.handle('ailinux:shell-release', async (event) => {
+    if (!fromTrustedFrame(event)) return { error: 'untrusted frame' };
+    const state = shellBackends.status();
+    if (!state.available) return state;
+
+    const confirmed = await dialog.showMessageBox(window, {
+      type: 'warning',
+      buttons: ['Cancel', 'Choose folder and release'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Release terminal to the AI',
+      message: 'Give the AI a terminal on this computer?',
+      detail: `Backend: ${state.label}\n`
+        + `${state.sandboxed ? 'Commands run inside a sandbox.' : 'Commands run with your user account, without a sandbox.'}\n\n`
+        + 'You pick the workspace folder next. Commands are confined to it, and you can revoke access from the tray at any time.',
+    });
+    if (confirmed.response !== 1) return shellBackends.status();
+
+    const picked = await dialog.showOpenDialog(window, {
+      title: 'Workspace folder for the released terminal',
+      properties: ['openDirectory'],
+    });
+    if (picked.canceled || !picked.filePaths.length) return shellBackends.status();
+
+    const granted = shellBackends.grantRelease(picked.filePaths[0]);
+    broadcastShellState(granted);
+    showConnectionNotification({ workspace: granted.workspace, mode: 'terminal released' });
+    return granted;
+  });
+
+  ipcMain.handle('ailinux:shell-revoke', (event) => {
+    if (!fromTrustedFrame(event)) return { error: 'untrusted frame' };
+    const state = shellBackends.revokeRelease();
+    broadcastShellState(state);
+    return state;
+  });
+
+  ipcMain.handle('ailinux:shell-run', async (event, payload) => {
+    if (!fromTrustedFrame(event)) return { ok: false, isError: true, text: 'untrusted frame' };
+    return shellBackends.runShell(payload || {});
+  });
+
+  ipcMain.handle('ailinux:notify-connection', (event, details) => {
+    if (!fromTrustedFrame(event)) return false;
+    return showConnectionNotification(details || {});
+  });
+}
+
+module.exports = { safeTarget, targetFromArgv, isTrustedDocument, fromTrustedFrame };
+
