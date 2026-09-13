@@ -1,8 +1,29 @@
 plugins { id 'com.android.application' }
 
+def releaseKeystore = System.getenv('AILINUX_ANDROID_KEYSTORE')
+def releaseStorePassword = System.getenv('AILINUX_ANDROID_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('AILINUX_ANDROID_KEY_ALIAS') ?: 'ailinux-workspace'
+def releaseKeyPassword = System.getenv('AILINUX_ANDROID_KEY_PASSWORD')
+def hasReleaseSigning = releaseKeystore && releaseStorePassword && releaseKeyPassword
+
 android {
     namespace 'me.ailinux.workspace'
     compileSdk 35
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+                enableV4Signing true
+            }
+        }
+    }
 
     defaultConfig {
         applicationId 'me.ailinux.workspace'
@@ -15,6 +36,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
