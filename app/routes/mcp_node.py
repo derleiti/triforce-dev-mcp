@@ -55,6 +55,7 @@ class ClientConnection:
         self.last_client_ping_at: Optional[datetime] = None
         self.pending_requests: Dict[str, asyncio.Future] = {}
         self.pending_request_stages: Dict[str, str] = {}
+        self.pending_request_tools: Dict[str, str] = {}
         self.supported_tools: List[str] = []
         self.client_info: Dict[str, Any] = {}  # Platform, hostname, version etc.
         
@@ -93,6 +94,7 @@ class ClientConnection:
         future = asyncio.get_event_loop().create_future()
         self.pending_requests[request_id] = future
         self.pending_request_stages[request_id] = "sent"
+        self.pending_request_tools[request_id] = tool
 
         try:
             async with asyncio.timeout(timeout):
@@ -106,6 +108,7 @@ class ClientConnection:
         finally:
             self.pending_requests.pop(request_id, None)
             self.pending_request_stages.pop(request_id, None)
+            self.pending_request_tools.pop(request_id, None)
             if not future.done():
                 future.cancel()
             elif not future.cancelled():
@@ -126,13 +129,35 @@ class ClientConnection:
         request_id = response.get("id")
         if isinstance(request_id, str) and request_id in self.pending_requests:
             future = self.pending_requests[request_id]
+            tool = self.pending_request_tools.get(request_id, "unknown")
             if not future.done():
                 if "error" in response:
                     error = response["error"]
                     detail = error.get("message", "Unknown error") if isinstance(error, dict) else "Malformed client RPC error"
+                    logger.warning(
+                        "Client tool RPC error | client=%s request=%s tool=%s detail=%s",
+                        self.client_id, request_id[:12], tool, str(detail)[:500],
+                    )
                     future.set_exception(RuntimeError(str(detail)))
                 elif "result" in response:
-                    future.set_result(response["result"])
+                    result = response["result"]
+                    if isinstance(result, dict) and result.get("isError"):
+                        detail = "client returned isError=true"
+                        structured = result.get("structuredContent")
+                        if isinstance(structured, dict) and structured.get("error"):
+                            detail = str(structured.get("error"))
+                        else:
+                            content = result.get("content")
+                            if isinstance(content, list):
+                                for item in content:
+                                    if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
+                                        detail = str(item.get("text"))
+                                        break
+                        logger.warning(
+                            "Client tool failed | client=%s request=%s tool=%s detail=%s",
+                            self.client_id, request_id[:12], tool, detail[:500],
+                        )
+                    future.set_result(result)
                 else:
                     future.set_exception(RuntimeError("Client RPC response has no result or error"))
 

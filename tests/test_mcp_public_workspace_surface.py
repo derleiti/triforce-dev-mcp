@@ -39,10 +39,11 @@ async def test_public_guest_gets_synced_non_admin_local_catalog():
     # Execution routing is explicit and cannot silently fall through to Hetzner.
     assert by_name['shell']['x_execution'] == 'local_workspace'
     assert by_name['file_ops']['x_execution'] == 'local_workspace'
-    file_ops_schema = by_name['file_ops']['inputSchema']['properties']
-    assert {'delete', 'remove'} <= set(file_ops_schema['action']['enum'])
-    assert file_ops_schema['recursive']['type'] == 'boolean'
-    assert by_name['file_ops']['annotations']['destructiveHint'] is True
+    # Shared canonical names keep exactly the canonical semantic schema; local
+    # execution is target metadata, not a second tool definition.
+    from app.mcp.tool_registry_unified import get_canonical_all_tools
+    canonical = {tool['name']: tool for tool in get_canonical_all_tools()}
+    assert by_name['file_ops']['inputSchema'] == canonical['file_ops']['inputSchema']
     assert by_name['code_edit']['x_execution'] == 'local_workspace'
     assert by_name['git']['x_execution'] == 'local_workspace'
     assert by_name['models']['x_execution'] == 'triforce_server'
@@ -103,15 +104,21 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
-    assert 'AILinux Helper 2.90.8' in html
+    assert 'AILinux Helper 2.90.11' in html
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
     assert '/v1/mcp/helper/android' in html
-    assert '/v1/mcp/helper/icon.png?v=2908' in html
+    assert '/v1/mcp/helper/icon.png?v=29011' in html
     assert '/v1/mcp/helper/linux-appimage' in html
     assert '/v1/mcp/helper/linux-deb' in html
     assert '/v1/mcp/helper/windows' in html
     assert '/v1/mcp/helper/macos' in html
+    assert "function detectedHelperOs()" in html
+    assert "return 'unknown'" in html
+    assert "unknown:HELPER_DOWNLOAD_IDS" in html
+    assert "showHelperDownloads(downloads[os]||HELPER_DOWNLOAD_IDS)" in html
+    assert "Operating system not recognized reliably" in html
+    assert "Android APK, Linux AppImage/.deb, Windows and macOS downloads are all available" in html
     assert "mode:workspaceMode==='write'?'readwrite':'read'" in html
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert 'legacyEntries' in html
@@ -150,7 +157,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.8-browser'" in html
+    assert "EXECUTOR_VERSION='2.90.11-browser'" in html
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -187,8 +194,8 @@ def test_mobile_workspace_install_surface_and_pwa_contract():
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=2908' in html
-    assert "/v1/mcp/sw.js?v=2908" in html
+    assert '/v1/mcp/manifest.webmanifest?v=29011' in html
+    assert "/v1/mcp/sw.js?v=29011" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
     assert 'native foreground executor' in html
@@ -203,9 +210,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     assert manifest['start_url'] == '/v1/mcp'
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v2908" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.8')" in worker.body
-    assert b'ailinux-helper-v2908' in worker.body
+    assert b"ailinux-helper-v29011" in worker.body
+    assert b"caches.match('/v1/mcp?app=2.90.11')" in worker.body
+    assert b'ailinux-helper-v29011' in worker.body
     assert b'caches.delete' in worker.body
 
 
@@ -214,6 +221,6 @@ def test_helper_surface_is_unified_and_branded():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
     assert '<h1>AILinux Helper</h1>' in html
-    assert 'AILinux Helper 2.90.8' in html
+    assert 'AILinux Helper 2.90.11' in html
     assert 'Mobile Workspace' not in html
-    assert '/v1/mcp/helper/icon.png?v=2908' in html
+    assert '/v1/mcp/helper/icon.png?v=29011' in html

@@ -44,13 +44,16 @@ class AICoderRunResult:
         tools = [str(e.get("name") or "") for e in self.events if e.get("type") == "tool_call"]
         terminal = next((e for e in reversed(self.events) if e.get("type") == "run_terminal"), {})
         perf = next((e for e in reversed(self.events) if e.get("type") == "performance_summary"), {})
+        model_requests = int(perf.get("model_requests") or 0)
+        if not model_requests:
+            model_requests = sum(1 for e in self.events if e.get("type") == "model_start")
         return {
             "event_count": len(self.events),
             "tool_calls": tools,
             "tool_call_count": len(tools),
             "tool_error_count": sum(1 for e in self.events if e.get("type") == "tool_result" and e.get("is_error")),
             "elapsed_ms": int(terminal.get("elapsed_ms") or perf.get("wall_ms") or 0),
-            "model_requests": int(perf.get("model_requests") or 0),
+            "model_requests": model_requests,
         }
 
     def to_dict(self, *, include_events: bool = False) -> dict[str, Any]:
@@ -81,6 +84,21 @@ def _copy_private_file(source: Path, target: Path) -> None:
     data = source.read_bytes()
     target.write_bytes(data)
     target.chmod(0o600)
+
+
+def _sync_private_file(source: Path, target: Path) -> None:
+    """Atomically refresh shared auth state without exposing its contents."""
+    data = source.read_bytes()
+    try:
+        if target.is_file() and not target.is_symlink() and target.read_bytes() == data:
+            return
+    except OSError:
+        pass
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    tmp.write_bytes(data)
+    tmp.chmod(0o600)
+    os.replace(tmp, target)
 
 
 def prepare_instance_home(
@@ -127,7 +145,15 @@ def prepare_instance_home(
     target_cfg = home / ".config" / "ai-coder"
     target_cfg.mkdir(parents=True, exist_ok=True)
     target_cfg.chmod(0o700)
-    for name in ("session.json", "state.json", "mcp_servers.json"):
+    session_source = source_cfg / "session.json"
+    session_target = target_cfg / "session.json"
+    if session_source.is_file():
+        # Authentication is operator-owned shared state. A one-time copy leaves
+        # long-lived agent homes stuck on expired MCP tokens after `aicoder setup`
+        # refreshes the canonical user session.
+        _sync_private_file(session_source, session_target)
+
+    for name in ("state.json", "mcp_servers.json"):
         source = source_cfg / name
         target = target_cfg / name
         if source.is_file() and not target.exists():
@@ -419,18 +445,53 @@ class AICoderRunner:
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
         )
+        stdout_chunks: list[bytes] = []
+
+        async def collect_stdout() -> None:
+            assert process.stdout is not None
+            while True:
+                chunk = await process.stdout.read(65536)
+                if not chunk:
+                    return
+                stdout_chunks.append(chunk)
+
+        reader_task = asyncio.create_task(collect_stdout())
         try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=max(1, int(timeout)))
+            await asyncio.wait_for(process.wait(), timeout=max(1, int(timeout)))
+            await reader_task
         except asyncio.TimeoutError:
             await self._terminate_process_group(process)
+            await asyncio.shield(reader_task)
+            lines = b"".join(stdout_chunks).decode("utf-8", errors="replace").splitlines()
+            events, raw = parse_ndjson(lines)
+            start = next((e for e in events if e.get("type") == "run_start"), {})
+            terminal = next((e for e in reversed(events) if e.get("type") == "run_terminal"), {})
             return AICoderRunResult(
                 profile_id=profile_id,
                 status="timeout",
                 error=f"AICoder did not finish within {int(timeout)}s",
                 exit_code=process.returncode,
+                run_id=str(start.get("run_id") or terminal.get("run_id") or ""),
+                plan_id=str(terminal.get("plan_id") or ""),
+                model=str(start.get("model") or model or ""),
+                events=events[-500:],
+                raw_lines=raw[-100:],
             )
+        except asyncio.CancelledError:
+            # The caller (HTTP/MCP/connector) may time out before AICoder's own
+            # run timeout.  Cancellation of ``communicate()`` does not terminate
+            # the child process, so without explicit cleanup the AICoder process
+            # keeps running under triforce.service and can retain workspace/provider
+            # resources after the request that owns it has disappeared.
+            #
+            # Shield cleanup from the *current* cancellation long enough to reap
+            # the whole process group, then preserve normal asyncio cancellation
+            # semantics for the caller.
+            await asyncio.shield(self._terminate_process_group(process))
+            await asyncio.shield(reader_task)
+            raise
 
-        lines = stdout.decode("utf-8", errors="replace").splitlines()
+        lines = b"".join(stdout_chunks).decode("utf-8", errors="replace").splitlines()
         events, raw = parse_ndjson(lines)
         result_event = next((e for e in reversed(events) if e.get("type") == "result"), {})
         terminal = next((e for e in reversed(events) if e.get("type") == "run_terminal"), {})

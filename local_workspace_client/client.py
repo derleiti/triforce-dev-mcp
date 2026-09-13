@@ -138,6 +138,10 @@ class WorkspaceNode:
 
     async def _handle(self, websocket, message: dict) -> None:
         method = message.get("method")
+        if method == "ping":
+            params = message.get("params") if isinstance(message.get("params"), dict) else {}
+            await websocket.send(json.dumps({"jsonrpc": "2.0", "method": "pong", "params": params}))
+            return
         if method == "connected":
             await self._announce(websocket)
             return

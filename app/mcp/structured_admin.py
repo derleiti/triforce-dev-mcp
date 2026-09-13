@@ -589,11 +589,19 @@ async def _ssh_run(host_id, cmd_list, timeout=30):
     if not host:
         return {"success": False, "errors": f"Unknown host: {host_id}. Known: {list(REMOTE_HOSTS.keys())}"}
 
+    import shlex
+
+    # OpenSSH accepts the remote command as one shell command string. Appending
+    # raw argv elements loses argument boundaries for whitespace-bearing values
+    # (for example Docker --format strings containing tabs) because ssh joins
+    # them before the remote shell parses the command. Quote once here so the
+    # remote side reconstructs the exact argv semantics.
+    remote_command = shlex.join(str(part) for part in cmd_list)
     ssh_cmd = [
         "ssh", "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
-        f"{host['user']}@{host['ip']}",
-    ] + cmd_list
+        f"{host['user']}@{host['ip']}", remote_command,
+    ]
     result = await _run(ssh_cmd, timeout=timeout)
 
     # The hosted MCP connector runs as uid 1000 but may not expose an NSS
@@ -647,7 +655,7 @@ async def handle_remote_admin(a):
         return {"action": action, "host": host, "service": service, "unit": u, **r}
 
     elif action == "docker_status":
-        r = await _ssh_run(host, ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"])
+        r = await _ssh_run(host, ["sudo", "docker", "ps", "--format", "{{.Names}}\t{{.Status}}"])
         return {"action": action, "host": host, **r}
 
     elif action == "disk_usage":
@@ -719,7 +727,7 @@ COMMAND_TEMPLATES = {
     "docker_networks":    (["docker", "network", "ls"], False, 5, "List Docker networks"),
     "docker_disk":        (["docker", "system", "df"], False, 5, "Docker disk usage"),
     # Storage
-    "disk_usage_detail":  (["du", "-sh", "/home/zombie/triforce/*/"], False, 10, "Disk usage per subdirectory"),
+    "disk_usage_detail":  (["du", "-x", "-h", "--max-depth=1", "/home/zombie/triforce"], True, 30, "Disk usage per subdirectory on the TriForce filesystem"),
     "largest_files":      (["bash", "-c", "find /home/zombie/triforce -type f -size +50M -exec ls -lh {} + 2>/dev/null | sort -k5 -h | tail -10"], False, 10, "Find files >50MB"),
     "inode_usage":        (["df", "-i"], False, 5, "Show inode usage"),
     # Triforce/AILinux

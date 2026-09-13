@@ -6,6 +6,7 @@ from copy import deepcopy
 from ..utils.tool_normalizer import normalize_tool_name
 # v4 shim - no longer needed, all aliases in V5_ALIASES
 from .tool_registry_v5 import get_all_tools as v5_get_all_tools, V5_ALIASES
+from .workspace_tool_contract import WORKSPACE_CONTROL_TOOLS
 
 
 DEFAULT_EXAMPLES: Dict[str, Dict[str, Any]] = {
@@ -117,6 +118,20 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "tla_status": "planning",
     "tla_advance": "planning",
     "tla_abort": "planning",
+    "workspace_status": "workspace",
+    "workspace_pair": "workspace",
+    "workspace_info": "workspace",
+    "workspace_clear": "workspace",
+    "file_read": "filesystem",
+    "file_tree": "filesystem",
+    "code_read": "filesystem",
+    "code_grep": "filesystem",
+    "file_edit": "filesystem",
+    "directory_create": "filesystem",
+    "computer_observe": "device",
+    "computer_screenshot": "device",
+    "clipboard_read": "device",
+    "clipboard_write": "device",
     # Group Chat (Multi-AI Orchestration) — Added 2026-03-15
     "group_chat_create": "group_chat",
     "group_chat_ask": "group_chat",
@@ -173,6 +188,10 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Group chat
     "group_chat_create", "group_chat_ask", "group_chat_message", "group_chat_read",
     "group_chat_list", "group_chat_consolidate", "group_chat_assign",
+    # Workspace / device controls (one canonical pool; execution remains target-specific)
+    "workspace_status", "workspace_pair", "workspace_info", "workspace_clear",
+    "file_read", "file_tree", "code_read", "code_grep", "file_edit", "directory_create",
+    "computer_observe", "computer_screenshot", "clipboard_read", "clipboard_write",
     # Integrations
     "n8n_mcp_call",
 })
@@ -227,6 +246,8 @@ INVENTORY_SYNONYMS: Dict[str, str] = {
     "browser": "browser",
     "n8n": "integration",
     "integration": "integration",
+    "workspace": "workspace",
+    "device": "device",
 }
 
 
@@ -274,6 +295,11 @@ def _inventory_for_tool(name: str) -> str:
 
 def resolve_tool_name_for_call(name: str) -> str:
     normalized = normalize_tool_name(name or "")
+    # Once a compatibility alias becomes a first-class canonical capability, its
+    # canonical name wins. This keeps file_read distinct from code_read while old
+    # non-canonical aliases continue resolving through V5_ALIASES.
+    if normalized in CANONICAL_TOOL_NAMES:
+        return normalized
     return V5_ALIASES.get(normalized, normalized)
 
 
@@ -281,6 +307,7 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     raw_tools: List[Dict[str, Any]] = []
     # v4 schemas removed — v5 is canonical source (2026-03-16)
     raw_tools.extend(v5_get_all_tools())
+    raw_tools.extend(WORKSPACE_CONTROL_TOOLS)
     from .handlers_memory_history import HISTORY_TOOLS
     raw_tools.extend(HISTORY_TOOLS)
 

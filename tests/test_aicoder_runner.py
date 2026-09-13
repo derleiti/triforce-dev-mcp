@@ -97,6 +97,49 @@ def test_prepare_instance_home_isolates_aicoder_state_and_links_provider_login(t
     assert (home / ".config" / "aicoder").is_dir()
 
 
+
+def test_prepare_instance_home_refreshes_canonical_session(tmp_path: Path):
+    source = tmp_path / "source"
+    source_cfg = source / ".config" / "ai-coder"
+    source_cfg.mkdir(parents=True)
+    source_session = source_cfg / "session.json"
+    source_session.write_text('{"token":"fresh-1"}')
+
+    home = prepare_instance_home("pilot", source_home=source, instance_root=tmp_path / "instances")
+    target = home / ".config" / "ai-coder" / "session.json"
+    assert target.read_text() == '{"token":"fresh-1"}'
+
+    source_session.write_text('{"token":"fresh-2"}')
+    home2 = prepare_instance_home("pilot", source_home=source, instance_root=tmp_path / "instances")
+    assert home2 == home
+    assert target.read_text() == '{"token":"fresh-2"}'
+    assert oct(target.stat().st_mode & 0o777) == "0o600"
+
+
+def test_runner_timeout_preserves_partial_events(tmp_path: Path):
+    fake = tmp_path / "aicoder"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, time\n"
+        "print(json.dumps({'type':'run_start','run_id':'r-timeout','model':'m'}), flush=True)\n"
+        "print(json.dumps({'type':'model_start','run_id':'r-timeout','model':'m'}), flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    fake.chmod(0o755)
+    workspace = tmp_path / "ws"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    home.mkdir()
+
+    result = asyncio.run(AICoderRunner(str(fake)).run(
+        profile_id="pilot", prompt="test", workspace=workspace, home=home, timeout=1,
+    ))
+    assert result.status == "timeout"
+    assert result.run_id == "r-timeout"
+    assert result.model == "m"
+    assert result.event_summary()["event_count"] == 2
+    assert result.event_summary()["model_requests"] == 1
+
 def test_runner_normalizes_completed_result(tmp_path: Path):
     fake = tmp_path / "aicoder"
     fake.write_text(
@@ -135,6 +178,51 @@ def test_runner_timeout_kills_process_group(tmp_path: Path):
         profile_id="pilot", prompt="test", workspace=workspace, home=home, timeout=1,
     ))
     assert result.status == "timeout"
+
+
+def test_runner_caller_cancellation_reaps_process_group(tmp_path: Path):
+    fake = tmp_path / "aicoder"
+    pid_file = tmp_path / "pid"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, time\n"
+        "from pathlib import Path\n"
+        f"Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
+        "time.sleep(30)\n"
+    )
+    fake.chmod(0o755)
+    workspace = tmp_path / "ws"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    home.mkdir()
+
+    async def exercise():
+        task = asyncio.create_task(AICoderRunner(str(fake)).run(
+            profile_id="pilot", prompt="test", workspace=workspace, home=home, timeout=60,
+        ))
+        for _ in range(100):
+            if pid_file.exists():
+                break
+            await asyncio.sleep(0.02)
+        assert pid_file.exists(), "AICoder child did not start"
+        pid = int(pid_file.read_text())
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("caller cancellation must propagate")
+
+        for _ in range(100):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            await asyncio.sleep(0.02)
+        raise AssertionError(f"cancelled AICoder child is still alive: pid={pid}")
+
+    asyncio.run(exercise())
 
 
 def test_apply_profile_state_updates_only_profile_owned_keys(tmp_path: Path):

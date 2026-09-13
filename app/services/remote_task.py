@@ -88,7 +88,7 @@ class RemoteTaskService:
         
         self.hosts: Dict[str, RemoteHost] = {}
         self.tasks: Dict[str, RemoteTask] = {}
-        self.running_processes: Dict[str, subprocess.Popen] = {}
+        self.running_processes: Dict[str, asyncio.subprocess.Process] = {}
         
         # Task Templates für verschiedene Task-Typen
         self.task_templates = {
@@ -260,8 +260,10 @@ Aufgabe: {description}"""
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                cwd="/home/zombie"
+                cwd="/home/zombie",
+                start_new_session=True,
             )
+            self.running_processes[task.task_id] = process
             
             # Output sammeln
             output_lines = []
@@ -275,21 +277,30 @@ Aufgabe: {description}"""
                 logger.debug(f"[{task.task_id}] {decoded}")
             
             await process.wait()
-            
-            task.status = TaskStatus.COMPLETED
+
             task.completed_at = datetime.now().isoformat()
             task.result = {
                 "exit_code": process.returncode,
-                "output_lines": len(output_lines)
+                "output_lines": len(output_lines),
             }
-            
-            logger.info(f"Task {task.task_id} completed with exit code {process.returncode}")
+            if task.status == TaskStatus.CANCELLED:
+                logger.info(f"Task {task.task_id} cancelled with exit code {process.returncode}")
+            elif process.returncode == 0:
+                task.status = TaskStatus.COMPLETED
+                logger.info(f"Task {task.task_id} completed with exit code 0")
+            else:
+                task.status = TaskStatus.FAILED
+                task.error = f"Agent exited with code {process.returncode}"
+                logger.warning(f"Task {task.task_id} failed with exit code {process.returncode}")
             
         except Exception as e:
-            task.status = TaskStatus.FAILED
-            task.error = str(e)
+            if task.status != TaskStatus.CANCELLED:
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
             task.completed_at = datetime.now().isoformat()
             logger.error(f"Task {task.task_id} failed: {e}")
+        finally:
+            self.running_processes.pop(task.task_id, None)
     
     def get_task(self, task_id: str) -> Optional[RemoteTask]:
         return self.tasks.get(task_id)
@@ -310,12 +321,17 @@ Aufgabe: {description}"""
     
     def cancel_task(self, task_id: str) -> bool:
         task = self.get_task(task_id)
-        if task and task.status == TaskStatus.RUNNING:
-            task.status = TaskStatus.CANCELLED
-            task.completed_at = datetime.now().isoformat()
-            # TODO: Process killen wenn in running_processes
-            return True
-        return False
+        if not task or task.status != TaskStatus.RUNNING:
+            return False
+        task.status = TaskStatus.CANCELLED
+        task.completed_at = datetime.now().isoformat()
+        process = self.running_processes.get(task_id)
+        if process is not None and process.returncode is None:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+        return True
 
 
 # Singleton Instance

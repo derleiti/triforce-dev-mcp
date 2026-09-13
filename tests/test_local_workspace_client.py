@@ -99,3 +99,58 @@ def test_mutating_file_edit_creates_shared_fallback(monkeypatch):
         index = Path(backups) / 'INDEX.md'
         assert str(backup) in index.read_text(encoding='utf-8')
         assert target.read_text(encoding='utf-8') == 'after'
+
+
+def test_workspace_node_replies_to_server_application_ping():
+    import asyncio
+    import json
+    from local_workspace_client.client import WorkspaceNode
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, payload):
+            self.sent.append(json.loads(payload))
+
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = WorkspaceRuntime(Path(temp), writable=False)
+        node = WorkspaceNode('https://api.ailinux.me', runtime, pair_code='ABCD-1234-EF56')
+        ws = FakeWebSocket()
+        asyncio.run(node._handle(ws, {'jsonrpc': '2.0', 'method': 'ping', 'params': {'server_ts': 123.5}}))
+        assert ws.sent == [
+            {'jsonrpc': '2.0', 'method': 'pong', 'params': {'server_ts': 123.5}}
+        ]
+
+
+def test_client_connection_logs_workspace_tool_error_detail(caplog):
+    import asyncio
+    import logging
+    from app.routes.mcp_node import ClientConnection
+    from app.services.user_tiers import UserTier
+
+    class FakeSocket:
+        pass
+
+    async def scenario():
+        conn = ClientConnection('client-1', 'workspace:test', FakeSocket(), UserTier.FREE)
+        request_id = 'req-1234567890'
+        future = asyncio.get_running_loop().create_future()
+        conn.pending_requests[request_id] = future
+        conn.pending_request_stages[request_id] = 'started'
+        conn.pending_request_tools[request_id] = 'file_read'
+        conn.handle_response({
+            'jsonrpc': '2.0',
+            'id': request_id,
+            'result': {
+                'isError': True,
+                'structuredContent': {'ok': False, 'error': 'FileNotFoundException: missing.txt'},
+                'content': [{'type': 'text', 'text': 'fallback text'}],
+            },
+        })
+        assert (await future)['isError'] is True
+
+    with caplog.at_level(logging.WARNING, logger='ailinux.mcp_node'):
+        asyncio.run(scenario())
+    assert 'tool=file_read' in caplog.text
+    assert 'FileNotFoundException: missing.txt' in caplog.text

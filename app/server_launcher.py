@@ -41,6 +41,8 @@ def build_server_process(
         str(settings.server_port),
         "--timeout-keep-alive",
         str(settings.server_keepalive),
+        "--timeout-graceful-shutdown",
+        str(settings.server_graceful_shutdown),
         # Explicit WebSocket liveness. Without these Uvicorn defaults to a 20s
         # pong deadline, which reaps mobile executors whose tab is throttled in
         # the background long before the TriForce workspace heartbeat applies.

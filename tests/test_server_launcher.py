@@ -58,3 +58,29 @@ def test_launcher_websocket_liveness_is_configurable(tmp_path: Path):
     argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
     assert float(argv[argv.index("--ws-ping-interval") + 1]) == 25.0
     assert float(argv[argv.index("--ws-ping-timeout") + 1]) == 180.0
+
+
+def test_launcher_bounds_graceful_shutdown_below_systemd_outer_timeout(tmp_path: Path):
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text("TRIFORCE_API_PORT=19121\n")
+    argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
+    timeout = argv[argv.index("--timeout-graceful-shutdown") + 1]
+    assert timeout == "5"
+    assert int(timeout) < 30
+
+
+def test_launcher_graceful_shutdown_is_configurable(tmp_path: Path):
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text("TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT=7\n")
+    argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
+    assert argv[argv.index("--timeout-graceful-shutdown") + 1] == "7"
+
+
+def test_launcher_rejects_fractional_graceful_shutdown(tmp_path: Path):
+    import pytest
+    from pydantic import ValidationError
+
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text("TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT=5.5\n")
+    with pytest.raises(ValidationError):
+        build_server_process(config_path=cfg, environ={}, python="/x/python")

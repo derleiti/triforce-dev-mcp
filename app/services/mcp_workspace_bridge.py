@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 import asyncio
+import hashlib
+import json
 import re
 from typing import Any, Dict, List
 
 from fastapi import HTTPException, Request
 
+from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES
 from .mcp_workspace_sessions import (
     claim_workspace_with_resume_token, get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
     resolve_web_pair_code, workspace_status as lease_status,
@@ -41,180 +44,63 @@ LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
 WORKSPACE_EXECUTOR_WAIT_SECONDS = 25.0
 WORKSPACE_EXECUTOR_POLL_SECONDS = 0.25
 
-_TOOL_SCHEMAS: List[Dict[str, Any]] = [
-    {
-        "name": "workspace_status",
-        "description": (
-            "Check whether this MCP session is paired with a browser-selected local workspace. "
-            "If the user message contains a TriForce workspace ID in the form XXXX-XXXX-XXXX-XXXX-XXXX-XXXX, "
-            "pass it as workspace_id; this tool validates the waiting browser and pairs it automatically."
-        ),
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_id": {"type": "string", "description": "Optional one-time TriForce workspace ID pasted by the user."},
-            "workspace_token": {"type": "string"}
-        }},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "workspace_pair",
-        "description": (
-            "Bind this MCP session to the browser workspace waiting under the one-time ID. "
-            "Use this when the user pastes an ID shown by https://api.ailinux.me/v1/mcp."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"code": {"type": "string"}},
-            "required": ["code"],
-        },
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "workspace_info",
-        "description": "Analyze the paired browser workspace: file counts, size, extensions and sample paths.",
-        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "file_read",
-        "description": "Read a UTF-8 text file inside the paired browser workspace.",
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
-            "end_line": {"type": "integer", "minimum": 1}}, "required": ["path"]},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "file_tree",
-        "description": "List a bounded directory tree inside the paired browser workspace.",
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "path": {"type": "string", "default": "."},
-            "max_depth": {"type": "integer", "minimum": 1, "maximum": 8},
-            "max_entries": {"type": "integer", "minimum": 1, "maximum": 1000}}},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "code_read",
-        "description": "Read source code inside the paired browser workspace.",
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
-            "end_line": {"type": "integer", "minimum": 1}}, "required": ["path"]},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "code_tree",
-        "description": "Inspect the source tree inside the paired browser workspace.",
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "path": {"type": "string", "default": "."},
-            "depth": {"type": "integer", "minimum": 1, "maximum": 8},
-            "max_entries": {"type": "integer", "minimum": 1, "maximum": 1000}}},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "code_search",
-        "description": "Search text/source files inside the paired browser workspace.",
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "query": {"type": "string"}, "path": {"type": "string", "default": "."},
-            "file_pattern": {"type": "string", "default": "*"},
-            "case_sensitive": {"type": "boolean"}, "regex": {"type": "boolean"},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 500}},
-            "required": ["query"]},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "code_grep",
-        "description": "Regex-search text files inside the paired browser workspace.",
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "pattern": {"type": "string"}, "path": {"type": "string", "default": "."},
-            "glob": {"type": "string", "default": "*"},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 500}},
-            "required": ["pattern"]},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "file_ops",
-        "description": (
-            "Local workspace file operations: read, write, append, list, find, size, delete or remove. "
-            "delete/remove requires Write access, creates a recovery backup first, supports recursive=true, "
-            "and protects the workspace root plus .workspacebackup."
-        ),
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"},
-            "action": {"type": "string", "enum": ["read", "write", "append", "list", "find", "size", "delete", "remove"]},
-            "path": {"type": "string"}, "content": {"type": "string"}, "pattern": {"type": "string"},
-            "query": {"type": "string"}, "recursive": {"type": "boolean", "default": False},
-            "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 500},
-            "max_entries": {"type": "integer", "minimum": 1, "maximum": 1000}},
-            "required": ["action", "path"]},
-        "annotations": {"readOnlyHint": False, "destructiveHint": True},
-    },
-    {
-        "name": "code_edit",
-        "description": "Edit source text inside the paired browser workspace. Requires Write access for mutations.",
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "path": {"type": "string"},
-            "mode": {"type": "string", "enum": ["replace", "insert", "append", "delete"]},
-            "old_text": {"type": "string"}, "new_text": {"type": "string"},
-            "line": {"type": "integer", "minimum": 1}, "dry_run": {"type": "boolean", "default": False}},
-            "required": ["path", "mode"]},
-        "annotations": {"readOnlyHint": False},
-    },
-    {
-        "name": "computer_observe",
-        "description": "Observe the explicitly shared primary screen through AILinux Helper. Available only when the user enabled screen sharing in the native Helper.",
-        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "computer_screenshot",
-        "description": "Capture the explicitly shared primary screen through AILinux Helper. Available only when the user enabled screen sharing in the native Helper.",
-        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "clipboard_read",
-        "description": "Read the local clipboard through AILinux Helper only when the user explicitly enabled clipboard-read sharing.",
-        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}}},
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "clipboard_write",
-        "description": "Write text to the local clipboard through AILinux Helper only when the user explicitly enabled clipboard-write sharing.",
-        "inputSchema": {"type": "object", "properties": {"workspace_token": {"type": "string"}, "text": {"type": "string", "maxLength": 1048576}}, "required": ["text"]},
-        "annotations": {"readOnlyHint": False},
-    },
-    {
-        "name": "file_edit",
-        "description": (
-            "Create or modify a UTF-8 text file inside the paired browser workspace. "
-            "Available only when the user granted browser Write access. The local runtime creates a persistent fallback backup before mutation."
-        ),
-        "inputSchema": {"type": "object", "properties": {
-            "workspace_token": {"type": "string"}, "path": {"type": "string"},
-            "operation": {"type": "string", "enum": ["create", "write", "append", "replace"]},
-            "content": {"type": "string"}, "old_text": {"type": "string"},
-            "new_text": {"type": "string"}}, "required": ["path", "operation"]},
-        "annotations": {"readOnlyHint": False},
-    },
-    {
-        "name": "directory_create",
-        "description": "Create a directory inside the paired browser workspace when Write access is enabled. The local runtime records a persistent pre-change fallback.",
-        "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "workspace_token": {"type": "string"}}, "required": ["path"]},
-        "annotations": {"readOnlyHint": False},
-    },
-    {
-        "name": "workspace_clear",
-        "description": "Delete every file and subdirectory inside the paired browser workspace while preserving the workspace root itself. Requires Write access and confirm=DELETE_ALL. A full fallback snapshot is created first and the shared backup store is protected.",
-        "inputSchema": {"type": "object", "properties": {"confirm": {"type": "string", "enum": ["DELETE_ALL"]}, "workspace_token": {"type": "string"}}, "required": ["confirm"]},
-        "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
-    },
-]
+# Versioned canonical contract for every workspace-facing MCP projection.
+# Fingerprints deliberately cover only the semantic input schema (plus name),
+# so policy/visibility/annotations may differ without creating false drift.
+WORKSPACE_SCHEMA_VERSION = "1.0.0"
 
-for _workspace_tool_schema in _TOOL_SCHEMAS:
-    _props = _workspace_tool_schema.setdefault("inputSchema", {}).setdefault("properties", {})
-    _props.setdefault("workspace_context", {
-        "type": "string",
-        "description": "Optional non-secret workspace context selector supplied by an authenticated bridge.",
-    })
+def _stable_schema_json(value: Any) -> str:
+    """Serialize schema material deterministically for cross-surface checks."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def workspace_tool_schema_fingerprint(tool: Dict[str, Any]) -> str:
+    """Return the semantic schema fingerprint for one workspace tool."""
+    material = {
+        "name": str(tool.get("name") or ""),
+        "inputSchema": tool.get("inputSchema") or {"type": "object", "properties": {}},
+    }
+    return hashlib.sha256(_stable_schema_json(material).encode("utf-8")).hexdigest()
+
+
+def _workspace_contract_base_tools() -> List[Dict[str, Any]]:
+    """Project workspace tools exclusively from TriForce's canonical registry."""
+    from app.mcp.tool_registry_unified import get_canonical_all_tools
+
+    canonical = {
+        str(tool.get("name") or ""): tool
+        for tool in get_canonical_all_tools()
+        if isinstance(tool, dict) and str(tool.get("name") or "")
+    }
+    missing = [name for name in WORKSPACE_TOOL_NAMES if name not in canonical]
+    if missing:
+        raise RuntimeError(f"canonical workspace tools missing from registry: {missing}")
+    return [deepcopy(canonical[name]) for name in WORKSPACE_TOOL_NAMES]
+
+
+def workspace_contract_fingerprint() -> str:
+    """Return one deterministic fingerprint for the advertised workspace surface."""
+    material = [
+        {
+            "name": str(tool.get("name") or ""),
+            "inputSchema": tool.get("inputSchema") or {"type": "object", "properties": {}},
+        }
+        for tool in sorted(_workspace_contract_base_tools(), key=lambda item: str(item.get("name") or ""))
+    ]
+    return hashlib.sha256(_stable_schema_json(material).encode("utf-8")).hexdigest()
+
+
+def canonical_workspace_tools() -> List[Dict[str, Any]]:
+    """Return decorated copies of the one canonical workspace tool contract."""
+    contract_fp = workspace_contract_fingerprint()
+    tools: List[Dict[str, Any]] = []
+    for tool in _workspace_contract_base_tools():
+        cloned = deepcopy(tool)
+        cloned["x_schema_version"] = WORKSPACE_SCHEMA_VERSION
+        cloned["x_schema_fingerprint"] = workspace_tool_schema_fingerprint(cloned)
+        cloned["x_workspace_contract_fingerprint"] = contract_fp
+        tools.append(cloned)
+    return tools
 
 
 def is_public_guest(request: Request | None) -> bool:
@@ -283,29 +169,6 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
                 continue
             cloned = deepcopy(tool)
-            if name == "file_ops":
-                cloned["description"] = (
-                    "Local workspace file operations: read, write, append, list, find, size, "
-                    "or delete files/directories. delete/remove requires Write access; set "
-                    "recursive=true to remove a non-empty directory. The workspace root itself cannot be deleted."
-                )
-                schema = deepcopy(cloned.get("inputSchema") or {"type": "object"})
-                props = schema.setdefault("properties", {})
-                action = props.setdefault("action", {"type": "string"})
-                action["enum"] = ["read", "write", "append", "list", "find", "size", "delete", "remove"]
-                props["recursive"] = {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "For delete/remove: recursively delete a non-empty directory."
-                }
-                props.setdefault("query", {"type": "string"})
-                props.setdefault("max_results", {"type": "integer", "minimum": 1, "maximum": 500})
-                props.setdefault("max_entries", {"type": "integer", "minimum": 1, "maximum": 1000})
-                schema["required"] = ["action", "path"]
-                cloned["inputSchema"] = schema
-                annotations = deepcopy(cloned.get("annotations") or {})
-                annotations["destructiveHint"] = True
-                cloned["annotations"] = annotations
             execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
             cloned["x_execution"] = execution
             if execution == "triforce_server" and name in PRIVILEGED_TOOLS:
@@ -317,10 +180,9 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             for tool in tools
             if isinstance(tool, dict) and str(tool.get("name") or "")
         }
-    for tool in _TOOL_SCHEMAS:
-        cloned = deepcopy(tool)
+    for cloned in canonical_workspace_tools():
         cloned["x_execution"] = "local_workspace"
-        merged[tool["name"]] = cloned
+        merged[cloned["name"]] = cloned
     return list(merged.values())
 
 

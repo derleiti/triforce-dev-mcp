@@ -258,3 +258,4 @@ data/n8n/crash.journal
 .local-backups/
 android_workspace/.gradle/
 android_workspace/**/build/
+.workspacebackup/
