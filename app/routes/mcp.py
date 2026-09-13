@@ -381,10 +381,13 @@ def _finish_tools_list(
             filtered_tools = merge_workspace_tools(filtered_tools, request)
         except Exception as exc:
             mcp_logger.warning("Public workspace tool merge failed: %s", exc)
+    from ..mcp.tool_registry_audit import advertised_toolset_descriptor
+
     result: Dict[str, Any] = {
         "tools": filtered_tools,
         "version": version,
         "count": len(filtered_tools),
+        "toolset": advertised_toolset_descriptor(filtered_tools),
     }
     if note:
         result["note"] = note

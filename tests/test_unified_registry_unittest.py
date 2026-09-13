@@ -192,3 +192,28 @@ class TestCanonicalRegistryAudit(unittest.TestCase):
         history = registry._policy_defaults("memory_history", "memory", "test")
         self.assertFalse(history["read_only"])
         self.assertEqual(registry._classify_tool("memory_history", history), "write_privileged")
+
+
+    def test_tools_list_exposes_hash_for_exact_visible_contract(self):
+        import asyncio
+        from app.mcp.tool_registry_audit import TOOLSET_VERSION, advertised_toolset_descriptor
+        from app.routes.mcp import handle_tools_list
+
+        payload = asyncio.run(handle_tools_list({"inventory": "all"}))
+        self.assertEqual(payload["toolset"]["version"], TOOLSET_VERSION)
+        self.assertEqual(payload["toolset"]["count"], payload["count"])
+        self.assertEqual(payload["toolset"], advertised_toolset_descriptor(payload["tools"]))
+
+    def test_visible_toolset_hash_is_order_independent_but_contract_sensitive(self):
+        from copy import deepcopy
+        from app.mcp.tool_registry_audit import advertised_toolset_descriptor
+
+        tools = [
+            {"name": "b", "description": "B", "inputSchema": {"type": "object"}},
+            {"name": "a", "description": "A", "inputSchema": {"type": "object"}},
+        ]
+        original = advertised_toolset_descriptor(tools)
+        self.assertEqual(original, advertised_toolset_descriptor(list(reversed(tools))))
+        changed = deepcopy(tools)
+        changed[0]["description"] = "changed"
+        self.assertNotEqual(original["hash"], advertised_toolset_descriptor(changed)["hash"])

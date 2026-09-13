@@ -274,3 +274,20 @@ def inventory_report(*, events: Optional[Iterable[Mapping[str, Any]]] = None) ->
         "toolset": toolset_descriptor(records),
         "tools": records,
     }
+
+
+def advertised_toolset_descriptor(tools: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Hash the exact client-visible MCP contract after auth/share filtering."""
+    contract_keys = (
+        "name", "description", "inputSchema", "outputSchema", "annotations", "x_inventory",
+    )
+    stable = []
+    for tool in tools:
+        stable.append({key: deepcopy(tool.get(key)) for key in contract_keys if key in tool})
+    stable.sort(key=lambda item: str(item.get("name") or ""))
+    payload = json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return {
+        "version": TOOLSET_VERSION,
+        "hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        "count": len(stable),
+    }
