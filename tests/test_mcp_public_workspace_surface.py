@@ -170,6 +170,10 @@ def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
     assert "removeEntry(name,{recursive:true})" in html
     assert "NotSupportedError" in html
     assert "workspace_clear" in html
+    assert "createBrowserBackup" in html
+    assert "recovery store is protected" in html
+    assert "name!=='.workspacebackup'" in html
+    assert "recovery_store_preserved:true" in html
 
 
 def test_mobile_workspace_install_surface_and_pwa_contract():
@@ -198,3 +202,5 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     worker = await workspace_pwa_service_worker()
     assert b"ailinux-helper-v2890" in worker.body
     assert b"caches.match('/v1/mcp?app=2.89.0')" in worker.body
+    assert b'ailinux-helper-v2890' in worker.body
+    assert b'caches.delete' in worker.body
