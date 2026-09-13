@@ -249,6 +249,17 @@ function registerNativeBridge() {
     return shellBackends.status();
   });
 
+  ipcMain.handle('ailinux:shell-backend', (event, name) => {
+    if (!fromTrustedFrame(event)) return { error: 'untrusted frame' };
+    try {
+      const state = shellBackends.setBackend(name);
+      broadcastShellState(state);
+      return state;
+    } catch (error) {
+      return { ...shellBackends.status(), error: String(error.message || error) };
+    }
+  });
+
   ipcMain.handle('ailinux:shell-release', async (event) => {
     if (!fromTrustedFrame(event)) return { error: 'untrusted frame' };
     const state = shellBackends.status();

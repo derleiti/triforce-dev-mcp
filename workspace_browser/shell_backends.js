@@ -18,6 +18,8 @@ const ENV_BACKEND = 'AILINUX_SHELL_BACKEND';
 const ENV_DOCKER_IMAGE = 'AILINUX_SHELL_DOCKER_IMAGE';
 const ENV_DOCKER_NETWORK = 'AILINUX_SHELL_DOCKER_NETWORK';
 
+let selectedBackend = '';
+
 const BACKEND_LABELS = {
   bubblewrap: 'Linux console (bubblewrap sandbox)',
   linux: 'Linux console (native)',
@@ -78,7 +80,27 @@ function backendAvailable(backend) {
   }
 }
 
+function availableBackends() {
+  return Object.keys(BACKEND_LABELS).flatMap((name) => {
+    const [ok, detail] = backendAvailable(name);
+    return ok ? [{ name, label: BACKEND_LABELS[name], sandboxed: SANDBOXED_BACKENDS.has(name), detail }] : [];
+  });
+}
+
+function setBackend(name) {
+  const candidate = String(name || '').trim().toLowerCase();
+  if (!BACKEND_LABELS[candidate]) throw new Error(`unknown backend: ${candidate}`);
+  const [ok, detail] = backendAvailable(candidate);
+  if (!ok) throw new Error(`backend unavailable: ${detail}`);
+  selectedBackend = candidate;
+  return status();
+}
+
 function detectBackend() {
+  if (selectedBackend) {
+    const [ok, reason] = backendAvailable(selectedBackend);
+    return ok ? [selectedBackend, reason] : ['', reason];
+  }
   const pinned = envValue(ENV_BACKEND).toLowerCase();
   if (pinned) {
     if (!BACKEND_LABELS[pinned]) return ['', `unknown backend pinned via ${ENV_BACKEND}: ${pinned}`];
@@ -131,6 +153,7 @@ function status() {
     workspace: release.root,
     releasedAt: release.at,
     detail,
+    backends: availableBackends(),
     releaseDetail: release.granted
       ? (release.root ? 'terminal released by the user' : 'released without a workspace folder')
       : 'terminal not released by the user',
@@ -227,6 +250,6 @@ function runShell({ command, cwd, timeout } = {}) {
 
 module.exports = {
   SANDBOXED_BACKENDS, BACKEND_LABELS, ENV_BACKEND, ENV_DOCKER_IMAGE, ENV_DOCKER_NETWORK,
-  detectBackend, backendAvailable, status, grantRelease, revokeRelease,
+  detectBackend, backendAvailable, availableBackends, setBackend, status, grantRelease, revokeRelease,
   buildPlan, runShell, resolveWithin, posixArgs, which,
 };

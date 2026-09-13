@@ -75,3 +75,34 @@ test('revoking closes the terminal again', () => {
   assert.equal(state.released, false);
   assert.equal(state.workspace, '');
 });
+
+test('available backends can be selected without releasing the terminal', () => {
+  backends.revokeRelease();
+  const available = backends.availableBackends();
+  assert.ok(available.length > 0);
+  for (const item of available) {
+    assert.ok(item.name);
+    assert.ok(item.label);
+    assert.equal(typeof item.sandboxed, 'boolean');
+    assert.ok(item.detail);
+  }
+  const selected = backends.setBackend(available[0].name);
+  assert.equal(selected.backend, available[0].name);
+  assert.equal(selected.released, false);
+  assert.equal(selected.workspace, '');
+});
+
+test('runtime backend selection takes precedence over the environment pin', () => {
+  const available = backends.availableBackends();
+  assert.ok(available.length > 0);
+  const target = available[0].name;
+  process.env[backends.ENV_BACKEND] = 'nonsense';
+  try {
+    const selected = backends.setBackend(target);
+    assert.equal(selected.backend, target);
+    const [detected] = backends.detectBackend();
+    assert.equal(detected, target);
+  } finally {
+    delete process.env[backends.ENV_BACKEND];
+  }
+});

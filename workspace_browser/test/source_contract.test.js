@@ -66,3 +66,12 @@ test('connection details surface as a notification and in the tray', () => {
   assert.match(source, /new Notification\(/);
   assert.match(source, /tray\.setToolTip/);
 });
+
+test('backend selection is exposed through preload and trusted IPC', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /setShellBackend:\s*\(name\)\s*=>\s*ipcRenderer\.invoke\('ailinux:shell-backend', name\)/);
+  assert.match(source, /ipcMain\.handle\('ailinux:shell-backend'/);
+  assert.match(source, /if \(!fromTrustedFrame\(event\)\) return \{ error: 'untrusted frame' \}/);
+  assert.match(source, /shellBackends\.setBackend\(name\)/);
+  assert.match(source, /broadcastShellState\(state\)/);
+});

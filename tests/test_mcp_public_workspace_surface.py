@@ -101,6 +101,9 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
     assert 'AILinux Helper 2.90.2' in html
+    assert 'id="terminalBackend"' in html
+    assert 'native.setShellBackend' in html
+    assert "$('terminalBackend').onchange" in html
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
     assert '/v1/mcp/helper/android' in html

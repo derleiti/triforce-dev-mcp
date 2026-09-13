@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('ailinuxNative', {
   platform: process.platform,
   version: process.env.AILINUX_HELPER_VERSION || '',
   shellStatus: () => ipcRenderer.invoke('ailinux:shell-status'),
+  setShellBackend: (name) => ipcRenderer.invoke('ailinux:shell-backend', name),
   releaseShell: () => ipcRenderer.invoke('ailinux:shell-release'),
   revokeShell: () => ipcRenderer.invoke('ailinux:shell-revoke'),
   runShell: (payload) => ipcRenderer.invoke('ailinux:shell-run', payload),
