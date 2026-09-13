@@ -195,7 +195,7 @@ async def handle_network_diagnostics(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # === 8. LOG VIEWER ===
 async def handle_log_viewer(params: Dict[str, Any]) -> Dict[str, Any]:
-    source = params.get("source", "system")
+    source = params.get("source", "system").lower()
     lines = min(params.get("lines", 50), 200)
     prio = params.get("priority", "")
     unit = params.get("unit", "")

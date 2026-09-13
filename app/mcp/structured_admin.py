@@ -267,7 +267,7 @@ async def handle_network_info(a):
     return {"error":f"Unknown query: {q}"}
 
 async def handle_log_viewer(a):
-    src=a.get("source","system"); n=min(a.get("lines",50),200)
+    src=a.get("source","system").lower(); n=min(a.get("lines",50),200)
     m={"system":["journalctl","--no-pager","-n",str(n)],
        "triforce":["tail","-n",str(n),"/home/zombie/triforce/logs/unified.log"],
        "errors":["tail","-n",str(n),"/home/zombie/triforce/logs/triforce-error-debug/error.log"],
