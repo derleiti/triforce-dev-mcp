@@ -907,3 +907,106 @@ async def test_plain_timeout_error_is_reported_as_uncertain():
     assert structured['code'] == 'WORKSPACE_EXECUTION_UNCERTAIN'
     assert structured['retryable'] is False
     assert structured['execution_started'] is True
+
+
+def _image_result(*, mime='image/png', data_url=None, data=None, **meta):
+    structured = {'mime': mime, **meta}
+    if data_url is not None:
+        structured['data_url'] = data_url
+    if data is not None:
+        structured['data'] = data
+    return {
+        'content': [{'type': 'text', 'text': __import__('json').dumps(structured)}],
+        'structuredContent': structured,
+        'isError': False,
+    }
+
+
+def test_display_result_normalizes_desktop_data_url_to_native_image_content():
+    import base64
+    from app.services.mcp_workspace_bridge import _normalize_display_tool_result
+
+    raw = b'\x89PNG\r\n\x1a\nimage-bytes'
+    encoded = base64.b64encode(raw).decode('ascii')
+    result = _normalize_display_tool_result(
+        'computer_screenshot',
+        _image_result(
+            mime='image/png',
+            data_url='data:image/png;base64,' + encoded,
+            width=800,
+            height=600,
+            source='primary-screen',
+        ),
+    )
+    assert result['content'] == [{'type': 'image', 'data': encoded, 'mimeType': 'image/png'}]
+    assert result['structuredContent']['mimeType'] == 'image/png'
+    assert result['structuredContent']['width'] == 800
+    assert result['structuredContent']['height'] == 600
+    assert result['structuredContent']['source'] == 'primary-screen'
+    assert 'data_url' not in result['structuredContent']
+
+
+def test_display_result_normalizes_raw_base64_and_preserves_jpeg_mime():
+    import base64
+    from app.services.mcp_workspace_bridge import _normalize_display_tool_result
+
+    encoded = base64.b64encode(b'\xff\xd8\xff\xd9').decode('ascii')
+    result = _normalize_display_tool_result(
+        'computer_observe',
+        {
+            'content': [{'type': 'text', 'text': 'legacy'}],
+            'structuredContent': {'mime_type': 'image/jpeg', 'data': encoded, 'source': 'android-screen'},
+            'isError': False,
+        },
+    )
+    assert result['content'][0]['type'] == 'image'
+    assert result['content'][0]['mimeType'] == 'image/jpeg'
+    assert result['content'][0]['data'] == encoded
+    assert result['structuredContent']['source'] == 'android-screen'
+    assert 'data' not in result['structuredContent']
+
+
+def test_display_result_rejects_malformed_base64_without_echoing_payload():
+    from app.services.mcp_workspace_bridge import _normalize_display_tool_result
+
+    result = _normalize_display_tool_result(
+        'computer_screenshot',
+        _image_result(mime='image/png', data='not-valid-base64%%%'),
+    )
+    assert result['isError'] is True
+    assert result['structuredContent']['code'] == 'WORKSPACE_IMAGE_INVALID'
+    assert 'not-valid-base64' not in result['content'][0]['text']
+
+
+def test_display_result_leaves_normal_dict_and_non_display_tools_unchanged():
+    from app.services.mcp_workspace_bridge import _normalize_display_tool_result
+
+    normal = {'content': [{'type': 'text', 'text': '{"ok":true}'}], 'structuredContent': {'ok': True}, 'isError': False}
+    assert _normalize_display_tool_result('computer_screenshot', normal) is normal
+
+    encoded_like = {
+        'content': [{'type': 'text', 'text': 'legacy'}],
+        'structuredContent': {'mime': 'image/png', 'data': 'YWJj'},
+        'isError': False,
+    }
+    assert _normalize_display_tool_result('file_read', encoded_like) is encoded_like
+
+
+@pytest.mark.asyncio
+async def test_display_execution_requires_active_display_grant():
+    from app.services import mcp_workspace_bridge as bridge
+
+    conn = DummyConnection('display-no-grant')
+    conn.share_manifest = {
+        'version': 1,
+        'grants': {
+            'resource://workspace': {'read': True, 'write': True},
+            'resource://display': {'observe': False},
+        },
+    }
+    sessions.bind_workspace('session-display', conn, mode='write', capabilities=['computer_screenshot'])
+    req = DummyRequest('session-display')
+    result = await bridge.call_public_local_tool(req, 'computer_screenshot', {})
+    assert result['isError'] is True
+    assert result['structuredContent']['code'] == 'WORKSPACE_DISPLAY_GRANT_REQUIRED'
+    assert conn.calls == []

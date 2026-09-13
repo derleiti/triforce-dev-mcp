@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -381,6 +383,90 @@ def _tool_error(code: str, text: str, **extra: Any) -> Dict[str, Any]:
     }
 
 
+_MAX_WORKSPACE_IMAGE_BYTES = 32 * 1024 * 1024
+_IMAGE_DATA_URL_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.+)$", re.DOTALL)
+
+
+def _normalize_display_tool_result(name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a verified local screenshot payload into native MCP image content.
+
+    Helpers historically returned screenshot metadata as JSON with either a
+    ``data_url`` (desktop) or raw base64 ``data`` plus an image MIME type.  The
+    bridge keeps that wire contract compatible but strips the encoded image from
+    structured metadata after producing the MCP ``image`` content block.
+    """
+    if name not in DISPLAY_OBSERVE_TOOLS or bool(result.get("isError")):
+        return result
+
+    content = result.get("content")
+    if isinstance(content, list) and any(
+        isinstance(block, dict) and block.get("type") == "image" for block in content
+    ):
+        return result
+
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict):
+        return result
+
+    mime = str(
+        structured.get("mimeType")
+        or structured.get("mime_type")
+        or structured.get("mime")
+        or ""
+    ).strip().lower()
+    encoded = structured.get("data")
+    data_url = structured.get("data_url") or structured.get("dataUrl")
+
+    if isinstance(data_url, str) and data_url:
+        match = _IMAGE_DATA_URL_RE.fullmatch(data_url.strip())
+        if not match:
+            return _tool_error(
+                "WORKSPACE_IMAGE_INVALID",
+                "The local screenshot executor returned an invalid image data URL.",
+                tool=name,
+            )
+        url_mime, encoded = match.group(1).lower(), match.group(2)
+        if mime and mime != url_mime:
+            return _tool_error(
+                "WORKSPACE_IMAGE_INVALID",
+                "The local screenshot executor returned conflicting image MIME types.",
+                tool=name,
+            )
+        mime = url_mime
+
+    if not isinstance(encoded, str) or not encoded or not mime.startswith("image/"):
+        # A display tool may intentionally return non-image status/metadata. Keep
+        # those legacy results untouched rather than guessing at arbitrary data.
+        return result
+
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return _tool_error(
+            "WORKSPACE_IMAGE_INVALID",
+            "The local screenshot executor returned malformed base64 image data.",
+            tool=name,
+        )
+    if not decoded or len(decoded) > _MAX_WORKSPACE_IMAGE_BYTES:
+        return _tool_error(
+            "WORKSPACE_IMAGE_INVALID",
+            "The local screenshot executor returned an empty or oversized image.",
+            tool=name,
+        )
+
+    metadata = {
+        key: value
+        for key, value in structured.items()
+        if key not in {"data", "data_url", "dataUrl"}
+    }
+    metadata["mimeType"] = mime
+    return {
+        "content": [{"type": "image", "data": encoded, "mimeType": mime}],
+        "structuredContent": metadata,
+        "isError": False,
+    }
+
+
 def _workspace_binding_response(binding: Dict[str, Any], *, token: str = "") -> Dict[str, Any]:
     connection = binding.get("connection")
     live = connection is not None and not bool(getattr(connection, "closed", True))
@@ -588,6 +674,14 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             tool=name,
             capabilities=sorted(capabilities),
         )
+    if name in DISPLAY_OBSERVE_TOOLS and not manifest_has_grant(
+        _binding_share_manifest(binding), RESOURCE_DISPLAY, "observe"
+    ):
+        return _tool_error(
+            "WORKSPACE_DISPLAY_GRANT_REQUIRED",
+            "The paired helper has not granted display observation for this workspace.",
+            tool=name,
+        )
 
     connection = binding.get("connection")
     if connection is None or bool(getattr(connection, "closed", True)):
@@ -627,7 +721,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         raise
     if not isinstance(result, dict):
         raise RuntimeError("Browser workspace returned an invalid MCP tool result")
-    return result
+    return _normalize_display_tool_result(name, result)
 
 
 # Backwards-compatible import name. Workspace routing is now shared by public
