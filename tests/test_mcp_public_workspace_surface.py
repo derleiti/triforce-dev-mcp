@@ -100,13 +100,14 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
-    assert 'Desktop Helper' in html
+    assert 'AILinux Helper 2.88.0' in html
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
-    assert '/v1/mcp/workspace/desktop/linux-appimage' in html
-    assert '/v1/mcp/workspace/desktop/linux-deb' in html
-    assert '/v1/mcp/workspace/desktop/windows' in html
-    assert '/v1/mcp/workspace/desktop/macos' in html
+    assert '/v1/mcp/helper/android' in html
+    assert '/v1/mcp/helper/linux-appimage' in html
+    assert '/v1/mcp/helper/linux-deb' in html
+    assert '/v1/mcp/helper/windows' in html
+    assert '/v1/mcp/helper/macos' in html
     assert "mode:workspaceMode==='write'?'readwrite':'read'" in html
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert 'legacyEntries' in html

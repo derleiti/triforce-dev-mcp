@@ -123,7 +123,7 @@ def _workspace_setup_html() -> str:
 <span class="pill">AILinux · TriForce MCP</span><h1>AILinux Workspace</h1>
 <p>The selected folder stays on this device. Selecting a folder does not enumerate or analyze it. Use the native Android helper for a persistent foreground executor, or install this page as a web app on Android/iOS for automatic resume when the OS suspends it.</p>
 <section id="mobilePanel" class="hidden"><h2>Mobile Workspace</h2><p id="mobileText" class="muted"></p><div class="row"><button id="openAppBtn" class="hidden">Open Android helper</button><button id="downloadApkBtn" class="secondary hidden">Download Android APK</button><button id="installPwaBtn" class="secondary hidden">Install web app</button></div><p id="mobileNote" class="muted"></p></section>
-<section id="desktopPanel"><h2>Desktop Helper</h2><p class="muted">Run this workspace in a dedicated tray app with a persistent profile, clean native window and automatic handoff. Available for Linux, Windows and macOS.</p><div class="row"><a href="/v1/mcp/workspace/desktop/linux-appimage"><button>Linux AppImage</button></a><a href="/v1/mcp/workspace/desktop/linux-deb"><button class="secondary">Linux .deb</button></a><a href="/v1/mcp/workspace/desktop/windows"><button class="secondary">Windows</button></a><a href="/v1/mcp/workspace/desktop/macos"><button class="secondary">macOS</button></a></div><p class="muted">Closing the desktop window keeps the helper in the system tray. The app only embeds the trusted <code>api.ailinux.me/v1/mcp</code> workspace surface.</p></section>
+<section id="desktopPanel"><h2>AILinux Helper 2.88.0</h2><p class="muted">One cross-platform helper for persistent local AILinux features. Desktop stays connected in the tray; Android keeps the native foreground executor active after the UI is closed. Connection state and reconnect controls remain visible through the platform notification/tray UI.</p><div class="row"><a href="/v1/mcp/helper/android"><button>Android APK</button></a><a href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a href="/v1/mcp/helper/windows"><button class="secondary">Windows</button></a><a href="/v1/mcp/helper/macos"><button class="secondary">macOS</button></a></div><p class="muted">iPhone/iPad uses the durable lease and resumes the transport when iOS allows the app to run; iOS does not permit an arbitrary MCP WebSocket to run permanently after suspension or force-quit. Legacy Workspace downloads remain compatible.</p></section>
 <section><h2>1 · Share workspace</h2>
 <div class="grid"><label class="choice"><input type="radio" name="mode" value="read_only" checked> Read only</label><label class="choice"><input id="writeMode" type="radio" name="mode" value="write"> Write</label></div>
 <div class="row" style="margin-top:14px"><button id="chooseBtn">Choose local folder</button><button id="openChromeBtn" class="secondary hidden">Open in Chrome</button><span id="folderName" class="muted">No folder shared</span></div>
@@ -434,6 +434,26 @@ async def download_android_workspace_helper() -> Response:
         filename="AILinux-Workspace-2.86.6.apk",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+@public_router.get("/mcp/helper/{platform}", tags=["MCP"], summary="Download current AILinux Helper")
+async def download_ailinux_helper(platform: str):
+    release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/triforce/releases/helper"))
+    artifacts = {
+        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.88.0-android.apk", "application/vnd.android.package-archive"),
+        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.88.0-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.88.0-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.88.0-windows-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.88.0-macos.dmg", "application/x-apple-diskimage"),
+    }
+    spec = artifacts.get(platform)
+    if not spec:
+        raise HTTPException(status_code=404, detail="Unknown AILinux Helper platform")
+    source_name, download_name, media_type = spec
+    artifact = release_root / source_name
+    if not artifact.is_file():
+        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.88.0", "repository": "ailinux-helper"})
+    return FileResponse(artifact, filename=download_name, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
 @public_router.get("/mcp/workspace/desktop/{platform}", tags=["MCP"], summary="Download AILinux desktop workspace helper")
