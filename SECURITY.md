@@ -1,21 +1,24 @@
 # Security Policy
 
-## Supported Versions
+## Supported code
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+Security fixes target the current default branch (`master`) and the latest supported release line. Older snapshots may receive fixes only when explicitly announced.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
+Please do **not** publish exploitable security details in a public issue. Send a private report to **support@ailinux.me** with:
 
-Use this section to tell people how to report a vulnerability.
+- affected repository and revision/version,
+- impact and prerequisites,
+- minimal reproduction steps,
+- relevant logs with secrets removed,
+- suggested mitigation if known.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+AILinux will triage reports based on practical impact and reproducibility. Never include passwords, API keys, private keys, session tokens, wallet secrets, or personal data in a report.
+
+## Security expectations
+
+- Secrets belong in local environment/configuration stores, OS keyrings, or GitHub Secrets; never commit them.
+- Destructive changes require backups and verification.
+- Network services should default to the narrowest required bind address and permissions.
+- Third-party dependency advisories remain subject to the upstream package's support window.

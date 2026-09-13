@@ -1,5 +1,7 @@
 # AILinux Workspace for Android
 
+> **Canonical Helper repository:** `derleiti/ailinux-helper` (current release **2.90.13**). This in-tree Android workspace project is retained for compatibility/history; new release work belongs in AILinux Helper.
+
 Native Android companion for `https://api.ailinux.me/v1/mcp`.
 
 - SAF `ACTION_OPEN_DOCUMENT_TREE` workspace selection with persisted URI permission.

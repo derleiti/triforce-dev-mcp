@@ -1,49 +1,81 @@
-# 🔱 TriForce v4.0.0
+# TriForce AI Platform
 
-Multi-LLM Orchestration System mit Docker Services.
+[![CI](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/ci.yml)
+[![Security](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/security.yml/badge.svg?branch=master)](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/security.yml)
 
-## Schnellstart
+**Current source version: 2.86.4** · Public API: https://api.ailinux.me · Public MCP/Helper entry: https://api.ailinux.me/v1/mcp
+
+TriForce is the AILinux control plane for multi-model inference, canonical MCP capabilities, agent orchestration, workspace/device federation, policy enforcement and service integrations.
+
+## AILinux family
+
+| Component | Current role |
+|---|---|
+| TriForce | Control plane, canonical tool registry, public MCP/API and policy |
+| AICoder 1.2.6 | Coding/DevOps worker and local agent runtime |
+| AILinux Helper 2.90.13 | Cross-platform endpoint/workspace/device companion |
+| AILinux Loom 0.3.0 alpha 2 | Capability fabric, target/grant/lease orchestration |
+
+## MCP and capability model
+
+TriForce exposes one canonical capability pool. Client-visible toolsets are projected from active grants rather than maintained as duplicate tool implementations. Workspace/device capabilities use scoped leases and support read-only/write modes independently of screen, clipboard, service or compute capabilities.
+
+The browser/Helper pairing flow is available at:
+
+```text
+https://api.ailinux.me/v1/mcp
+```
+
+A one-time pairing ID binds the selected workspace to an MCP session; durable/reconnectable lease tokens allow transport churn without silently widening permissions.
+
+## Runtime
+
+Production source deployments use the repository checkout directly. The service itself is environment/deployment specific; do not assume package installation should overwrite a source-mode systemd unit.
+
+Typical source setup:
 
 ```bash
-# Config anpassen (URLs, Passwörter):
-nano ~/project-triforce/config/triforce.env
-
-# Docker Services starten:
-cd ~/project-triforce/docker
-docker compose --profile wordpress --profile searxng up -d
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-## Struktur
-
-```
-project-triforce/
-├── config/triforce.env     # EINE Config für ALLES
-├── docker/                 # Docker Compose
-├── wordpress/html/         # WordPress (Docker Mount)
-├── searxng/                # SearXNG Config
-├── repo/mirror/            # APT Repository + ailinux.gpg
-├── mailserver/             # Mailserver Daten
-├── auth/                   # CLI Agent Tokens
-└── scripts/                # Wrapper & Tools
-```
-
-## URLs (nach .env Konfiguration)
-
-| Service | URL | Port |
-|---------|-----|------|
-| WordPress | https://ailinux.me | 8080 |
-| API | https://api.ailinux.me | 9100 |
-| SearXNG | https://search.ailinux.me | 8888 |
-| Repository | https://repo.ailinux.me | 8081 |
-| Mail | mail.ailinux.me | 25,587,993 |
-
-## CLI Agents
+Development verification:
 
 ```bash
-# Login als root (einmalig)
-sudo bash && claude login && exit
-triforce-sync-auth
-
-# Nutzung mit MCP
-triforce-claude "Dein Prompt"
+.venv/bin/python -m compileall -q app tests
+.venv/bin/python -m pytest -q
 ```
+
+## Major subsystems
+
+- FastAPI API and OpenAI-compatible surfaces
+- multi-provider model routing and availability tracking
+- canonical MCP registry and target-aware execution
+- local/remote workspace federation
+- helper/browser node WebSocket transport
+- agent mesh and specialist routing
+- persistent memory/evidence integrations
+- Docker/service/runtime administration under policy
+- notifications, integrations and deployment tooling
+
+## GitHub Actions status note
+
+As of **13 September 2026**, GitHub currently returns `startup_failure` for repository-authored TriForce workflows before creating any jobs, including a minimal one-step smoke workflow. Workflow YAML parses locally and repository Actions are enabled; other AILinux repositories on the same account run normally. This is tracked as a GitHub/repository Actions startup blocker rather than being hidden by a fake CI workaround.
+
+## Security
+
+Never commit `.env` files, API keys, signing keys, session tokens or runtime databases. Workspace/endpoint sharing must stay capability-scoped. See `SECURITY.md` and `docs/CONTRIBUTING.md`.
+
+## Documentation map
+
+- `docs/README.md` — documentation index
+- `docs/CONTRIBUTING.md` — project-specific contributor notes
+- `CHANGELOG.md` and `docs/CHANGELOG.md` — historical changes
+- `workspace_browser/README.md` — desktop/browser workspace helper history
+- `android_workspace/README.md` — Android workspace helper history
+- `scripts/README.md` — operational scripts
+- `COMMERCIAL-LICENSING.md` — commercial/alternative licensing
+
+## License
+
+TriForce's published open-source code remains under **GNU AGPL v3.0** as stated in `LICENSE`. Those grants remain valid. Copyright in AILinux-authored portions is held by Markus Leitermann / AILinux, which can additionally offer commercial/alternative terms for material it has the right to relicense. See `COMMERCIAL-LICENSING.md`.

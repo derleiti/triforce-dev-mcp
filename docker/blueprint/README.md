@@ -1,5 +1,7 @@
 # TriForce Docker Blueprint
 
+> Current TriForce baseline: **2.86.4**. The blueprint remains a bounded optional runtime surface; Docker access is an operator-granted capability and is not implied by installing TriForce.
+
 Schlanke, paketierbare Docker-Grundstruktur fuer TriForce 2.85 Beta.
 Enthalten: Compose/Config-Geruest, leere Mount-Verzeichnisse und Wartungsskripte.
 Nicht enthalten: produktives WordPress-HTML, Repository-Mirror, Datenbanken,

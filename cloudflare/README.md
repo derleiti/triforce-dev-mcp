@@ -1,5 +1,7 @@
 # TriForce Cloudflare Load Balancer
 
+> Current routing note (TriForce **2.86.4**): Cloudflare configuration is deployment infrastructure, not a source of truth for active backend inventory. Verify origins/health endpoints before deployment; do not copy historical IP examples into production blindly.
+
 ## Übersicht
 
 Cloudflare Worker für intelligentes Load Balancing zwischen TriForce Servern.

@@ -2,21 +2,17 @@
 
 
 <!-- AILINUX_STATUS_START -->
-## Documentation map and production baseline
+## Current documentation baseline
 
-Authoritative project documentation starts with:
-
-- `README.md` for the public overview.
-- `SERVER_DOCUMENTATION.md` for production operations.
-- `AGENTS.md` for agent workspace rules.
-- `docs/MCP_NODE_OPENCLAW.md` for OpenClaw/MCP node operation.
-- `docs/API_DOCUMENTATION.md` and `docs/api/REST.md` for API details.
-- `docs/ARCHITECTURE.md` and `docs/architecture/OVERVIEW.md` for architecture notes.
-- `docs/architecture/episodic-memory.md` for the native persistent Agent Memory Fabric and Claude-Mem provider integration.
-
-Current baseline: production branch `master`; episodic-memory integration baseline `65eec52f`; service `triforce.service`; API `https://api.ailinux.me`; default chat model `ollama/gemma4:12b`.
-
-Generated, cache, backup, vendor, and runtime folders are not authoritative documentation sources.
+- Source version: **2.86.4**
+- Default branch: `master`
+- Public API: `https://api.ailinux.me`
+- Public MCP / Helper entry: `https://api.ailinux.me/v1/mcp`
+- Canonical endpoint helper: **AILinux Helper 2.90.13** (`derleiti/ailinux-helper`)
+- Coding worker: **AICoder 1.2.6**
+- Capability fabric: **AILinux Loom 0.3.0 alpha 2**
+- Canonical capability discovery is grant-projected; old fixed tool-count snapshots are historical, not a stable API contract.
+- Generated/cache/vendor/build directories are not authoritative documentation sources.
 <!-- AILINUX_STATUS_END -->
 
 ## Übersicht

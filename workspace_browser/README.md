@@ -1,5 +1,7 @@
 # AILinux Workspace Desktop Helper
 
+> **Canonical Helper repository:** `derleiti/ailinux-helper` (current release **2.90.13**). This in-tree desktop workspace helper is retained for compatibility/history. New cross-platform Helper releases and branding live in the dedicated repository.
+
 Cross-platform Electron shell for `https://api.ailinux.me/v1/mcp`. It keeps the trusted MCP workspace page in a persistent Chromium profile and remains available from the system tray when the window is closed.
 
 ## Platforms

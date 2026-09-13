@@ -1,5 +1,7 @@
 # Codex MCP Agent Sidecar
 
+> Current TriForce baseline: **2.86.4**. This directory documents the legacy/container-side Codex MCP agent integration. New capability discovery and endpoint execution should follow the canonical MCP/Loom model described in the repository root README. Do not treat historical port examples here as production defaults without checking current deployment configuration.
+
 Autostarting Codex MCP Agent für alle Docker Stacks (wordpress, ailinux-repo, mailserver).
 
 ## Struktur

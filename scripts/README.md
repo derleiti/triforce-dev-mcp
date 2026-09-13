@@ -1,5 +1,7 @@
 # 🔱 TriForce Admin Scripts
 
+> Current safety rule (TriForce **2.86.4**): operational scripts can be destructive. Back up affected configuration/data first, prefer narrowly scoped commands, and verify current paths/services before using historical examples. Do not run broad cleanup against production merely because a script exists here.
+
 Administration und Automatisierung für TriForce Docker Infrastructure.
 
 ## 📁 Struktur

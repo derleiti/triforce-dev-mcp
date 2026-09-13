@@ -1,5 +1,7 @@
 # TriForce TLA+ Specifications
 
+> Specification status: these TLA+ models are formal-design artifacts and do not by themselves certify the current TriForce 2.86.4 runtime. Re-run TLC against the checked-in specs/configs when using them as evidence.
+
 Formal verification specs for TriForce distributed AI system.
 
 ## Files

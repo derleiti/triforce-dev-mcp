@@ -1,5 +1,7 @@
 # 🗂️ AILinux Repository
 
+> Current repository note: this is the AILinux package-repository stack used by the wider AILinux family. Treat mirror size, distributions and signing configuration as deployment-specific; verify current repository configuration before running destructive mirror maintenance.
+
 **Status: Early Alpha**
 
 Lokales APT Repository für AILinux Pakete.
