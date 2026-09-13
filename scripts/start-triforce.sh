@@ -3,8 +3,8 @@
 # this script intentionally never source/eval's user-editable dotenv content.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 BRANCH="${TRIFORCE_BRANCH:-master}"
 UPDATE_INTERVAL="${TRIFORCE_UPDATE_INTERVAL:-300}"
 AUTO_UPDATE="${TRIFORCE_AUTO_UPDATE:-0}"

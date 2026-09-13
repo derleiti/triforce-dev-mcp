@@ -16,11 +16,11 @@ StartLimitBurst=5
 Type=simple
 User=zombie
 Group=zombie
-WorkingDirectory=/home/zombie/triforce
+WorkingDirectory=/home/zombie/workspace/triforce
 Environment="PATH=/home/zombie/.local/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="TRIFORCE_DIR=/home/zombie/triforce"
+Environment="TRIFORCE_DIR=/home/zombie/workspace/triforce"
 Environment="TRIFORCE_AUTO_UPDATE=0"
-EnvironmentFile=-/home/zombie/triforce/config/triforce.env
+EnvironmentFile=-/home/zombie/workspace/triforce/config/triforce.env
 
 # Laufzeit-Workspace. Die App legt darunter selbst Unterordner an
 # (agents, prompts, ...), deshalb muss das ELTERNverzeichnis zombie gehoeren.
@@ -34,7 +34,7 @@ StateDirectoryMode=0750
 RuntimeDirectory=triforce
 RuntimeDirectoryMode=0750
 
-ExecStart=/home/zombie/triforce/scripts/start-triforce.sh
+ExecStart=/home/zombie/workspace/triforce/scripts/start-triforce.sh
 
 ExecStop=/bin/kill -SIGTERM $MAINPID
 TimeoutStopSec=30

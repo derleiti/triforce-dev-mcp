@@ -15,7 +15,7 @@ while [[ $# -gt 0 ]]; do
 Usage: sudo $0 [--mode source|package]
 
   source   Run TriForce from a checkout (default):
-           /home/zombie/triforce -> /etc/systemd/system/triforce.service
+           /home/zombie/workspace/triforce -> /etc/systemd/system/triforce.service
 
   package  Run the repository package bundle:
            /opt/triforce -> /usr/lib/systemd/system/triforce.service
@@ -31,7 +31,7 @@ case "$MODE" in
   *) echo "Invalid mode '$MODE' (expected source or package)" >&2; exit 2 ;;
 esac
 
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 LOCAL_UNIT="/etc/systemd/system/triforce.service"
 PACKAGE_UNIT="/usr/lib/systemd/system/triforce.service"
 BACKUP_DIR="/var/backups/triforce-service"
@@ -56,9 +56,19 @@ if [[ "$MODE" == "source" ]]; then
     if [[ -f "$f" ]]; then source_unit="$f"; break; fi
   done
   [[ -n "$source_unit" ]] || { echo "No source-mode triforce.service found in $TRIFORCE_DIR" >&2; exit 1; }
-  systemd-analyze verify "$source_unit"
+  rendered_unit=$(mktemp)
+  trap 'rm -f "$rendered_unit"' EXIT
+  python3 - "$source_unit" "$rendered_unit" "$TRIFORCE_DIR" <<'PYUNIT'
+from pathlib import Path
+import sys
+src, dst, root = sys.argv[1:]
+text = Path(src).read_text()
+text = text.replace('/home/zombie/workspace/triforce', root.rstrip('/'))
+Path(dst).write_text(text)
+PYUNIT
+  systemd-analyze verify "$rendered_unit"
   backup_local_unit
-  install -m 0644 "$source_unit" "$LOCAL_UNIT"
+  install -m 0644 "$rendered_unit" "$LOCAL_UNIT"
   printf 'source\n' > "$MODE_MARKER"
   chmod 0644 "$MODE_MARKER"
   echo "Installed source-mode override: $LOCAL_UNIT -> $TRIFORCE_DIR"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 INSTALLER="$TRIFORCE_DIR/scripts/install-service.sh"
 EXPECTED_START="$TRIFORCE_DIR/scripts/start-triforce.sh"
 MARKER="/etc/triforce/source-mode.enabled"
