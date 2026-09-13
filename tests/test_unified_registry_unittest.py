@@ -54,9 +54,15 @@ class TestCanonicalMcpSurface(unittest.TestCase):
             "group_chat_status", "flarum_discussion",
             "logs_errors", "logs_stats", "mcp_telemetry", "git_ops",
             "image_search", "ollama_run", "ollama_list",
-            "code_read", "code_patch", "wp_publish_post",
+            "code_patch", "wp_publish_post",
             "n8n_workflow_create",
         }
+        # code_read is an ALIAS of file_read, not a retired tool: the browser
+        # surface (READ_TOOLS) and the shipped Android client 2.90.11
+        # (readCaps) both advertise it, and execute() maps it onto the same
+        # implementation. Dropping it from the registry would break those
+        # clients, so it stays until the tool registry work (P7) retires the
+        # alias deliberately.
         self.assertFalse(names & retired, names & retired)
 
 class TestCanonicalMcpCompatibilityDelegates(unittest.TestCase):

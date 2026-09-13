@@ -6,7 +6,9 @@ def test_helper_device_tools_are_local_workspace_capabilities():
 
 
 def test_helper_device_schemas_are_exposed():
-    schemas = {item["name"]: item for item in bridge._TOOL_SCHEMAS}
+    # Schemas now come from the canonical registry via the workspace contract,
+    # not from a module-level _TOOL_SCHEMAS list.
+    schemas = {item["name"]: item for item in bridge._workspace_contract_base_tools()}
     assert schemas["computer_screenshot"]["annotations"]["readOnlyHint"] is True
     assert schemas["clipboard_read"]["annotations"]["readOnlyHint"] is True
     assert schemas["clipboard_write"]["annotations"]["readOnlyHint"] is False
