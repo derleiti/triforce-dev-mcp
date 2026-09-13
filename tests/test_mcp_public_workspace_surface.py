@@ -113,6 +113,39 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'id="shareCompute"' in html
     assert 'id="shareResources"' in html
     assert 'Choose device capabilities' in html
+    # P5: WebApp binds only to the typed native Helper broker for Docker/service control.
+    assert 'id="dockerPanel"' in html
+    assert 'id="dockerInstallBtn"' in html
+    assert 'id="dockerStartBtn"' in html
+    assert 'id="dockerStopBtn"' in html
+    assert 'id="dockerRestartBtn"' in html
+    assert 'id="dockerTestBtn"' in html
+    assert "nativeHelper.dockerStatus()" in html
+    assert "nativeHelper.dockerService(action)" in html
+    assert "nativeHelper.dockerInstall()" in html
+    assert "nativeHelper.dockerTest()" in html
+    assert 'docker.sock' in html
+    assert 'page never talks to docker.sock or systemd directly' in html
+    assert 'id="shareBuilderPanel"' in html
+    assert 'id="shareVisibility"' in html
+    assert '<option value="private" selected>Private</option>' in html
+    assert '<option value="unlisted">Unlisted</option>' in html
+    assert '<option value="public">Public</option>' in html
+    assert 'id="activeGrants"' in html
+    assert 'id="revokeShareBtn"' in html
+    assert "visibility:$('shareVisibility').value" in html
+    assert 'async function revokeAllShare()' in html
+    assert 'id="serviceControlPanel"' in html
+    assert 'id="serviceList"' in html
+    assert 'id="serviceRefreshBtn"' in html
+    assert "nativeHelper.serviceList()" in html
+    assert "nativeHelper.serviceAction(id,action)" in html
+    assert "for(const action of ['start','stop','restart'])" in html
+    assert 'There is no free-form root shell' in html
+    # The Android download is an ordinary href; stale element IDs must not abort
+    # the page script before P5 button handlers are registered.
+    assert "$('downloadApkBtn')" not in html
+    assert "$('mobileNote')" not in html
     # Compute prefers the hardened helper broker but keeps the native fallback.
     assert "if(nativeHelper&&typeof nativeHelper.runCompute==='function')" in html
     assert 'if(native)return result(await runNativeShell(args))' in html
