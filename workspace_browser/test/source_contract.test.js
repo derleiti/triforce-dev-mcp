@@ -34,5 +34,13 @@ test('external navigation and popups are denied', () => {
 test('closing the window hides it instead of stopping the executor', () => {
   assert.match(source, /event\.preventDefault\(\)/);
   assert.match(source, /window\.hide\(\)/);
-  assert.match(source, /Quit executor/);
+  assert.match(source, /Quit AILinux Workspace/);
+});
+
+
+test('desktop helper identifies platform and keeps a clean tray lifecycle', () => {
+  assert.match(source, /PLATFORM_LABEL/);
+  assert.match(source, /Open AILinux Workspace/);
+  assert.match(source, /Reconnect workspace/);
+  assert.match(source, /Quit AILinux Workspace/);
 });

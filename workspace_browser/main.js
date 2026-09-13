@@ -8,6 +8,7 @@ const ALLOWED_ORIGIN = new URL(START_URL).origin;
 const SESSION_PARTITION = 'persist:ailinux-workspace';
 const PROTOCOL = 'ailinux-workspace';
 const startHidden = process.argv.includes('--background');
+const PLATFORM_LABEL = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux';
 
 let window = null;
 let tray = null;
@@ -90,15 +91,16 @@ async function navigate(target) {
 
 function createTray() {
   tray = new Tray(trayImage());
-  tray.setToolTip(`${APP_NAME} · workspace executor`);
+  tray.setToolTip(`${APP_NAME} · ${PLATFORM_LABEL} workspace helper`);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open workspace', click: showWindow },
-    { label: 'Reconnect page', click: () => window?.webContents.reloadIgnoringCache() },
+    { label: 'Open AILinux Workspace', click: showWindow },
+    { label: `Platform: ${PLATFORM_LABEL}`, enabled: false },
+    { label: 'Reconnect workspace', click: () => window?.webContents.reloadIgnoringCache() },
     { type: 'separator' },
     { label: 'Open MCP URL in default browser', click: () => shell.openExternal(START_URL) },
     { type: 'separator' },
     {
-      label: 'Quit executor',
+      label: 'Quit AILinux Workspace',
       click: () => {
         quitting = true;
         app.quit();
@@ -118,7 +120,8 @@ function createWindow() {
     minWidth: 720,
     minHeight: 560,
     show: false,
-    title: APP_NAME,
+    title: `${APP_NAME} · ${PLATFORM_LABEL}`,
+    backgroundColor: '#0d0f12',
     autoHideMenuBar: true,
     webPreferences: {
       partition: SESSION_PARTITION,
@@ -176,6 +179,10 @@ if (!gotLock) {
     powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
     createWindow();
     createTray();
+  });
+
+  app.on('window-all-closed', (event) => {
+    if (process.platform !== 'darwin' && !quitting) event?.preventDefault?.();
   });
 
   app.on('activate', showWindow);

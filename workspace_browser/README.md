@@ -1,24 +1,29 @@
-# AILinux Workspace Browser
+# AILinux Workspace Desktop Helper
 
-Minimal Chromium/Electron shell for the public TriForce workspace page.
+Cross-platform Electron shell for `https://api.ailinux.me/v1/mcp`. It keeps the trusted MCP workspace page in a persistent Chromium profile and remains available from the system tray when the window is closed.
 
-It is intentionally not a general-purpose browser. It keeps a persistent Chromium profile,
-allows File System Access only for `https://api.ailinux.me`, disables renderer Node.js access,
-keeps background timers unthrottled, prevents application suspension while running, and hides
-to the tray rather than terminating when the window is closed.
+## Platforms
+
+- Linux: AppImage and Debian package
+- Windows: NSIS installer and portable executable
+- macOS: DMG and ZIP
+
+The same `ailinux-workspace://` deep-link contract is used by Android and desktop. Only `https://api.ailinux.me/v1/mcp` is allowed inside the application; popups and external navigation are denied. Node integration is disabled and the renderer is sandboxed.
 
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run check
 npm start
 ```
 
-The custom protocol is `ailinux-workspace://`. A pair code can be passed as:
+## Build
 
-```text
-ailinux-workspace://connect?pair_code=ABCD-1234-EF56
+```bash
+npm run dist:linux
+npm run dist:win
+npm run dist:mac
 ```
 
-Only `https://api.ailinux.me/v1/mcp...` is accepted as a top-level target.
+Cross-platform release builds are produced by `.github/workflows/workspace-desktop-helper.yml`. Closing the window hides it to the tray; use **Quit AILinux Workspace** from the tray to terminate it.

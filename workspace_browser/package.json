@@ -1,14 +1,80 @@
 {
-  "name": "@ailinux/workspace-browser",
-  "version": "0.1.0",
+  "name": "@ailinux/workspace-desktop",
+  "version": "2.86.6",
   "private": true,
-  "description": "Minimal Chromium executor shell for TriForce browser workspaces",
+  "description": "AILinux Workspace desktop helper for Linux, Windows and macOS",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --test test/*.test.js"
+    "check": "node --check main.js && node --test test/*.test.js",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:win": "electron-builder --win nsis portable",
+    "dist:mac": "electron-builder --mac dmg zip"
   },
   "devDependencies": {
-    "electron": "44.3.0"
+    "electron": "44.3.0",
+    "electron-builder": "26.0.12"
+  },
+  "productName": "AILinux Workspace",
+  "build": {
+    "appId": "me.ailinux.workspace.desktop",
+    "productName": "AILinux Workspace",
+    "artifactName": "AILinux-Workspace-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "protocols": [
+      {
+        "name": "AILinux Workspace",
+        "schemes": [
+          "ailinux-workspace"
+        ]
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "synopsis": "AILinux local MCP workspace helper",
+      "maintainer": "AILinux <admin@ailinux.me>"
+    },
+    "deb": {
+      "priority": "optional"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools"
+    }
+  },
+  "author": {
+    "name": "AILinux",
+    "email": "admin@ailinux.me"
+  },
+  "homepage": "https://ailinux.me",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ailinux-me/triforce.git"
   }
 }

@@ -1,0 +1,52 @@
+name: Workspace Desktop Helper
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - "workspace_browser/**"
+      - ".github/workflows/workspace-desktop-helper.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            command: dist:linux
+            label: linux
+          - os: windows-2025
+            command: dist:win
+            label: windows
+          - os: macos-15
+            command: dist:mac
+            label: macos
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: workspace_browser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: workspace_browser/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run ${{ matrix.command }} -- --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ailinux-workspace-${{ matrix.label }}
+          path: |
+            workspace_browser/dist/*.AppImage
+            workspace_browser/dist/*.deb
+            workspace_browser/dist/*.exe
+            workspace_browser/dist/*.dmg
+            workspace_browser/dist/*.zip
+          if-no-files-found: error
