@@ -17,6 +17,7 @@ OUT_DIR="${OUT_DIR:-$ROOT/dist/control-center}"
 WORK="$(mktemp -d /tmp/triforce-control-deb.XXXXXX)"
 PKG="$WORK/pkg"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct)}"
+export SOURCE_DATE_EPOCH
 
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
@@ -38,6 +39,9 @@ env -u TRIFORCE_CONFIG_FILE -u TRIFORCE_PROJECT_ROOT \
   QT_QPA_PLATFORM=offscreen PYTHONPATH="$ROOT" \
   "$VENV/bin/python" "$ROOT/control_center/main.py" --smoke-test
 
+# app/__init__.py lazily imports app.main. Nuitka follows that edge statically,
+# which would compile the entire backend (routes, MCP, services) into the GUI
+# binary. The Control Center never calls create_app()/get_app().
 rm -rf "$NUITKA_OUT"
 env -u TRIFORCE_CONFIG_FILE -u TRIFORCE_PROJECT_ROOT \
   "$VENV/bin/python" -m nuitka \
@@ -45,6 +49,7 @@ env -u TRIFORCE_CONFIG_FILE -u TRIFORCE_PROJECT_ROOT \
   --enable-plugin=pyqt6 \
   --include-qt-plugins=platforms,imageformats,iconengines,wayland-decoration-client,wayland-graphics-integration-client,wayland-shell-integration \
   --include-package=control_center \
+  --nofollow-import-to=app.main \
   --output-dir="$NUITKA_OUT" \
   --output-filename=triforce-control-center \
   "$ROOT/control_center/main.py"
