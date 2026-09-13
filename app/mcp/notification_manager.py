@@ -296,6 +296,11 @@ async def create_event(
     entries.append(entry)
     _save(entries)
     logger.info(f"EVENT | [{priority.upper()}] [{source}] [{event_type}] {title}")
+    try:
+        from ..services.slack_notifications import schedule_slack_notification
+        schedule_slack_notification(entry)
+    except Exception as exc:
+        logger.debug("Slack notification scheduling skipped: %s", exc)
     if not auto_resolve:
         asyncio.create_task(_dispatch_event(entry))
     return entry

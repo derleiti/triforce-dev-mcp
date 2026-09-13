@@ -1,0 +1,39 @@
+version: 1
+channels:
+  - name: announcements
+    purpose: Releases, production changes, security notices, and major AILinux announcements.
+    topic: AILinux announcements. Keep signal high; discussion belongs in threads or project channels.
+    default_posting: restricted
+  - name: general
+    purpose: General AILinux discussion that does not belong to a project channel.
+    topic: General AILinux discussion.
+  - name: dev
+    purpose: Cross-project engineering discussion.
+    topic: Cross-project development, architecture, and integration work.
+  - name: triforce
+    purpose: TriForce backend, API, agents, runtime, and service development.
+    topic: TriForce backend and runtime engineering.
+  - name: aicoder
+    purpose: AICoder runtime, model orchestration, coding agents, and tests.
+    topic: AICoder development and runtime reliability.
+  - name: loom
+    purpose: AILinux Loom, capability fabric, sharing, and federation.
+    topic: AILinux Loom and capability fabric.
+  - name: helper
+    purpose: AILinux Helper desktop, Android, pairing, and remote execution.
+    topic: AILinux Helper apps and integrations.
+  - name: mcp
+    purpose: MCP tools, protocol, pairing, workspaces, capability sharing, and compatibility.
+    topic: MCP protocol, tool pool, pairing, workspaces, and capability fabric.
+  - name: bugs
+    purpose: Reproducible bugs that need cross-project visibility.
+    topic: Bugs only. Start one thread per issue and link the canonical GitHub issue when available.
+  - name: releases
+    purpose: Build, packaging, GitHub Actions, release candidates, and published artifacts.
+    topic: Releases and packaging. Failures and release-ready artifacts only; avoid green-build noise.
+  - name: ops
+    purpose: Infrastructure, Docker, servers, networking, monitoring, and incidents.
+    topic: AILinux operations and infrastructure.
+  - name: random
+    purpose: Non-project conversation and low-signal discussion.
+    topic: Everything that should not pollute engineering channels.

@@ -262,3 +262,5 @@ android_workspace/**/build/
 .workspacebackup/
 
 !tests/test_tool_result_logging.py
+
+!tests/test_slack_notifications.py
