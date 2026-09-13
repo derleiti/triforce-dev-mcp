@@ -1,17 +1,17 @@
 {
-  "image": "mcr.microsoft.com/devcontainers/universal:2",
-  "features": {}
-}
-{
   "name": "TriForce Dev",
-  "dockerComposeFile": "docker-compose.dev.yml",
-  "service": "app",
-  "workspaceFolder": "/workspace",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "features": {},
   "forwardPorts": [9000, 6379],
   "portsAttributes": {
-    "9000": { "label": "TriForce API", "onAutoForward": "notify" },
-    "6379": { "label": "Redis", "onAutoForward": "silent" }
+    "9000": {
+      "label": "TriForce API",
+      "onAutoForward": "notify"
+    },
+    "6379": {
+      "label": "Redis",
+      "onAutoForward": "silent"
+    }
   },
-  "postCreateCommand": "pip install -r requirements.txt && pre-commit install || true",
-  "remoteUser": "vscode"
+  "postCreateCommand": "python -m pip install -r requirements.txt && pre-commit install || true"
 }
