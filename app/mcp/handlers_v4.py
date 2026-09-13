@@ -908,20 +908,43 @@ class HandlerRegistry:
             logger.warning(f"Vault handlers import failed: {e}")
     
     def _register_remote_handlers(self):
-        """Remote: remote_task (stub).
+        """Register direct remote shell execution on the shared SSH transport.
 
-        NOTE: remote_hosts and remote_status are provided as real read-only
-        handlers by app.mcp.structured_admin, registered later in
-        initialize() via _register_structured_admin_handlers (which runs
-        LAST). Earlier this function also registered "not_implemented"
-        stubs for remote_hosts/remote_status; those were redundant because
-        they were always immediately overwritten. Removed 2026-04-27.
+        ``remote_task`` is the compact v5 façade for the already hardened
+        ``task_runner(action=execute_remote)`` implementation. Keeping one SSH
+        transport avoids divergent auth, quoting, timeout and audit behavior.
         """
         try:
-            # remote_task has no structured_admin equivalent yet -> stub stays
             async def handle_remote_task(params):
-                logger.warning("remote_task not yet implemented")
-                return {"status": "not_implemented", "message": "Remote task function pending"}
+                from app.mcp.structured_admin import REMOTE_HOSTS, handle_task_runner
+
+                host = str(params.get("host") or "").strip()
+                command = str(params.get("command") or "").strip()
+                if not host:
+                    return {"error": "host parameter required"}
+                if not command:
+                    return {"error": "command parameter required"}
+
+                host_id = host
+                if host_id not in REMOTE_HOSTS:
+                    host_id = next(
+                        (name for name, info in REMOTE_HOSTS.items() if info.get("ip") == host),
+                        "",
+                    )
+                if not host_id:
+                    return {"error": f"Unknown host: {host}"}
+
+                try:
+                    timeout = max(1, min(int(params.get("timeout", 30)), 120))
+                except (TypeError, ValueError):
+                    return {"error": "timeout must be an integer"}
+
+                return await handle_task_runner({
+                    "action": "execute_remote",
+                    "host": host_id,
+                    "task_data": command,
+                    "timeout": timeout,
+                })
 
             self.register("remote_task", handle_remote_task)
         except Exception as e:
