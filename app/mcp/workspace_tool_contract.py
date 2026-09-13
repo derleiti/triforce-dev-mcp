@@ -48,7 +48,7 @@ WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
                                                                       'selector supplied by an authenticated '
                                                                       'bridge.'}},
                   'required': ['code']},
-  'annotations': {'readOnlyHint': True}},
+  'annotations': {'readOnlyHint': False}},
  {'name': 'workspace_info',
   'description': 'Analyze the paired browser workspace: file counts, size, extensions and sample paths.',
   'inputSchema': {'type': 'object',

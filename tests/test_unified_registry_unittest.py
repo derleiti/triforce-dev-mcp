@@ -97,3 +97,98 @@ class TestCanonicalMcpCompatibilityDelegates(unittest.TestCase):
 
         payload = asyncio.run(handle_initialize({"clientInfo": {"name": "compat-test"}}))
         self.assertEqual(payload["serverInfo"]["version"], VERSION)
+
+class TestCanonicalRegistryAudit(unittest.TestCase):
+    def test_inventory_covers_every_canonical_tool_with_required_p7_fields(self):
+        from app.mcp.tool_registry_audit import build_canonical_inventory
+        from app.mcp.tool_registry_unified import get_canonical_all_tools
+
+        records = build_canonical_inventory(events=[])
+        self.assertEqual(
+            {item["name"] for item in records},
+            {tool["name"] for tool in get_canonical_all_tools()},
+        )
+        required = {
+            "name", "schema", "category", "effect", "privilege", "platforms",
+            "required_capabilities", "duplicate_of", "latency_ms", "error_rate",
+            "usage", "source", "classification",
+        }
+        for item in records:
+            self.assertTrue(required.issubset(item), item["name"])
+            self.assertIn(item["category"].split(".", 1)[0], {
+                "core", "share", "workspace", "compute", "dev", "system",
+                "service", "process", "network", "security", "display", "input",
+                "container", "logs", "package", "hardware", "custom",
+            })
+
+    def test_known_code_read_compatibility_alias_is_explicit(self):
+        from app.mcp.tool_registry_audit import build_canonical_inventory
+
+        by_name = {item["name"]: item for item in build_canonical_inventory(events=[])}
+        self.assertEqual(by_name["code_read"]["classification"], "ALIAS")
+        self.assertEqual(by_name["code_read"]["duplicate_of"], "file_read")
+        self.assertEqual(by_name["file_read"]["classification"], "KEEP")
+
+    def test_metrics_are_measured_not_invented(self):
+        from app.mcp.tool_registry_audit import build_canonical_inventory
+
+        events = [
+            {"tool": "file_read", "latency_ms": 10, "status": "success"},
+            {"tool": "file_read", "latency_ms": 30, "status": "error"},
+        ]
+        by_name = {item["name"]: item for item in build_canonical_inventory(events=events)}
+        self.assertEqual(by_name["file_read"]["usage"], 2)
+        self.assertEqual(by_name["file_read"]["latency_ms"], 20.0)
+        self.assertEqual(by_name["file_read"]["error_rate"], 0.5)
+        self.assertEqual(by_name["status"]["usage"], 0)
+        self.assertIsNone(by_name["status"]["latency_ms"])
+        self.assertIsNone(by_name["status"]["error_rate"])
+
+    def test_toolset_hash_ignores_volatile_metrics(self):
+        from app.mcp.tool_registry_audit import build_canonical_inventory, toolset_descriptor
+
+        empty = build_canonical_inventory(events=[])
+        measured = build_canonical_inventory(events=[
+            {"tool": "file_read", "latency_ms": 12.5, "status": "success"},
+        ])
+        self.assertEqual(toolset_descriptor(empty), toolset_descriptor(measured))
+        self.assertEqual(toolset_descriptor(empty)["count"], len(empty))
+
+
+    def test_explicit_read_only_hints_agree_with_runtime_effect(self):
+        from app.mcp.tool_registry_audit import build_canonical_inventory
+        from app.mcp.tool_registry_unified import get_canonical_all_tools
+
+        audit = {item["name"]: item for item in build_canonical_inventory(events=[])}
+        for tool in get_canonical_all_tools():
+            annotations = tool.get("annotations") or {}
+            if "readOnlyHint" not in annotations:
+                continue
+            expected_read = audit[tool["name"]]["effect"] == "read"
+            self.assertEqual(bool(annotations["readOnlyHint"]), expected_read, tool["name"])
+
+
+    def test_share_mutations_are_never_classified_read_safe(self):
+        from app.mcp.runtime_registry import RuntimeToolRegistry
+        from app.services.share_manifest import CLIPBOARD_WRITE_TOOLS, WORKSPACE_WRITE_TOOLS
+
+        registry = RuntimeToolRegistry()
+        mutations = set(WORKSPACE_WRITE_TOOLS) | set(CLIPBOARD_WRITE_TOOLS) | {"workspace_pair"}
+        for name in sorted(mutations):
+            defaults = registry._policy_defaults(name, "workspace", "test")
+            self.assertFalse(defaults["read_only"], name)
+            self.assertEqual(registry._classify_tool(name, defaults), "write_scoped", name)
+        self.assertTrue(registry._policy_defaults("workspace_clear", "workspace", "test")["destructive"])
+
+    def test_mixed_or_destructive_admin_tools_use_strongest_policy(self):
+        from app.mcp.runtime_registry import RuntimeToolRegistry
+
+        registry = RuntimeToolRegistry()
+        docker = registry._policy_defaults("docker_stack", "admin", "test")
+        self.assertFalse(docker["read_only"])
+        self.assertTrue(docker["destructive"])
+        self.assertEqual(registry._classify_tool("docker_stack", docker), "write_privileged")
+
+        history = registry._policy_defaults("memory_history", "memory", "test")
+        self.assertFalse(history["read_only"])
+        self.assertEqual(registry._classify_tool("memory_history", history), "write_privileged")
