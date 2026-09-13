@@ -9,7 +9,7 @@
 # =====================================================
 set -euo pipefail
 
-REPO="/home/zombie/triforce"
+REPO="/home/zombie/workspace/triforce"
 VENV="$REPO/.venv/bin/python3"
 LOG="$REPO/logs/federation-rotate.log"
 SSH_KEY="$HOME/.ssh/id_ed25519"
@@ -32,10 +32,10 @@ ROTATION_JSON=$("$VENV" 2>/dev/null << 'PYEOF' | grep '^RESULT:' | sed 's/^RESUL
 import sys, os, json, logging, warnings
 logging.disable(logging.CRITICAL)
 warnings.filterwarnings('ignore')
-sys.path.insert(0, '/home/zombie/triforce')
-os.chdir('/home/zombie/triforce')
+sys.path.insert(0, '/home/zombie/workspace/triforce')
+os.chdir('/home/zombie/workspace/triforce')
 from dotenv import load_dotenv
-load_dotenv('/home/zombie/triforce/config/triforce.env')
+load_dotenv('/home/zombie/workspace/triforce/config/triforce.env')
 from app.services.federation_vault import get_federation_vault
 vault = get_federation_vault()
 secret = os.getenv('FEDERATION_SECRET', '')
@@ -90,8 +90,8 @@ print('patched')
 }
 
 ERRORS=0
-deploy_token "zombie@10.10.0.2"     "zombie-pc" "$ZOMBIE_TOKEN" "/home/zombie/triforce/config/triforce.env" || ERRORS=$((ERRORS+1))
-deploy_token "zombie@10.10.0.3" "backup"    "$BACKUP_TOKEN" "/home/zombie/triforce/config/triforce.env" || ERRORS=$((ERRORS+1))
+deploy_token "zombie@10.10.0.2"     "zombie-pc" "$ZOMBIE_TOKEN" "/home/zombie/workspace/triforce/config/triforce.env" || ERRORS=$((ERRORS+1))
+deploy_token "zombie@10.10.0.3" "backup"    "$BACKUP_TOKEN" "/home/zombie/workspace/triforce/config/triforce.env" || ERRORS=$((ERRORS+1))
 
 # Hetzner braucht KEINEN Neustart — Vault lädt dynamisch bei verify_token()
 log "Vault bereits aktuell — kein Hetzner-Restart nötig"

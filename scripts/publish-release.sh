@@ -7,7 +7,7 @@
 
 set -e
 
-TRIFORCE_DIR="/home/zombie/triforce"
+TRIFORCE_DIR="/home/zombie/workspace/triforce"
 cd "$TRIFORCE_DIR"
 
 # Get bump type
@@ -49,4 +49,4 @@ echo "Manifest: https://update.ailinux.me/manifest.json"
 echo "Download: https://update.ailinux.me/releases/$NEW_VERSION.tar.gz"
 echo ""
 echo "Nodes will auto-update within 30 minutes, or run manually:"
-echo "  /home/zombie/triforce/scripts/triforce-update.sh --restart"
+echo "  /home/zombie/workspace/triforce/scripts/triforce-update.sh --restart"

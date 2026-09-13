@@ -22,7 +22,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-VAULT_PATH = Path("/home/zombie/triforce/.vault")
+VAULT_PATH = Path("/home/zombie/workspace/triforce/.vault")
 VAULT_FILE = VAULT_PATH / "api_keys.enc"
 SALT_FILE = VAULT_PATH / "salt"
 

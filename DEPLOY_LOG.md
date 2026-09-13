@@ -3,13 +3,13 @@
 <!-- AILINUX_STATUS_START -->
 ## 2026-06-05 documentation refresh
 
-- Production checkout: `/home/zombie/triforce`.
+- Production checkout: `/home/zombie/workspace/triforce`.
 - Production branch: `nova-nextlevel-20260603`.
 - Published HEAD: `16f43b8a`.
 - Service: `triforce.service`.
 - API health endpoint: `https://api.ailinux.me/health`.
 - Default model route: `ollama/gemma4:12b`.
-- Runtime spool: `/home/zombie/triforce/data/crawler_spool/` is ignored and should exist locally.
+- Runtime spool: `/home/zombie/workspace/triforce/data/crawler_spool/` is ignored and should exist locally.
 
 Validation checklist: clean branch status, successful Python compile, active service, and healthy API response.
 <!-- AILINUX_STATUS_END -->

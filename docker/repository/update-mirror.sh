@@ -46,17 +46,17 @@ SIGN_REPOS_SCRIPT="${REPO_ROOT}/sign-repos.sh"
 INSTALLER_SOURCE="${REPO_ROOT}/add-ailinux-repo.sh"
 MIRROR_MANIFEST_SCRIPT="${REPO_ROOT}/generate-mirror-manifest.py"
 
-if [[ ! -f "$HEAL_PERMS_SCRIPT" && -f "/home/zombie/triforce/scripts/docker/repository/heal-perms.sh" ]]; then
-  HEAL_PERMS_SCRIPT="/home/zombie/triforce/scripts/docker/repository/heal-perms.sh"
+if [[ ! -f "$HEAL_PERMS_SCRIPT" && -f "/home/zombie/workspace/triforce/scripts/docker/repository/heal-perms.sh" ]]; then
+  HEAL_PERMS_SCRIPT="/home/zombie/workspace/triforce/scripts/docker/repository/heal-perms.sh"
 fi
-if [[ ! -f "$COMPRESS_FIX_SCRIPT" && -f "/home/zombie/triforce/scripts/docker/repository/fix-packages-compression.sh" ]]; then
-  COMPRESS_FIX_SCRIPT="/home/zombie/triforce/scripts/docker/repository/fix-packages-compression.sh"
+if [[ ! -f "$COMPRESS_FIX_SCRIPT" && -f "/home/zombie/workspace/triforce/scripts/docker/repository/fix-packages-compression.sh" ]]; then
+  COMPRESS_FIX_SCRIPT="/home/zombie/workspace/triforce/scripts/docker/repository/fix-packages-compression.sh"
 fi
-if [[ ! -f "$PUBLIC_KEY_SCRIPT" && -f "/home/zombie/triforce/scripts/docker/repository/export-public-key.sh" ]]; then
-  PUBLIC_KEY_SCRIPT="/home/zombie/triforce/scripts/docker/repository/export-public-key.sh"
+if [[ ! -f "$PUBLIC_KEY_SCRIPT" && -f "/home/zombie/workspace/triforce/scripts/docker/repository/export-public-key.sh" ]]; then
+  PUBLIC_KEY_SCRIPT="/home/zombie/workspace/triforce/scripts/docker/repository/export-public-key.sh"
 fi
-if [[ ! -f "$SIGN_REPOS_SCRIPT" && -f "/home/zombie/triforce/scripts/docker/repository/sign-repos.sh" ]]; then
-  SIGN_REPOS_SCRIPT="/home/zombie/triforce/scripts/docker/repository/sign-repos.sh"
+if [[ ! -f "$SIGN_REPOS_SCRIPT" && -f "/home/zombie/workspace/triforce/scripts/docker/repository/sign-repos.sh" ]]; then
+  SIGN_REPOS_SCRIPT="/home/zombie/workspace/triforce/scripts/docker/repository/sign-repos.sh"
 fi
 
 # Mirror paths - auto-detected from ./repo/mirror

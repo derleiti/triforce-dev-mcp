@@ -7,6 +7,6 @@ Wants=network-online.target
 Type=oneshot
 User=zombie
 Environment=AUTO_RESTART=true
-ExecStart=/home/zombie/triforce/scripts/triforce-update.sh --restart
+ExecStart=/home/zombie/workspace/triforce/scripts/triforce-update.sh --restart
 StandardOutput=journal
 StandardError=journal

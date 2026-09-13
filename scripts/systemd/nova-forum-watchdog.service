@@ -6,6 +6,6 @@ After=network-online.target
 [Service]
 Type=oneshot
 User=zombie
-WorkingDirectory=/home/zombie/triforce
-ExecStart=/usr/bin/python3 /home/zombie/triforce/scripts/tools/nova_forum_watchdog.py
+WorkingDirectory=/home/zombie/workspace/triforce
+ExecStart=/usr/bin/python3 /home/zombie/workspace/triforce/scripts/tools/nova_forum_watchdog.py
 Nice=5

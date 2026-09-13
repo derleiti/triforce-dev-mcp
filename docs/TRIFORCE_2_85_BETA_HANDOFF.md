@@ -3,19 +3,19 @@
 Stand: 2026-09-09
 Branch: `feat/triforce-2.85-beta1`
 Ausgangscommit: `992c8bac2bba8c873987a62747c31336acdc9c35`
-Arbeits-Worktree: `/home/zombie/triforce-2.85-beta1`
-Produktions-Checkout: `/home/zombie/triforce` (nicht verändert)
+Arbeits-Worktree: `/home/zombie/workspace/triforce-2.85-beta1`
+Produktions-Checkout: `/home/zombie/workspace/triforce` (nicht verändert)
 
 ## Verifizierter Ausgangszustand
 
 - Host: `ailinux`.
 - Produktionsdienst: `triforce.service`, aktiv und enabled, Benutzer/Gruppe `zombie`.
-- Produktions-ExecStart: `/home/zombie/triforce/scripts/start-triforce.sh`.
-- Produktions-Unit lädt `/home/zombie/triforce/config/triforce.env`.
+- Produktions-ExecStart: `/home/zombie/workspace/triforce/scripts/start-triforce.sh`.
+- Produktions-Unit lädt `/home/zombie/workspace/triforce/config/triforce.env`.
 - Alter Startwrapper sourced dieselbe Datei zusätzlich, synchronisierte MCP-OAuth nochmals aus `.env` und startete hart auf `0.0.0.0:9000`.
 - `app/config.py` lud separat `.env` via Pydantic.
 - `/v1/settings` persistierte Änderungen nicht, sondern schrieb nur `os.environ`.
-- TriStar `SettingsController` besitzt zusätzlich JSON/Secrets-Store sowie einen hartcodierten `/home/zombie/triforce/.env`-Writer; Secrets werden dort nur XOR/Base64-obfuskiert.
+- TriStar `SettingsController` besitzt zusätzlich JSON/Secrets-Store sowie einen hartcodierten `/home/zombie/workspace/triforce/.env`-Writer; Secrets werden dort nur XOR/Base64-obfuskiert.
 - Alter Release-Builder kopiert `config/` vollständig und war auf `4.8.0-beta`/`Architecture: all` voreingestellt.
 - `VERSION` stand auf `2.86.0`, `app/config.py` auf `2.81`: Versionsquelle war inkonsistent.
 - Produktions-venv: Python 3.14.4, Pydantic 2.13.4, pydantic-settings 2.15.0, python-dotenv 1.2.2, pytest 9.1.1. PyQt6/Nuitka sind dort nicht installiert.
@@ -60,7 +60,7 @@ Getestet:
 
 ## Schutz der Produktion
 
-Bis zu diesem Stand wurden weder `/home/zombie/triforce`, `/etc/systemd/system/triforce.service` noch der laufende Produktionsdienst verändert oder neu gestartet.
+Bis zu diesem Stand wurden weder `/home/zombie/workspace/triforce`, `/etc/systemd/system/triforce.service` noch der laufende Produktionsdienst verändert oder neu gestartet.
 
 ## Phase 2 – Setup, Admin-Helper und Control Center
 
@@ -116,7 +116,7 @@ Der aktuelle Kandidat wurde nach den letzten Settings-/Setup-Korrekturen vollst�
 
 ### Erledigt und getestet
 
-- Zentrale Konfiguration: Prozess-Environment → `/etc/triforce/triforce.env` → Defaults; keine produktiven Python-Fallbacks mehr auf `/home/zombie/triforce/.env`.
+- Zentrale Konfiguration: Prozess-Environment → `/etc/triforce/triforce.env` → Defaults; keine produktiven Python-Fallbacks mehr auf `/home/zombie/workspace/triforce/.env`.
 - TriStar-, Anthropic- und Flarum-Konfigurationszugriffe auf den zentralen Settings-Store umgestellt.
 - Geschützter Raw-Editor: `config-read` liefert ausschließlich redigierte Secrets; `config-raw-update` stellt unveränderte Masken aus der root-lesbaren Originaldatei wieder her, validiert und schreibt atomar mit `.last-good`.
 - Persistente Setup-Aufträge über den festen transienten systemd-Job `triforce-setup-job`; Abhängigkeiten werden vor Mutationen geprüft.

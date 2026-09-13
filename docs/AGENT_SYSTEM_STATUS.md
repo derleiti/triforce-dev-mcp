@@ -12,7 +12,7 @@
 | Agent Spawner | ✅ Working | `app/services/agent_spawner.py` (Tier 2 workers) |
 | Notification Manager v2 | ✅ Working | `app/mcp/notification_manager.py` (event-driven orchestrator) |
 | Unified Logging | ✅ Active | `logs/unified.log` + stdout |
-| Wrapper Scripts | ✅ Created | `/home/zombie/triforce/triforce/bin/` |
+| Wrapper Scripts | ✅ Created | `/home/zombie/workspace/triforce/triforce/bin/` |
 
 ## Tier 1 — Core Agents (Permanent)
 

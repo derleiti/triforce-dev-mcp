@@ -63,7 +63,7 @@ Die Service-Definitionen findest du in `compose-patches/`.
 
 ```bash
 # Einzelner Stack
-cd /home/zombie/triforce/wordpress
+cd /home/zombie/workspace/triforce/wordpress
 docker compose build codex-agent
 docker compose up -d codex-agent
 

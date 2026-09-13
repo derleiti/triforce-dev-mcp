@@ -19,7 +19,7 @@ ANTHROPIC_VERSION = "2023-06-01"
 def get_api_key() -> str:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        env_path = "/home/zombie/triforce/config/triforce.env"
+        env_path = "/home/zombie/workspace/triforce/config/triforce.env"
         if os.path.exists(env_path):
             with open(env_path) as f:
                 for line in f:

@@ -6,7 +6,7 @@
 # ============================================================================
 
 set -e
-WP_DIR="/home/zombie/triforce/docker/wordpress"
+WP_DIR="/home/zombie/workspace/triforce/docker/wordpress"
 cd "$WP_DIR"
 
 echo "🚀 WORDPRESS OPTIMIZED DEPLOYMENT"
@@ -15,7 +15,7 @@ echo "=================================="
 # Step 1: Create optimization configs
 echo ""
 echo "📦 [1/4] Creating optimization configs..."
-bash /home/zombie/triforce/scripts/optimize-wordpress-extreme.sh
+bash /home/zombie/workspace/triforce/scripts/optimize-wordpress-extreme.sh
 
 # Step 2: Backup current docker-compose.yml
 echo ""

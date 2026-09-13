@@ -16,7 +16,7 @@ async def _run(cmd: str, timeout: int = 30) -> Dict[str, Any]:
     try:
         proc = await asyncio.create_subprocess_shell(
             cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            cwd="/home/zombie/triforce")
+            cwd="/home/zombie/workspace/triforce")
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         return {"success": proc.returncode == 0,
                 "output": stdout.decode("utf-8", errors="replace").strip(),
@@ -123,7 +123,7 @@ async def handle_container_ops(params: Dict[str, Any]) -> Dict[str, Any]:
     return {"error": f"Unknown: {action}", "available": ["list","list_all","status","logs","start","stop","restart","images","stats"]}
 
 # === 5. FILE OPS ===
-_ALLOWED = ["/home/zombie/triforce/","/etc/","/var/log/","/tmp/","/home/zombie/"]
+_ALLOWED = ["/home/zombie/workspace/triforce/","/etc/","/var/log/","/tmp/","/home/zombie/"]
 
 def _ok_path(p):
     return any(os.path.realpath(p).startswith(a) for a in _ALLOWED)
@@ -153,7 +153,7 @@ async def handle_file_ops(params: Dict[str, Any]) -> Dict[str, Any]:
         return await _run(f"stat '{path}'")
     elif action == "search":
         q = params.get("query","")
-        scope = params.get("scope","/home/zombie/triforce/app")
+        scope = params.get("scope","/home/zombie/workspace/triforce/app")
         if not _ok_path(scope): return {"error": "scope restricted"}
         return await _run(f"grep -rn '{q}' '{scope}' --include='*.py' --include='*.json' | head -30")
     elif action == "tree":
@@ -201,7 +201,7 @@ async def handle_log_viewer(params: Dict[str, Any]) -> Dict[str, Any]:
     unit = params.get("unit", "")
     cmds = {
         "system": f"journalctl --no-pager -n {lines}" + (f" -p {prio}" if prio else "") + (f" -u {unit}" if unit else ""),
-        "triforce": f"tail -n {lines} /home/zombie/triforce/logs/unified.log 2>/dev/null",
+        "triforce": f"tail -n {lines} /home/zombie/workspace/triforce/logs/unified.log 2>/dev/null",
         "errors": f"journalctl --no-pager -n {lines} -p err 2>&1",
         "auth": f"journalctl --no-pager -n {lines} -t sshd -t sudo 2>&1",
         "docker": f"journalctl --no-pager -n {lines} -u docker 2>&1",

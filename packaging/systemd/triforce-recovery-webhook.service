@@ -9,7 +9,7 @@ ConditionPathExists=/etc/triforce/recovery-token
 [Service]
 Type=simple
 Environment=TRIFORCE_RECOVERY_PORT=9191
-ExecStart=/usr/bin/python3 /home/zombie/triforce/packaging/triforce-recovery-listener.py
+ExecStart=/usr/bin/python3 /home/zombie/workspace/triforce/packaging/triforce-recovery-listener.py
 Restart=on-failure
 RestartSec=5
 User=root
@@ -19,7 +19,7 @@ UMask=0077
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadOnlyPaths=/home/zombie/triforce /etc/triforce
+ReadOnlyPaths=/home/zombie/workspace/triforce /etc/triforce
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

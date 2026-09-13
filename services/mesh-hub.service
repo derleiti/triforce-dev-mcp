@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 User=zombie
-WorkingDirectory=/home/zombie/triforce
+WorkingDirectory=/home/zombie/workspace/triforce
 ExecStart=/usr/bin/python3 -m app.mcp.mesh_hub --port 44433
 Restart=always
 RestartSec=5

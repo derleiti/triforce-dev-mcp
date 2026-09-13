@@ -1160,8 +1160,8 @@ async def downloads() -> Dict[str, Any]:
     """
     import os as _os, hashlib, mimetypes as _mt, json as _json, datetime as _dt
 
-    WP_DOWNLOADS   = "/home/zombie/triforce/docker/wordpress/html/downloads"
-    DESCRIPTIONS_F = "/home/zombie/triforce/docker/wordpress/html/wp-content/plugins/nova-ai-frontend/config/download_descriptions.json"
+    WP_DOWNLOADS   = "/home/zombie/workspace/triforce/docker/wordpress/html/downloads"
+    DESCRIPTIONS_F = "/home/zombie/workspace/triforce/docker/wordpress/html/wp-content/plugins/nova-ai-frontend/config/download_descriptions.json"
     BASE_URL       = "https://ailinux.me/downloads"
 
     desc_map: Dict[str, str] = {}
@@ -1264,7 +1264,7 @@ async def downloads() -> Dict[str, Any]:
 @router.get("/downloads/descriptions")
 async def downloads_descriptions_get() -> Dict[str, Any]:
     """Get all download descriptions for admin editing."""
-    DESCRIPTIONS_F = "/home/zombie/triforce/docker/wordpress/html/wp-content/plugins/nova-ai-frontend/config/download_descriptions.json"
+    DESCRIPTIONS_F = "/home/zombie/workspace/triforce/docker/wordpress/html/wp-content/plugins/nova-ai-frontend/config/download_descriptions.json"
     import json as _json
     try:
         with open(DESCRIPTIONS_F) as f:
@@ -1275,7 +1275,7 @@ async def downloads_descriptions_get() -> Dict[str, Any]:
 @router.post("/downloads/descriptions")
 async def downloads_descriptions_set(data: Dict[str, Any]) -> Dict[str, Any]:
     """Save download descriptions."""
-    DESCRIPTIONS_F = "/home/zombie/triforce/docker/wordpress/html/wp-content/plugins/nova-ai-frontend/config/download_descriptions.json"
+    DESCRIPTIONS_F = "/home/zombie/workspace/triforce/docker/wordpress/html/wp-content/plugins/nova-ai-frontend/config/download_descriptions.json"
     import json as _json, os as _os
     try:
         descs = data.get("descriptions", {})

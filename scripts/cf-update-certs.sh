@@ -22,8 +22,8 @@ DOMAINS=(
 CRED_FILE="/etc/letsencrypt/cloudflare.ini"
 
 ENV_CANDIDATES=(
-  "/home/zombie/triforce/config/triforce.env"
-  "/home/zombie/triforce/.env"
+  "/home/zombie/workspace/triforce/config/triforce.env"
+  "/home/zombie/workspace/triforce/.env"
   "/home/zombie/scripts/.env"
   "/etc/ailinux.env"
 )
@@ -152,7 +152,7 @@ install_deploy_hook() {
 #!/usr/bin/env bash
 set -u
 
-COMPOSE="/home/zombie/triforce/docker/wordpress/docker-compose.yml"
+COMPOSE="/home/zombie/workspace/triforce/docker/wordpress/docker-compose.yml"
 
 logger -t ailinux-certbot "Let's Encrypt certificate deployed"
 

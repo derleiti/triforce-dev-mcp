@@ -487,7 +487,7 @@ async def browser_workspace_handoff_landing() -> HTMLResponse:
 
 @public_router.get("/mcp/workspace/android.apk", tags=["MCP"], summary="Download AILinux Android workspace helper")
 async def download_android_workspace_helper() -> Response:
-    apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/triforce/releases/helper/AILinux-Helper-latest.apk")
+    apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/workspace/triforce/releases/helper/AILinux-Helper-latest.apk")
     if not os.path.isfile(apk_path):
         return JSONResponse(
             {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.13"},
@@ -504,7 +504,7 @@ async def download_android_workspace_helper() -> Response:
 
 @public_router.get("/mcp/helper/icon.png", tags=["MCP"], summary="AILinux Helper app icon")
 async def ailinux_helper_icon() -> Response:
-    icon = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/triforce/releases/helper")) / "AILinux-Helper-icon.png"
+    icon = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper")) / "AILinux-Helper-icon.png"
     if not icon.is_file():
         raise HTTPException(status_code=404, detail="AILinux Helper icon unavailable")
     return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=86400, immutable"})
@@ -512,7 +512,7 @@ async def ailinux_helper_icon() -> Response:
 
 @public_router.get("/mcp/helper/{platform}", tags=["MCP"], summary="Download current AILinux Helper")
 async def download_ailinux_helper(platform: str):
-    release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/triforce/releases/helper"))
+    release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
     artifacts = {
         "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.13-android.apk", "application/vnd.android.package-archive"),
         "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.13-linux-x86_64.AppImage", "application/vnd.appimage"),
@@ -532,7 +532,7 @@ async def download_ailinux_helper(platform: str):
 
 @public_router.get("/mcp/workspace/desktop/{platform}", tags=["MCP"], summary="Download AILinux desktop workspace helper")
 async def download_desktop_workspace_helper(platform: str) -> Response:
-    root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/triforce/releases/helper")
+    root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/workspace/triforce/releases/helper")
     artifacts = {
         "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.13-linux-x86_64.AppImage", "application/vnd.appimage"),
         "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.13-linux-amd64.deb", "application/vnd.debian.binary-package"),

@@ -5,7 +5,7 @@
 
 | Area | Current value |
 | --- | --- |
-| Production checkout | `/home/zombie/triforce` |
+| Production checkout | `/home/zombie/workspace/triforce` |
 | Branch | `nova-nextlevel-20260603` |
 | Expected HEAD | `16f43b8a` |
 | Service | `triforce.service` |
@@ -18,7 +18,7 @@
 ### Standard health checks
 
 ```bash
-cd /home/zombie/triforce
+cd /home/zombie/workspace/triforce
 git status --short --branch
 git log --oneline -3
 systemctl is-active triforce
@@ -29,7 +29,7 @@ Expected baseline: clean branch status, active service, and a health JSON with `
 
 ### Runtime directories
 
-`data/crawler_spool/` is runtime state and is intentionally ignored. Recreate it if needed with `mkdir -p /home/zombie/triforce/data/crawler_spool`.
+`data/crawler_spool/` is runtime state and is intentionally ignored. Recreate it if needed with `mkdir -p /home/zombie/workspace/triforce/data/crawler_spool`.
 
 ### Model defaults
 
@@ -235,7 +235,7 @@ Client-Outsourcing für rechenintensive Tasks:
 
 **Pfade:**
 ```
-/home/zombie/triforce/          # Backend Root
+/home/zombie/workspace/triforce/          # Backend Root
 ├── app/                        # FastAPI App
 │   ├── routes/                 # API Endpoints
 │   ├── services/               # Business Logic
@@ -300,7 +300,7 @@ git branch --show-current
 git status --short
 ```
 
-`/home/zombie` must not be used as a Git repository. Use `/home/zombie/triforce` for the live server checkout and `/home/zombie/triforce-review` only on the local review machine when present.
+`/home/zombie` must not be used as a Git repository. Use `/home/zombie/workspace/triforce` for the live server checkout and `/home/zombie/workspace/triforce-review` only on the local review machine when present.
 
 ### Route compatibility note
 

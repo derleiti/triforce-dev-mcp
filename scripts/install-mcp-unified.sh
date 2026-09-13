@@ -18,13 +18,13 @@
 # Usage:
 #   curl -sSL https://repo.ailinux.me/.../install-mcp-unified.sh | sudo bash
 #   # oder lokal:
-#   sudo bash /home/zombie/triforce/scripts/install-mcp-unified.sh [--user USER]
+#   sudo bash /home/zombie/workspace/triforce/scripts/install-mcp-unified.sh [--user USER]
 # =============================================================================
 
 set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 ENV_FILE="${TRIFORCE_DIR}/.env"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="/var/log/triforce-install.log"
@@ -563,7 +563,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/home/zombie/triforce/scripts/rotate-proxy-token.sh
+ExecStart=/home/zombie/workspace/triforce/scripts/rotate-proxy-token.sh
 StandardOutput=journal
 StandardError=journal
 SERVICE

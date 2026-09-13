@@ -18,9 +18,9 @@ logger = logging.getLogger("ailinux.mcp.admin")
 PROJECT_ROOT = Path(os.environ.get("TRIFORCE_PROJECT_ROOT", str(Path(__file__).resolve().parents[2])))
 SSH_KEY_PATH = Path(os.environ.get("TRIFORCE_SSH_KEY", str(Path.home() / ".ssh" / "id_ed25519")))
 
-READ_PATHS = ["/home/zombie/triforce", "/etc/systemd/system", "/etc/apache2",
+READ_PATHS = ["/home/zombie/workspace/triforce", "/etc/systemd/system", "/etc/apache2",
               "/etc/nginx", "/etc/wireguard", "/var/log", "/tmp", "/home/zombie/.config"]
-WRITE_PATHS = ["/home/zombie/triforce", "/tmp"]
+WRITE_PATHS = ["/home/zombie/workspace/triforce", "/tmp"]
 SERVICES = ["triforce","apache2","nginx","docker","wireguard","redis-server",
             "ollama","mesh-guardian","federation-node"]
 CONTAINERS = ["wordpress_apache","wordpress_fpm","wordpress_db","wordpress_redis",
@@ -269,10 +269,10 @@ async def handle_network_info(a):
 async def handle_log_viewer(a):
     src=a.get("source","system"); n=min(a.get("lines",50),200)
     m={"system":["journalctl","--no-pager","-n",str(n)],
-       "triforce":["tail","-n",str(n),"/home/zombie/triforce/logs/unified.log"],
-       "errors":["tail","-n",str(n),"/home/zombie/triforce/logs/triforce-error-debug/error.log"],
-       "mcp":["tail","-n",str(n),"/home/zombie/triforce/logs/mcp.log"],
-       "auth":["tail","-n",str(n),"/home/zombie/triforce/logs/auth.log"],
+       "triforce":["tail","-n",str(n),"/home/zombie/workspace/triforce/logs/unified.log"],
+       "errors":["tail","-n",str(n),"/home/zombie/workspace/triforce/logs/triforce-error-debug/error.log"],
+       "mcp":["tail","-n",str(n),"/home/zombie/workspace/triforce/logs/mcp.log"],
+       "auth":["tail","-n",str(n),"/home/zombie/workspace/triforce/logs/auth.log"],
        "apache":["tail","-n",str(n),"/var/log/apache2/error.log"],
        "docker":["docker","logs","--tail",str(n),"triforce-wordpress"],
        "kernel":["dmesg","-T"]}
@@ -352,7 +352,7 @@ REMOTE_COMMANDS = {
     "ollama_list":  ["ollama", "list"],
     "service_list": ["systemctl", "list-units", "--type=service", "--state=running", "--no-pager"],
     "journal":      ["journalctl", "--no-pager", "-n", "30"],
-    "triforce_log": ["tail", "-n", "30", "/home/zombie/triforce/logs/unified.log"],
+    "triforce_log": ["tail", "-n", "30", "/home/zombie/workspace/triforce/logs/unified.log"],
     "reboot":       ["sudo", "reboot"],
     "apt_update":   ["sudo", "apt-get", "update", "-qq"],
     "apt_upgrade":  ["sudo", "apt-get", "upgrade", "-y", "-qq"],
@@ -421,7 +421,7 @@ CUSTOM_BINARIES = {
     "docker_compose": {"path": "/usr/bin/docker", "prefix": ["compose"], "allowed_args": ["ps", "up", "down", "restart", "logs", "pull"]},
     "git":            {"path": "/usr/bin/git", "allowed_args": ["status", "log", "diff", "branch", "pull", "push", "add", "commit", "stash"]},
     "curl":           {"path": "/usr/bin/curl", "allowed_args": ["-s", "-o", "-L", "-I", "-X"]},
-    "pip":            {"path": "/home/zombie/triforce/.venv/bin/pip", "allowed_args": ["list", "install", "show", "freeze"]},
+    "pip":            {"path": "/home/zombie/workspace/triforce/.venv/bin/pip", "allowed_args": ["list", "install", "show", "freeze"]},
     "systemctl":      {"path": "/usr/bin/systemctl", "allowed_args": ["status", "list-units", "list-timers", "is-active", "is-enabled"]},
 }
 
@@ -460,7 +460,7 @@ async def handle_custom_binary(a):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=cwd or "/home/zombie/triforce",
+            cwd=cwd or "/home/zombie/workspace/triforce",
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=120)
         return {
@@ -485,7 +485,7 @@ async def handle_custom_binary(a):
 async def handle_git_ops(a):
     """Structured git operations on the triforce repo."""
     action = a.get("action", "status")
-    repo_path = "/home/zombie/triforce"
+    repo_path = "/home/zombie/workspace/triforce"
 
     if action == "status":
         r = await _run(["git", "-C", repo_path, "status", "--porcelain"])
@@ -678,8 +678,8 @@ async def handle_remote_admin(a):
         n = str(min(a.get("lines", 50), 200))
         log_paths = {
             "syslog": "/var/log/syslog",
-            "triforce": "/home/zombie/triforce/logs/unified.log",
-            "errors": "/home/zombie/triforce/logs/triforce-error-debug/error.log",
+            "triforce": "/home/zombie/workspace/triforce/logs/unified.log",
+            "errors": "/home/zombie/workspace/triforce/logs/triforce-error-debug/error.log",
             "auth": "/var/log/auth.log",
         }
         lp = log_paths.get(log, log)
@@ -727,13 +727,13 @@ COMMAND_TEMPLATES = {
     "docker_networks":    (["docker", "network", "ls"], False, 5, "List Docker networks"),
     "docker_disk":        (["docker", "system", "df"], False, 5, "Docker disk usage"),
     # Storage
-    "disk_usage_detail":  (["du", "-x", "-h", "--max-depth=1", "/home/zombie/triforce"], True, 30, "Disk usage per subdirectory on the TriForce filesystem"),
-    "largest_files":      (["bash", "-c", "find /home/zombie/triforce -type f -size +50M -exec ls -lh {} + 2>/dev/null | sort -k5 -h | tail -10"], False, 10, "Find files >50MB"),
+    "disk_usage_detail":  (["du", "-x", "-h", "--max-depth=1", "/home/zombie/workspace/triforce"], True, 30, "Disk usage per subdirectory on the TriForce filesystem"),
+    "largest_files":      (["bash", "-c", "find /home/zombie/workspace/triforce -type f -size +50M -exec ls -lh {} + 2>/dev/null | sort -k5 -h | tail -10"], False, 10, "Find files >50MB"),
     "inode_usage":        (["df", "-i"], False, 5, "Show inode usage"),
     # Triforce/AILinux
-    "triforce_version":   (["cat", "/home/zombie/triforce/VERSION"], False, 5, "Show TriForce version"),
-    "triforce_git_log":   (["bash", "-c", "cd /home/zombie/triforce && git log --oneline -10"], False, 5, "Last 10 git commits"),
-    "triforce_git_status":(["bash", "-c", "cd /home/zombie/triforce && git status --short"], False, 5, "Git working tree status"),
+    "triforce_version":   (["cat", "/home/zombie/workspace/triforce/VERSION"], False, 5, "Show TriForce version"),
+    "triforce_git_log":   (["bash", "-c", "cd /home/zombie/workspace/triforce && git log --oneline -10"], False, 5, "Last 10 git commits"),
+    "triforce_git_status":(["bash", "-c", "cd /home/zombie/workspace/triforce && git status --short"], False, 5, "Git working tree status"),
     "ollama_models":      (["bash", "-c", "curl -s http://localhost:11434/api/tags | python3 -c \"import sys,json;[print(f'{m[\\\"name\\\"]:30s} {m[\\\"size\\\"]//1024//1024}MB') for m in json.load(sys.stdin).get('models',[])]\""], False, 10, "List Ollama models with sizes"),
     "triforce_config":    (["/opt/triforce/runtime/bin/python", "-c", "from app.settings_store import load_snapshot,redact; import json; print(json.dumps(redact(load_snapshot().values), ensure_ascii=False))"], False, 5, "Show canonical TriForce config (redacted)"),
     # Security
@@ -994,8 +994,8 @@ async def handle_task_runner(a):
             "triforce_logs": {"cmd": "journalctl -u triforce --no-pager -n 50", "elevated": False},
             "wireguard_status": {"cmd": "wg show", "elevated": True},
             "open_ports": {"cmd": "ss -tlnp", "elevated": False},
-            "git_status": {"cmd": "cd /home/zombie/triforce && git status --short", "elevated": False},
-            "git_log": {"cmd": "cd /home/zombie/triforce && git log --oneline -10", "elevated": False},
+            "git_status": {"cmd": "cd /home/zombie/workspace/triforce && git status --short", "elevated": False},
+            "git_log": {"cmd": "cd /home/zombie/workspace/triforce && git log --oneline -10", "elevated": False},
             "apt_upgradable": {"cmd": "apt list --upgradable 2>/dev/null", "elevated": False},
             "ollama_models": {"cmd": "docker exec ollama ollama list 2>/dev/null || ollama list", "elevated": False},
             "public_ip": {"cmd": "curl -s https://api.ipify.org", "elevated": False},
@@ -1781,7 +1781,7 @@ async def handle_mcp_analytics(a):
 
 async def _analytics_from_logfile(a):
     """Parse MCP tool call stats from unified log file."""
-    log_path = "/home/zombie/triforce/logs/unified.log"
+    log_path = "/home/zombie/workspace/triforce/logs/unified.log"
     n_lines = min(a.get("lines", 5000), 20000)
     try:
         r = await _run(["tail", "-n", str(n_lines), log_path], timeout=5)

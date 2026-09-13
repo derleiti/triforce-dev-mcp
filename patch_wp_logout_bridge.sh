@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-cd /home/zombie/triforce
+cd /home/zombie/workspace/triforce
 
 TARGET_REL="docker/wordpress/html/wp-content/plugins/nova-ai-frontend/services/AuthService.php"
-TARGET_HOST="/home/zombie/triforce/${TARGET_REL}"
-BACKUP_DIR="/home/zombie/triforce/patch_backups"
+TARGET_HOST="/home/zombie/workspace/triforce/${TARGET_REL}"
+BACKUP_DIR="/home/zombie/workspace/triforce/patch_backups"
 TARGET_CONTAINER="/var/www/html/wp-content/plugins/nova-ai-frontend/services/AuthService.php"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/AuthService.php.bak.${STAMP}"

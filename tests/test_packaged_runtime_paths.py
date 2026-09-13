@@ -107,7 +107,7 @@ def test_debian_package_preserves_operator_selected_source_service() -> None:
     postinst = (ROOT / "debian" / "postinst").read_text()
     rules = (ROOT / "debian" / "rules").read_text()
     installer = (ROOT / "scripts" / "install-service.sh").read_text()
-    assert "/home/zombie/triforce/scripts/start-triforce.sh" in preinst
+    assert "/home/zombie/workspace/triforce/scripts/start-triforce.sh" in preinst
     assert "source-service.backup" in preinst
     assert "restore-source-service" in preinst
     assert "Restored operator-selected TriForce source service state" in postinst

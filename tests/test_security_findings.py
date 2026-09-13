@@ -2,7 +2,7 @@
 Security-Tests fuer Findings F1 + F2 + zusaetzliche Regressions-Tests.
 
 Ausfuehren:
-    cd /home/zombie/triforce
+    cd /home/zombie/workspace/triforce
     .venv/bin/python -m pytest tests/test_security_findings.py -v
 
 Alle Tests sollen nach dem Fix grueen sein.

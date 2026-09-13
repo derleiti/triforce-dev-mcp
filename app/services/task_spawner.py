@@ -110,7 +110,7 @@ class TaskSpawner:
             AgentType.GEMINI: {
                 # Legacy enum name retained; runtime is Antigravity CLI.
                 "cmd": [
-                    "/home/zombie/triforce/triforce/bin/agy-triforce",
+                    "/home/zombie/workspace/triforce/triforce/bin/agy-triforce",
                     "--output-format", "text", "--print"
                 ],
                 "providers": [],  # agy uses the zombie account/keyring session

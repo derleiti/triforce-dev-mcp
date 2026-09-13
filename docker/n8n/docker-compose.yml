@@ -26,7 +26,7 @@ services:
       - MCP_API_URL=${MCP_API_URL}
       - OLLAMA_HOST=${OLLAMA_HOST}
     volumes:
-      - ${TRIFORCE_DATA_DIR:-/home/zombie/triforce/data}/n8n:/home/node/.n8n
+      - ${TRIFORCE_DATA_DIR:-/home/zombie/workspace/triforce/data}/n8n:/home/node/.n8n
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

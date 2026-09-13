@@ -4,7 +4,7 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-TRIFORCE_DIR=/home/zombie/triforce
+TRIFORCE_DIR=/home/zombie/workspace/triforce
 
 # APT Mirror Update - Alle 2 Stunden
 0 */2 * * * $TRIFORCE_DIR/docker/repository/update-mirror.sh >> $TRIFORCE_DIR/docker/repository/log/cron-run.log 2>&1

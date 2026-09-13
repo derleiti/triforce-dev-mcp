@@ -18,7 +18,7 @@ export XDG_DATA_HOME="/home/zombie/.local/share"
 export XDG_CACHE_HOME="/home/zombie/.cache"
 
 # TriForce Env laden (fuer MCP-Endpoints, sonstige Settings)
-TRIFORCE_ENV="/home/zombie/triforce/config/triforce.env"
+TRIFORCE_ENV="/home/zombie/workspace/triforce/config/triforce.env"
 if [[ -f "$TRIFORCE_ENV" ]]; then
   set -a
   source "$TRIFORCE_ENV"
@@ -48,7 +48,7 @@ unset GOOGLE_GEMINI_KEY
 unset OPENAI_API_KEY
 
 # Arbeitsverzeichnis
-export TRIFORCE_DIR="/home/zombie/triforce"
+export TRIFORCE_DIR="/home/zombie/workspace/triforce"
 cd "$TRIFORCE_DIR" || exit 1
 
 # npm auto-update: einmal pro 24h, non-blocking, im Hintergrund
@@ -72,15 +72,15 @@ _auto_update_npm() {
   (
     touch "$lock"
     npm install -g "${pkg}@latest" --silent --no-fund --no-audit \
-      >> "/home/zombie/triforce/logs/npm-updates.log" 2>&1 \
+      >> "/home/zombie/workspace/triforce/logs/npm-updates.log" 2>&1 \
       && echo "$(date -Iseconds) | updated: ${pkg}" \
-        >> "/home/zombie/triforce/logs/npm-updates.log"
+        >> "/home/zombie/workspace/triforce/logs/npm-updates.log"
   ) &
   disown
 }
 
 # Agent-Logging (1 Zeile pro Start)
-AGENT_LOG="/home/zombie/triforce/logs/agent-starts.log"
+AGENT_LOG="/home/zombie/workspace/triforce/logs/agent-starts.log"
 _log_agent_start() {
   local agent="$1" model="$2"
   echo "$(date -Iseconds) | ${agent} | model=${model:-default} | pid=$$ | args=${*:3}" >> "$AGENT_LOG" 2>/dev/null

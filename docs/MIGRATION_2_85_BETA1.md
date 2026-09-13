@@ -10,7 +10,7 @@ TriForce 2.85 Beta 1 trennt Programmcode, Konfiguration und Laufzeitdaten:
 - Logs: `/var/log/triforce`
 - systemd Unit: `triforce.service`
 
-Produktiver Code soll nicht mehr direkt auf Entwicklerpfade wie `/home/zombie/triforce/.env` zugreifen.
+Produktiver Code soll nicht mehr direkt auf Entwicklerpfade wie `/home/zombie/workspace/triforce/.env` zugreifen.
 
 ## Bestehende Konfiguration übernehmen
 

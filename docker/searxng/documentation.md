@@ -33,7 +33,7 @@
 
 ## Typical Commands
 ```bash
-cd /home/zombie/triforce/docker/searxng
+cd /home/zombie/workspace/triforce/docker/searxng
 docker compose --env-file ../../.env up -d
 docker compose logs -f searxng
 ```

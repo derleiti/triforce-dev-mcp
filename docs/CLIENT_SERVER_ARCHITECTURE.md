@@ -79,7 +79,7 @@ Master Password → PBKDF2 (480.000 Iterations) → Fernet Key → Verschlüssel
 
 ### 2.2 Speicherort
 ```
-/home/zombie/triforce/.vault/
+/home/zombie/workspace/triforce/.vault/
 ├── api_keys.enc    # Verschlüsselte Keys
 └── salt            # PBKDF2 Salt
 ```
@@ -419,7 +419,7 @@ WINDOW_SIZE=1400x900
 
 ### 7.2 CLI Agent (Server-Side)
 ```bash
-# /home/zombie/triforce/agents/.env.claude
+# /home/zombie/workspace/triforce/agents/.env.claude
 
 AILINUX_AGENT_ID=claude-mcp
 AILINUX_AGENT_SECRET=agent_secret_key
@@ -429,7 +429,7 @@ AILINUX_SERVER=http://localhost:9000
 ALLOW_BASH=true
 ALLOW_FILES=true
 ALLOW_LOGS=true
-ALLOWED_PATHS=/home/zombie/triforce,/tmp,/var/log
+ALLOWED_PATHS=/home/zombie/workspace/triforce,/tmp,/var/log
 BLOCKED_PATHS=/etc/shadow,/root/.ssh
 ```
 

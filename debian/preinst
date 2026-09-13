@@ -13,7 +13,7 @@ ENABLED_MARKER="$MIGRATION_DIR/source-service.was-enabled"
 # package-owned file while unpacking the new package. Save it before unpack so
 # postinst can put the operator choice back exactly as it was.
 if [ -f "$LOCAL_UNIT" ]; then
-    if grep -Fq '/home/zombie/triforce/scripts/start-triforce.sh' "$LOCAL_UNIT" 2>/dev/null; then
+    if grep -Fq '/home/zombie/workspace/triforce/scripts/start-triforce.sh' "$LOCAL_UNIT" 2>/dev/null; then
         install -d -m 0750 "$MIGRATION_DIR"
         cp -a "$LOCAL_UNIT" "$BACKUP_UNIT"
         : > "$MARKER"

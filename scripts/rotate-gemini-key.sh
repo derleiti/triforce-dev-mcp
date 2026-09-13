@@ -3,7 +3,7 @@
 # Usage: bash rotate-gemini-key.sh
 set -e
 
-ENV_FILE="/home/zombie/triforce/config/triforce.env"
+ENV_FILE="/home/zombie/workspace/triforce/config/triforce.env"
 
 echo "=== Gemini API Key Rotation ==="
 echo

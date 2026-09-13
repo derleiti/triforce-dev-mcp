@@ -84,26 +84,26 @@ TESTS = [
     ("memory_clear",    {"tags": ["dryrun"]},                  None,           "Clear test memory",                  False),
 
     # CODE
-    ("code_tree",       {"path": "/home/zombie/triforce/app/mcp", "depth": 1},
+    ("code_tree",       {"path": "/home/zombie/workspace/triforce/app/mcp", "depth": 1},
                                                                 None,           "Code directory tree",                True),
-    ("code_read",       {"path": "/home/zombie/triforce/app/mcp/tool_registry_v5.py",
+    ("code_read",       {"path": "/home/zombie/workspace/triforce/app/mcp/tool_registry_v5.py",
                          "start_line": 1, "end_line": 10},     None,           "Read v5 registry (10 lines)",        True),
-    ("code_search",     {"query": "def handle_", "path": "/home/zombie/triforce/app/mcp/dev_tools.py",
+    ("code_search",     {"query": "def handle_", "path": "/home/zombie/workspace/triforce/app/mcp/dev_tools.py",
                          "max_results": 5},                     None,           "Search handler functions",           True),
 
     # DEV TOOLS (neu)
-    ("dev_analyze",     {"path": "/home/zombie/triforce/app/mcp/handlers_v4.py",
+    ("dev_analyze",     {"path": "/home/zombie/workspace/triforce/app/mcp/handlers_v4.py",
                          "checks": ["security", "typos"], "severity": "warning"},
                                                                 "issues_found", "Analyze handlers_v4.py",            True),
-    ("dev_lint",        {"path": "/home/zombie/triforce/app/mcp/dev_tools.py", "language": "python"},
+    ("dev_lint",        {"path": "/home/zombie/workspace/triforce/app/mcp/dev_tools.py", "language": "python"},
                                                                 "total_errors", "Lint dev_tools.py",                 True),
     ("dev_debug",       {"error": "AttributeError: 'NoneType' object has no attribute 'get'\n  File '/app/test.py', line 42"},
                                                                 "root_cause",   "Debug AttributeError",              True),
-    ("dev_summarize",   {"path": "/home/zombie/triforce/app/mcp/dev_tools.py", "depth": "brief"},
+    ("dev_summarize",   {"path": "/home/zombie/workspace/triforce/app/mcp/dev_tools.py", "depth": "brief"},
                                                                 "size_lines",   "Summarize dev_tools.py",            True),
-    ("dev_links",       {"path": "/home/zombie/triforce/app/mcp/dev_tools.py"},
+    ("dev_links",       {"path": "/home/zombie/workspace/triforce/app/mcp/dev_tools.py"},
                                                                 "files_scanned","Link check dev_tools.py",           True),
-    ("dev_refactor",    {"path": "/home/zombie/triforce/app/mcp/handlers_v4.py", "focus": "structure"},
+    ("dev_refactor",    {"path": "/home/zombie/workspace/triforce/app/mcp/handlers_v4.py", "focus": "structure"},
                                                                 "suggestions_count", "Refactor suggestions",        True),
 
     # GIT
@@ -142,13 +142,13 @@ TESTS = [
     ("git_status",      {},                                    "output",         "Alias: git_status→git",             True),
     ("hot_reload_all",  {},                                    None,             "Alias: hot_reload_all→hot_reload",  True),
     # code_probe: pre-existing import bug in tristar_mcp — skipped
-    # ("code_probe",      {"path": "/home/zombie/triforce/app/mcp/dev_tools.py"},
+    # ("code_probe",      {"path": "/home/zombie/workspace/triforce/app/mcp/dev_tools.py"},
     #                                                            None,             "Alias: code_probe→code_read",       True),
 
     # WRITE TESTS (FULL MODE ONLY)
     ("shell",           {"command": "echo 'dryrun-shell-test'"},
                                                                "stdout",         "Shell: echo test",                  False),
-    ("code_edit",       {"path": "/home/zombie/triforce/app/mcp/dev_tools.py", "mode": "replace",
+    ("code_edit",       {"path": "/home/zombie/workspace/triforce/app/mcp/dev_tools.py", "mode": "replace",
                          "old_text": 'async def handle_dev_analyze(params: dict) -> dict:', "new_text": 'async def handle_dev_analyze(params: dict) -> dict:'},      None,             "Code edit (identity replace)",      False),
     ("hot_reload",      {"scope": "all"},                      None,             "Hot reload all modules",            False),
 ]

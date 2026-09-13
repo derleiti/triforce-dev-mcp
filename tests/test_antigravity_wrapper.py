@@ -48,4 +48,4 @@ def test_persisted_builtin_agent_is_migrated_to_antigravity():
 
 def test_antigravity_wrapper_is_explicitly_whitelisted():
     text = (ROOT / "app/services/tristar/agent_controller.py").read_text()
-    assert '"/home/zombie/triforce/triforce/bin/agy-triforce"' in text
+    assert '"/home/zombie/workspace/triforce/triforce/bin/agy-triforce"' in text

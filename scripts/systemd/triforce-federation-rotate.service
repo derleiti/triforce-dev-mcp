@@ -6,7 +6,7 @@ Requires=triforce.service
 [Service]
 Type=oneshot
 User=zombie
-WorkingDirectory=/home/zombie/triforce
-ExecStart=/home/zombie/triforce/scripts/federation-token-rotate.sh
+WorkingDirectory=/home/zombie/workspace/triforce
+ExecStart=/home/zombie/workspace/triforce/scripts/federation-token-rotate.sh
 StandardOutput=journal
 StandardError=journal

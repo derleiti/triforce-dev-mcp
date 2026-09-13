@@ -11,7 +11,7 @@ NODE="${1:-local}"
 MCP_EXTERNAL="https://api.ailinux.me/v1/mcp"
 MCP_LOCAL="$MCP_EXTERNAL"
 MCP_INTERNAL="$MCP_EXTERNAL"
-TRIFORCE_ENV="/home/zombie/triforce/config/triforce.env"
+TRIFORCE_ENV="/home/zombie/workspace/triforce/config/triforce.env"
 if [[ -f "$TRIFORCE_ENV" ]]; then
   set -a
   source "$TRIFORCE_ENV"
@@ -57,7 +57,7 @@ echo ""
 
 # --- 1. Antigravity CLI ---
 echo "[1/3] Antigravity CLI..."
-AGY_WRAPPER="/home/zombie/triforce/triforce/bin/agy-triforce"
+AGY_WRAPPER="/home/zombie/workspace/triforce/triforce/bin/agy-triforce"
 if [[ -x "$AGY_WRAPPER" ]] && command -v agy &>/dev/null; then
   # The wrapper atomically merges the authenticated ailinux remote server into
   # ~/.gemini/config/mcp_config.json without clobbering other MCP entries.

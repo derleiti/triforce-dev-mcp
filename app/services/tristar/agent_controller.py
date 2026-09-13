@@ -39,16 +39,16 @@ logger = logging.getLogger("ailinux.tristar.agent_controller")
 # This prevents arbitrary command execution via agents.json manipulation
 ALLOWED_COMMAND_EXECUTABLES = frozenset([
     # TriForce wrapper scripts (primary - set correct HOME/env)
-    "/home/zombie/triforce/triforce/bin/claude-triforce",
-    "/home/zombie/triforce/triforce/bin/codex-triforce",
-    "/home/zombie/triforce/triforce/bin/agy-triforce",
-    "/home/zombie/triforce/triforce/bin/gemini-triforce",
-    "/home/zombie/triforce/triforce/bin/opencode-triforce",
+    "/home/zombie/workspace/triforce/triforce/bin/claude-triforce",
+    "/home/zombie/workspace/triforce/triforce/bin/codex-triforce",
+    "/home/zombie/workspace/triforce/triforce/bin/agy-triforce",
+    "/home/zombie/workspace/triforce/triforce/bin/gemini-triforce",
+    "/home/zombie/workspace/triforce/triforce/bin/opencode-triforce",
     # Legacy paths (backwards compatibility)
-    "/home/zombie/triforce/bin/claude-triforce",
-    "/home/zombie/triforce/bin/codex-triforce",
-    "/home/zombie/triforce/bin/gemini-triforce",
-    "/home/zombie/triforce/bin/opencode-triforce",
+    "/home/zombie/workspace/triforce/bin/claude-triforce",
+    "/home/zombie/workspace/triforce/bin/codex-triforce",
+    "/home/zombie/workspace/triforce/bin/gemini-triforce",
+    "/home/zombie/workspace/triforce/bin/opencode-triforce",
     # Direct CLI binaries (fallback for call_agent)
     "/usr/local/bin/claude",
     "/usr/local/bin/codex",
@@ -125,7 +125,7 @@ class AgentConfig:
     agent_type: AgentType
     name: str
     command: List[str]
-    working_dir: str = "/home/zombie/triforce"
+    working_dir: str = "/home/zombie/workspace/triforce"
     env: Dict[str, str] = field(default_factory=dict)
 
     # System Prompt
@@ -188,7 +188,7 @@ class AgentInstance:
 
 # Vordefinierte Agent-Konfigurationen
 # Nutze TriForce Wrapper Scripts für korrektes HOME/Environment
-TRIFORCE_BIN = "/home/zombie/triforce/triforce/bin"
+TRIFORCE_BIN = "/home/zombie/workspace/triforce/triforce/bin"
 CLI_BIN = "/root/.npm-global/bin"  # Fallback für call_agent
 
 # ============================================================================
@@ -383,7 +383,7 @@ BUILTIN_AICODER_PROFILE_DEFAULTS: Dict[str, Dict[str, Any]] = {
 def _ensure_builtin_aicoder_profiles(
     profile_root: str | Path = "/var/tristar/agents/profiles",
     *,
-    workspace: str = "/home/zombie/triforce",
+    workspace: str = "/home/zombie/workspace/triforce",
 ) -> list[str]:
     """Create missing built-in AICoder profiles without overwriting operator choices."""
     root = Path(profile_root)
@@ -564,7 +564,7 @@ class AgentController:
                         agent_type=AgentType(agent_data["agent_type"]),
                         name=stored_name,
                         command=command,
-                        working_dir=agent_data.get("working_dir", "/home/zombie/triforce"),
+                        working_dir=agent_data.get("working_dir", "/home/zombie/workspace/triforce"),
                         env=agent_data.get("env", {}),
                         system_prompt=stored_prompt,
                         system_prompt_source=stored_source,
@@ -610,7 +610,7 @@ class AgentController:
         2. triforce/prompts/{agent_type}.txt (spezifischer Prompt)
         3. TriForce API Fallback
         """
-        prompts_dir = Path("/home/zombie/triforce/triforce/prompts")
+        prompts_dir = Path("/home/zombie/workspace/triforce/triforce/prompts")
 
         # 1. Universeller CLI-Agent System-Prompt
         universal_prompt = prompts_dir / "cli-agent-system.txt"
@@ -961,7 +961,7 @@ class AgentController:
             try:
                 instance.status = AgentStatus.RUNNING
                 from .idle_worker import lease_coordinator
-                workspace = str(instance.config.working_dir or "/home/zombie/triforce")
+                workspace = str(instance.config.working_dir or "/home/zombie/workspace/triforce")
                 async with lease_coordinator.foreground(str(Path(workspace).resolve())):
                     async with self._aicoder_run_lock(agent_id):
                         result = await run_profile(

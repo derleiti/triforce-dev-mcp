@@ -14,7 +14,7 @@ if [[ $EUID -eq 0 ]]; then
    exit 1
 fi
 
-BASE_DIR="/home/zombie/triforce"
+BASE_DIR="/home/zombie/workspace/triforce"
 TRIFORCE_DIR="$BASE_DIR/triforce"
 
 # ============================================================================
@@ -71,7 +71,7 @@ cat > "$TRIFORCE_DIR/bin/claude-triforce" << 'EOF'
 #!/bin/bash
 set -euo pipefail
 
-TRIFORCE_ROOT="/home/zombie/triforce/triforce"
+TRIFORCE_ROOT="/home/zombie/workspace/triforce/triforce"
 BINARY="$HOME/.npm-global/bin/claude"
 
 # Fallback
@@ -111,7 +111,7 @@ cat > "$TRIFORCE_DIR/bin/codex-triforce" << 'EOF'
 #!/bin/bash
 set -euo pipefail
 
-TRIFORCE_ROOT="/home/zombie/triforce/triforce"
+TRIFORCE_ROOT="/home/zombie/workspace/triforce/triforce"
 BINARY="$HOME/.npm-global/bin/codex"
 
 [[ ! -x "$BINARY" ]] && BINARY=$(command -v codex 2>/dev/null || echo "$BINARY")
@@ -148,7 +148,7 @@ cat > "$TRIFORCE_DIR/bin/gemini-triforce" << 'EOF'
 #!/bin/bash
 set -euo pipefail
 
-TRIFORCE_ROOT="/home/zombie/triforce/triforce"
+TRIFORCE_ROOT="/home/zombie/workspace/triforce/triforce"
 BINARY="$HOME/.npm-global/bin/gemini"
 
 [[ ! -x "$BINARY" ]] && BINARY=$(command -v gemini 2>/dev/null || echo "$BINARY")

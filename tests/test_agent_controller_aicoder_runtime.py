@@ -152,7 +152,7 @@ def test_native_cli_profile_auto_routes_simple_task_direct_without_aicoder(tmp_p
     controller._initialized = True
     controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
         agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
-        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        command=["/home/zombie/workspace/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
         working_dir=str(tmp_path),
     ))
 
@@ -184,7 +184,7 @@ def test_gemini_direct_print_timeout_is_not_reported_as_success(tmp_path):
     controller._initialized = True
     controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
         agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
-        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        command=["/home/zombie/workspace/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
         working_dir=str(tmp_path),
     ))
 
@@ -213,7 +213,7 @@ def test_gemini_direct_quota_preflight_fails_fast_without_starting_provider(tmp_
     controller._initialized = True
     controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
         agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
-        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        command=["/home/zombie/workspace/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
         working_dir=str(tmp_path),
     ))
 
@@ -255,7 +255,7 @@ def test_native_cli_profile_explicit_team_routes_aicoder_team_on(tmp_path):
     controller._initialized = True
     controller.agents["gemini-mcp"] = AgentInstance(config=AgentConfig(
         agent_id="gemini-mcp", agent_type=AgentType.GEMINI, name="Gemini",
-        command=["/home/zombie/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
+        command=["/home/zombie/workspace/triforce/triforce/bin/agy-triforce"], runtime="aicoder",
         working_dir=str(tmp_path),
     ))
     seen = {}

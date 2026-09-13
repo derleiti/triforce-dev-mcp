@@ -12,8 +12,8 @@ RSYNC_INTERVAL=30
 PID_FILE="/var/run/triforce-rammode.pid"
 STREAMER_PID_FILE="/var/run/triforce-streamer.pid"
 LOG_FILE="/var/log/triforce-rammode.log"
-PYTHON_VENV="/home/zombie/triforce/.venv"
-APP_DIR="/home/zombie/triforce"
+PYTHON_VENV="/home/zombie/workspace/triforce/.venv"
+APP_DIR="/home/zombie/workspace/triforce"
 UVICORN_PID_FILE="/var/run/triforce-uvicorn.pid"
 
 # Colors for output

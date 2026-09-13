@@ -12,8 +12,8 @@ def test_plan_contains_names_not_values(tmp_path):
     source.write_text(
         "OPENROUTER_API_KEY=" + secret + "\n"
         "FEDERATION_SECRET=federation-secret\n"
-        "INSTALL_DIR=/home/zombie/triforce\n"
-        "WP_HTML_PATH=/home/zombie/triforce/docker/wordpress/html\n"
+        "INSTALL_DIR=/home/zombie/workspace/triforce\n"
+        "WP_HTML_PATH=/home/zombie/workspace/triforce/docker/wordpress/html\n"
         "UNKNOWN_OLD_FLAG=yes\n"
     )
     plan = build_plan(source)
@@ -33,7 +33,7 @@ def test_import_preserves_package_values_and_forces_proxy_compat(tmp_path):
     source.write_text(
         "OPENROUTER_API_KEY=legacy-key\n"
         "FEDERATION_SECRET=legacy-fed\n"
-        "INSTALL_DIR=/home/zombie/triforce\n"
+        "INSTALL_DIR=/home/zombie/workspace/triforce\n"
         "TRIFORCE_API_PORT=9999\n"
         "TRIFORCE_BIND_HOST=127.0.0.1\n"
     )

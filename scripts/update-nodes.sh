@@ -4,9 +4,9 @@
 
 set -e
 
-NODES=("zombie@10.10.0.2:/home/zombie/triforce" "zombie@10.10.0.3:/home/zombie/triforce")
-SOURCE="/home/zombie/triforce"
-LOG="/home/zombie/triforce/logs/node-updates.log"
+NODES=("zombie@10.10.0.2:/home/zombie/workspace/triforce" "zombie@10.10.0.3:/home/zombie/workspace/triforce")
+SOURCE="/home/zombie/workspace/triforce"
+LOG="/home/zombie/workspace/triforce/logs/node-updates.log"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"

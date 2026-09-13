@@ -213,7 +213,7 @@ python -m ailinux_sdk.client "Hallo Nova!"
 ## 📁 Dateistruktur nach Integration
 
 ```
-/home/zombie/triforce/
+/home/zombie/workspace/triforce/
 ├── app/
 │   ├── services/
 │   │   ├── api_vault.py         # NEU: Verschlüsselter Key-Tresor
@@ -251,7 +251,7 @@ python -m ailinux_sdk.client "Hallo Nova!"
 
 ```bash
 # Alle Services auf einmal kopieren
-cd /home/zombie/triforce
+cd /home/zombie/workspace/triforce
 
 # 1. API Vault
 cp docs/implementation/api_vault.py app/services/

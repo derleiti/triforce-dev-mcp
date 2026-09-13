@@ -160,7 +160,7 @@ async def handle_node_update(args: Dict[str, Any]) -> Dict[str, Any]:
     import subprocess
     try:
         result = subprocess.run(
-            ["/home/zombie/triforce/scripts/update-nodes.sh"],
+            ["/home/zombie/workspace/triforce/scripts/update-nodes.sh"],
             capture_output=True,
             text=True,
             timeout=120

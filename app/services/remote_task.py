@@ -243,7 +243,7 @@ Aufgabe: {description}"""
                 "claude-mcp": ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write"],
                 "codex-mcp": ["codex", "exec", "--full-auto", "-m", "o4-mini", prompt],
                 "gemini-mcp": [
-                    "/home/zombie/triforce/triforce/bin/agy-triforce",
+                    "/home/zombie/workspace/triforce/triforce/bin/agy-triforce",
                     "--output-format", "text", "--print", prompt
                 ],
                 "opencode-mcp": ["opencode", "run", prompt]

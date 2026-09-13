@@ -160,8 +160,8 @@ Patch:
 Befund:
 
 - README/AGENTS nennen Produktion auf Port `9000`, Dev teils `9100`.
-- `scripts/systemd/triforce.service` nutzt `/home/zombie/triforce` und `scripts/start-backend.sh`.
-- `config/triforce.service` zeigt auf `/home/zombie/triforce/backend`, `config/.env` und Port `${TRIFORCE_API_PORT:-9100}`.
+- `scripts/systemd/triforce.service` nutzt `/home/zombie/workspace/triforce` und `scripts/start-backend.sh`.
+- `config/triforce.service` zeigt auf `/home/zombie/workspace/triforce/backend`, `config/.env` und Port `${TRIFORCE_API_PORT:-9100}`.
 - `debian/triforce-backend.service` zeigt auf `/opt/triforce`, `--workers 2`.
 - `scripts/start-backend.sh` startet auf `0.0.0.0:9000`, berechnet Worker aus CPU-Kernen und startet optional Redis/Ollama.
 - `start-triforce.sh` startet ebenfalls Uvicorn auf Port `9000`, aber mit anderer Update-/Env-Logik.

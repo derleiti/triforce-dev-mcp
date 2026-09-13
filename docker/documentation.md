@@ -24,7 +24,7 @@ This folder contains the multi-stack Docker setup for TriForce.
 
 ## Typical Commands
 ```bash
-cd /home/zombie/triforce/docker
+cd /home/zombie/workspace/triforce/docker
 docker compose --profile wordpress --profile searxng --profile repo up -d
 docker compose ps
 docker compose logs -f

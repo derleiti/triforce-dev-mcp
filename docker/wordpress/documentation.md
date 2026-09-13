@@ -41,7 +41,7 @@
 
 ## Typical Commands
 ```bash
-cd /home/zombie/triforce/docker/wordpress
+cd /home/zombie/workspace/triforce/docker/wordpress
 docker compose --env-file ../../.env up -d
 docker compose ps
 docker compose logs -f apache wordpress_fpm

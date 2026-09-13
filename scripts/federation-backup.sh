@@ -49,7 +49,7 @@ do_sync() {
 }
 
 # ── triforce backend (all nodes) ────────────────────────────
-do_sync "triforce" "/home/zombie/triforce/" "${BACKUP_BASE}/triforce/" \
+do_sync "triforce" "/home/zombie/workspace/triforce/" "${BACKUP_BASE}/triforce/" \
     --exclude='docker/' --exclude='html/' --exclude='logs/'
 
 # ── home dir (configs, ssh, scripts) ────────────────────────
@@ -57,17 +57,17 @@ do_sync "home" "/home/zombie/" "${BACKUP_BASE}/home/" \
     --exclude='triforce/' --exclude='*.iso' --exclude='*.img'
 
 # ── Docker volumes (auto-detect) ────────────────────────────
-if [ -d "/home/zombie/triforce/docker" ]; then
+if [ -d "/home/zombie/workspace/triforce/docker" ]; then
     # WordPress HTML
-    do_sync "wp-html" "/home/zombie/triforce/docker/wordpress/html/" "${BACKUP_BASE}/wp-html/" \
+    do_sync "wp-html" "/home/zombie/workspace/triforce/docker/wordpress/html/" "${BACKUP_BASE}/wp-html/" \
         --exclude='wp-content/cache/' --exclude='wp-content/wp-cloudflare-super-page-cache/' \
         --exclude='wp-content/uploads/wpo/' --exclude='wp-content/debug.log'
 
     # Apache vhosts
-    do_sync "apache-vhosts" "/home/zombie/triforce/docker/wordpress/apache/" "${BACKUP_BASE}/apache/"
+    do_sync "apache-vhosts" "/home/zombie/workspace/triforce/docker/wordpress/apache/" "${BACKUP_BASE}/apache/"
 
     # Docker compose files
-    for dc in /home/zombie/triforce/docker/*/docker-compose.yml; do
+    for dc in /home/zombie/workspace/triforce/docker/*/docker-compose.yml; do
         [ -f "$dc" ] || continue
         dcdir=$(dirname "$dc")
         dcname=$(basename "$dcdir")
@@ -77,7 +77,7 @@ if [ -d "/home/zombie/triforce/docker" ]; then
 fi
 
 # ── ai-coder (if exists) ────────────────────────────────────
-do_sync "ai-coder" "/home/zombie/ai-coder/" "${BACKUP_BASE}/ai-coder/"
+do_sync "ai-coder" "/home/zombie/workspace/ai-coder/" "${BACKUP_BASE}/ai-coder/"
 
 # ── DB dumps (WordPress MariaDB) ────────────────────────────
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -q wordpress_db; then

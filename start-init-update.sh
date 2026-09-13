@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REMOTE="/home/zombie/triforce/app/routes/mcp_remote.py"
+REMOTE="/home/zombie/workspace/triforce/app/routes/mcp_remote.py"
 
 # Backup
 cp "$REMOTE" "${REMOTE}.bak_patch_$(date +%Y%m%d_%H%M%S)"

@@ -137,7 +137,7 @@ FEDERATION_NODES = {
 
 ```bash
 # From main hub
-scp zombie@10.10.0.1:/home/zombie/triforce/config/federation_psk.key config/
+scp zombie@10.10.0.1:/home/zombie/workspace/triforce/config/federation_psk.key config/
 ```
 
 ### 4. Restart

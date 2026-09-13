@@ -28,8 +28,8 @@ logger = logging.getLogger("ailinux.client_update")
 router = APIRouter(prefix="/client/update", tags=["Client Update"])
 
 # Release-Verzeichnisse
-LINUX_RELEASE_DIR = Path("/home/zombie/triforce/client-releases/latest")
-WINDOWS_RELEASE_DIR = Path("/home/zombie/triforce/docker/repository/repo/mirror/archive.ailinux.me/windows")
+LINUX_RELEASE_DIR = Path("/home/zombie/workspace/triforce/client-releases/latest")
+WINDOWS_RELEASE_DIR = Path("/home/zombie/workspace/triforce/docker/repository/repo/mirror/archive.ailinux.me/windows")
 
 
 # ============================================================================
@@ -72,7 +72,7 @@ def get_linux_release_info() -> dict:
 
 def find_deb_file() -> Optional[Path]:
     """Findet die .deb Datei"""
-    repo_pool = Path("/home/zombie/triforce/docker/repository/repo/mirror/archive.ailinux.me/pool/main/a/ailinux-client")
+    repo_pool = Path("/home/zombie/workspace/triforce/docker/repository/repo/mirror/archive.ailinux.me/pool/main/a/ailinux-client")
     
     # Latest symlink
     latest = repo_pool / "ailinux-client-latest.deb"

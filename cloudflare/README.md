@@ -24,7 +24,7 @@ npm install -g wrangler
 wrangler login
 
 # Deploy
-cd /home/zombie/triforce/cloudflare
+cd /home/zombie/workspace/triforce/cloudflare
 wrangler deploy
 ```
 

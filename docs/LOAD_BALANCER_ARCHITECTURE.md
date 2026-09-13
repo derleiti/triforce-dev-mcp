@@ -219,7 +219,7 @@ server {
 ## Python Server Node Implementation
 
 ```python
-# /home/zombie/triforce/app/services/server_node.py
+# /home/zombie/workspace/triforce/app/services/server_node.py
 """
 TriForce Server Node - Worker im Load-Balanced Cluster
 Kommuniziert mit Load Balancer (upstream) und Hub (downstream)
@@ -558,7 +558,7 @@ async def proxy_to_cloud(body: dict, model: str) -> dict:
 ## Hub Federation Endpoints
 
 ```python
-# /home/zombie/triforce/app/api/federation.py
+# /home/zombie/workspace/triforce/app/api/federation.py
 """
 Hub-seitige Endpoints für Federation Management
 """

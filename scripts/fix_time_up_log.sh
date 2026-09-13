@@ -1,10 +1,10 @@
 #!/bin/bash
 # BUG-001 FIX: time_up.log truncaten + logrotate einrichten
-# Ausführen mit: sudo bash /home/zombie/triforce/scripts/fix_time_up_log.sh
+# Ausführen mit: sudo bash /home/zombie/workspace/triforce/scripts/fix_time_up_log.sh
 
 set -e
 
-LOG_FILE="/home/zombie/triforce/time_up.log"
+LOG_FILE="/home/zombie/workspace/triforce/time_up.log"
 LOGROTATE_CONF="/etc/logrotate.d/triforce-time-up"
 
 echo "[1/3] Leere time_up.log (aktuell: $(du -sh "$LOG_FILE" | cut -f1))"
@@ -17,7 +17,7 @@ echo "      → Erledigt."
 
 echo "[3/3] Erstelle logrotate-Config: $LOGROTATE_CONF"
 cat > "$LOGROTATE_CONF" << 'EOF'
-/home/zombie/triforce/time_up.log {
+/home/zombie/workspace/triforce/time_up.log {
     daily
     rotate 3
     compress

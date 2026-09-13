@@ -43,7 +43,7 @@ _settings = get_settings()
 MCP_WS_HOST = _settings.mcp_ws_host
 MCP_WS_PORT = _settings.mcp_ws_port
 MCP_WS_ENABLE_IPV6 = _settings.mcp_ws_enable_ipv6
-CERT_DIR = Path("/home/zombie/triforce/certs/client-auth")
+CERT_DIR = Path("/home/zombie/workspace/triforce/certs/client-auth")
 
 
 def _port_available(host: str, port: int) -> bool:

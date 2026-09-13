@@ -6,7 +6,7 @@
 # ============================================================================
 
 set -Eeuo pipefail
-WP_DIR="${AILINUX_WP_DIR:-/home/zombie/triforce/docker/wordpress}"
+WP_DIR="${AILINUX_WP_DIR:-/home/zombie/workspace/triforce/docker/wordpress}"
 [[ -d "$WP_DIR" ]] || { echo "WordPress stack not found: $WP_DIR" >&2; exit 1; }
 cd "$WP_DIR"
 

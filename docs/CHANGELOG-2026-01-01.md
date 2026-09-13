@@ -30,7 +30,7 @@ class UserTier(str, Enum):
 `UserTier("free")` findet keinen Enum mit value="free" → ValueError
 
 ### Lösung
-Explizites Tier-Mapping Dictionary in `/home/zombie/triforce/app/routes/mcp_node.py`:
+Explizites Tier-Mapping Dictionary in `/home/zombie/workspace/triforce/app/routes/mcp_node.py`:
 ```python
 # Line 330-340
 tier_mapping = {
@@ -61,7 +61,7 @@ Eigenes Verteilungssystem statt GitHub für automatische Updates auf allen Feder
 ### Komponenten
 
 #### 1. Apache vHost
-**Datei:** `/home/zombie/triforce/docker/wordpress/apache/vhosts/vhost-update.ailinux.me.conf`
+**Datei:** `/home/zombie/workspace/triforce/docker/wordpress/apache/vhosts/vhost-update.ailinux.me.conf`
 ```apache
 <VirtualHost *:443>
   ServerName update.ailinux.me
@@ -78,7 +78,7 @@ Eigenes Verteilungssystem statt GitHub für automatische Updates auf allen Feder
 ```
 
 #### 2. Docker Volume Mount
-**Datei:** `/home/zombie/triforce/docker/wordpress/docker-compose.yml`
+**Datei:** `/home/zombie/workspace/triforce/docker/wordpress/docker-compose.yml`
 ```yaml
 volumes:
   - /var/www/update.ailinux.me:/var/www/update.ailinux.me:ro
@@ -113,7 +113,7 @@ volumes:
 ### Scripts
 
 #### Release Publisher (Backend)
-**Datei:** `/home/zombie/triforce/scripts/publish-release.sh`
+**Datei:** `/home/zombie/workspace/triforce/scripts/publish-release.sh`
 ```bash
 # Usage: ./publish-release.sh [patch|minor|major] [message]
 # - Bumpt VERSION
@@ -123,7 +123,7 @@ volumes:
 ```
 
 #### Release Creator
-**Datei:** `/home/zombie/triforce/scripts/create-release.sh`
+**Datei:** `/home/zombie/workspace/triforce/scripts/create-release.sh`
 ```bash
 # Erstellt:
 # - releases/$VERSION.tar.gz (app/, config/, scripts/)
@@ -133,7 +133,7 @@ volumes:
 ```
 
 #### Auto-Updater (Node-Client)
-**Datei:** `/home/zombie/triforce/scripts/triforce-update.sh`
+**Datei:** `/home/zombie/workspace/triforce/scripts/triforce-update.sh`
 ```bash
 # Features:
 # - Prüft https://update.ailinux.me/manifest.json
@@ -183,7 +183,7 @@ ModuleNotFoundError: No module named 'PyQt6.QtWebEngineWidgets'
 PyInstaller bundled QtWebEngine nicht vollständig trotz `--hidden-import`.
 
 ### Lösung
-**Datei:** `/home/zombie/triforce/client-deploy/release.sh`
+**Datei:** `/home/zombie/workspace/triforce/client-deploy/release.sh`
 ```bash
 # Hinzugefügt:
 --hidden-import=PyQt6.QtWebEngineCore \
@@ -193,7 +193,7 @@ PyInstaller bundled QtWebEngine nicht vollständig trotz `--hidden-import`.
 ```
 
 ### Client Updater Umstellung
-**Datei:** `/home/zombie/triforce/client-deploy/ailinux-client/ailinux_client/core/updater.py`
+**Datei:** `/home/zombie/workspace/triforce/client-deploy/ailinux-client/ailinux_client/core/updater.py`
 
 Vorher:
 ```python
@@ -209,7 +209,7 @@ RELEASES_URL = f"{UPDATE_BASE_URL}/client/releases"
 ```
 
 ### Client Publisher
-**Datei:** `/home/zombie/triforce/client-deploy/publish-client.sh`
+**Datei:** `/home/zombie/workspace/triforce/client-deploy/publish-client.sh`
 ```bash
 # Workflow:
 # 1. Ruft release.sh auf (PyInstaller + .deb)
@@ -222,7 +222,7 @@ RELEASES_URL = f"{UPDATE_BASE_URL}/client/releases"
 ```bash
 # Nach Client-Build:
 cp ailinux-client_4.3.3_amd64.deb \
-   /home/zombie/triforce/docker/repository/repo/mirror/archive.ailinux.me/pool/main/a/ailinux-client/
+   /home/zombie/workspace/triforce/docker/repository/repo/mirror/archive.ailinux.me/pool/main/a/ailinux-client/
 
 sudo ./update-mirror.sh
 ```
@@ -250,21 +250,21 @@ sudo ./update-mirror.sh
 
 ### Backend-Release
 ```bash
-cd /home/zombie/triforce
+cd /home/zombie/workspace/triforce
 ./scripts/publish-release.sh patch "Fix description"
 # → Automatisches Update auf allen Nodes innerhalb 30 Min
 ```
 
 ### Client-Release
 ```bash
-cd /home/zombie/triforce/client-deploy
+cd /home/zombie/workspace/triforce/client-deploy
 ./publish-client.sh --bump-patch
 # → Kopiert zu update.ailinux.me + APT repo
 ```
 
 ### Manuelles Node-Update
 ```bash
-/home/zombie/triforce/scripts/triforce-update.sh --restart
+/home/zombie/workspace/triforce/scripts/triforce-update.sh --restart
 ```
 
 ---

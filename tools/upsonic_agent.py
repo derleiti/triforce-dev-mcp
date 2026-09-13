@@ -2,7 +2,7 @@ import os
 os.environ["UPSONIC_TELEMETRY"] = "False"
 
 from dotenv import load_dotenv
-load_dotenv("/home/zombie/triforce/.env")
+load_dotenv("/home/zombie/workspace/triforce/.env")
 
 from upsonic import Agent, Task
 from upsonic_triforce import TriForceMCP

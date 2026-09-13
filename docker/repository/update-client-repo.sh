@@ -11,8 +11,8 @@
 
 set -e
 
-REPO_BASE="/home/zombie/triforce/docker/repository/repo/mirror/repo.ailinux.me"
-CLIENT_RELEASES="/home/zombie/triforce/client-releases/latest"
+REPO_BASE="/home/zombie/workspace/triforce/docker/repository/repo/mirror/repo.ailinux.me"
+CLIENT_RELEASES="/home/zombie/workspace/triforce/client-releases/latest"
 POOL_DIR="$REPO_BASE/pool/main/a/aicoder"
 DISTS_DIR="$REPO_BASE/dists/noble"
 GPG_KEY_ID="ailinux"  # Falls signiert werden soll

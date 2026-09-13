@@ -22,7 +22,7 @@ async def test_remote_docker_status_uses_sudo(monkeypatch):
 
 def test_disk_usage_detail_has_no_unexpanded_glob():
     cmd, needs_sudo, timeout, _ = sa.COMMAND_TEMPLATES['disk_usage_detail']
-    assert cmd == ['du', '-x', '-h', '--max-depth=1', '/home/zombie/triforce']
+    assert cmd == ['du', '-x', '-h', '--max-depth=1', '/home/zombie/workspace/triforce']
     assert needs_sudo is True
     assert timeout == 30
     assert not any('*' in part for part in cmd)

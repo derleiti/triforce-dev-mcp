@@ -69,7 +69,7 @@
 
 ### 1. Backend (FastAPI)
 
-**Pfad:** `/home/zombie/triforce/app/`
+**Pfad:** `/home/zombie/workspace/triforce/app/`
 
 | Modul | Beschreibung |
 |-------|--------------|

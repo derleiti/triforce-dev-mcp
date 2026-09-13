@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-cd /home/zombie/triforce
+cd /home/zombie/workspace/triforce
 
-TARGET="/home/zombie/triforce/docker/wordpress/login.ailinux.me/index.html"
-BACKUP_DIR="/home/zombie/triforce/patch_backups"
+TARGET="/home/zombie/workspace/triforce/docker/wordpress/login.ailinux.me/index.html"
+BACKUP_DIR="/home/zombie/workspace/triforce/patch_backups"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/login.repo.index.html.bak.${STAMP}"
 TMP_FILE="${BACKUP_DIR}/login.repo.index.html.patched.${STAMP}"
