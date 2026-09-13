@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from app.services.aicoder_runner import AICoderRunner, parse_ndjson, prepare_instance_home, resolve_aicoder_launch
+from app.services.aicoder_runner import AICoderRunResult, AICoderRunner, parse_ndjson, prepare_instance_home, resolve_aicoder_launch
 
 
 def test_resolve_aicoder_launch_source_uses_checkout_virtualenv(tmp_path: Path):
@@ -285,3 +285,103 @@ def test_claude_account_run_strips_api_billing_env(tmp_path, monkeypatch):
     result = asyncio.run(AICoderRunner(str(fake)).run(profile_id="pilot", prompt="x", workspace=ws, home=home, timeout=5, model="account:claude/sonnet"))
     assert result.status == "success"
     assert result.response == "OK"
+
+
+
+def _configure_idle_provider_test(monkeypatch, tmp_path: Path, *, profile_cursor: int = 1):
+    from app.services.tristar import idle_worker
+
+    state_file = tmp_path / "idle-state.json"
+    state_file.write_text(json.dumps({"profile_cursor": profile_cursor, "catalogue_cursor": 0}), encoding="utf-8")
+    monkeypatch.setattr(idle_worker, "STATE_FILE", state_file)
+    monkeypatch.setattr(idle_worker, "STATE_LOCK_FILE", tmp_path / "idle-state.lock")
+    monkeypatch.setattr(idle_worker, "workspace_fingerprint", lambda workspace: "stable-fingerprint")
+    snapshot = tmp_path / "snapshot"
+
+    def create_snapshot(_workspace):
+        snapshot.mkdir(exist_ok=True)
+        return snapshot
+
+    def prepare_home(profile_id):
+        home = tmp_path / "homes" / profile_id
+        home.mkdir(parents=True, exist_ok=True)
+        return home
+
+    models = {
+        "codex-mcp": "account:chatgpt/gpt-5.6-terra",
+        "claude-mcp": "account:claude/sonnet",
+        "gemini-mcp": "account:gemini/gemini-3.8-flash-high",
+        "opencode-mcp": "mistral/codestral-latest",
+    }
+    monkeypatch.setattr(idle_worker, "create_snapshot", create_snapshot)
+    monkeypatch.setattr(idle_worker, "prepare_instance_home", prepare_home)
+    monkeypatch.setattr(idle_worker, "apply_profile_state", lambda home, profile: None)
+    monkeypatch.setattr(idle_worker, "load_profile", lambda profile_id: {"id": profile_id, "model": models[profile_id]})
+    monkeypatch.setenv("TRISTAR_IDLE_COOLDOWN_SECONDS", "0")
+    return idle_worker
+
+
+def test_idle_auto_rotation_falls_back_after_linked_account_failure(tmp_path: Path, monkeypatch):
+    idle_worker = _configure_idle_provider_test(monkeypatch, tmp_path, profile_cursor=1)
+    calls = []
+
+    class FakeRunner:
+        async def run(self, **kwargs):
+            calls.append(kwargs["model"])
+            if kwargs["model"].startswith("account:claude/"):
+                return AICoderRunResult(
+                    profile_id=kwargs["profile_id"], status="failed", model=kwargs["model"],
+                    error="claude account client failed (exit 1); verify the linked account",
+                )
+            return AICoderRunResult(
+                profile_id=kwargs["profile_id"], status="success", model=kwargs["model"],
+                response="STATUS: CLEAN\nNEXT_SAFE_WORK: NONE",
+            )
+
+    monkeypatch.setattr(idle_worker, "AICoderRunner", FakeRunner)
+    outcome = asyncio.run(idle_worker.run_idle_once(workspace=tmp_path, timeout=5))
+
+    assert calls == ["account:claude/sonnet", "account:gemini/gemini-3.8-flash-high"]
+    assert outcome["status"] == "success"
+    assert outcome["profile_id"] == "gemini-mcp"
+    assert outcome["attempted_profiles"] == ["claude-mcp", "gemini-mcp"]
+
+
+def test_idle_explicit_profile_does_not_fallback(tmp_path: Path, monkeypatch):
+    idle_worker = _configure_idle_provider_test(monkeypatch, tmp_path, profile_cursor=0)
+    calls = []
+
+    class FakeRunner:
+        async def run(self, **kwargs):
+            calls.append(kwargs["model"])
+            return AICoderRunResult(
+                profile_id=kwargs["profile_id"], status="failed", model=kwargs["model"],
+                error="claude account client failed (exit 1); verify the linked account",
+            )
+
+    monkeypatch.setattr(idle_worker, "AICoderRunner", FakeRunner)
+    outcome = asyncio.run(idle_worker.run_idle_once(workspace=tmp_path, profile_id="claude-mcp", timeout=5))
+
+    assert calls == ["account:claude/sonnet"]
+    assert outcome["status"] == "failed"
+    assert outcome["attempted_profiles"] == ["claude-mcp"]
+
+
+def test_idle_internal_failure_does_not_switch_provider(tmp_path: Path, monkeypatch):
+    idle_worker = _configure_idle_provider_test(monkeypatch, tmp_path, profile_cursor=1)
+    calls = []
+
+    class FakeRunner:
+        async def run(self, **kwargs):
+            calls.append(kwargs["model"])
+            return AICoderRunResult(
+                profile_id=kwargs["profile_id"], status="failed", model=kwargs["model"],
+                error="merge validation failed: regression test mismatch",
+            )
+
+    monkeypatch.setattr(idle_worker, "AICoderRunner", FakeRunner)
+    outcome = asyncio.run(idle_worker.run_idle_once(workspace=tmp_path, timeout=5))
+
+    assert calls == ["account:claude/sonnet"]
+    assert outcome["status"] == "failed"
+    assert outcome["attempted_profiles"] == ["claude-mcp"]

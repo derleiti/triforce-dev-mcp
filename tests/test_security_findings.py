@@ -635,6 +635,30 @@ class TestCodeWorkspaceRoots:
         assert result["results"][0]["line"] == 2
 
     @pytest.mark.asyncio
+    async def test_code_read_allows_version_but_not_arbitrary_extensionless_files(self, tmp_path: Path, monkeypatch):
+        from app.services.mcp_service import handle_codebase_file
+
+        (tmp_path / "VERSION").write_text("2.90.13\n", encoding="utf-8")
+        (tmp_path / "SECRETLESS").write_text("not source\n", encoding="utf-8")
+        monkeypatch.setenv("MCP_DEV_ALLOWED_ROOTS", str(tmp_path))
+
+        result = await handle_codebase_file({"root": str(tmp_path), "path": "VERSION"})
+        assert result["content"] == "1: 2.90.13"
+        with pytest.raises(ValueError, match="File type not allowed: SECRETLESS"):
+            await handle_codebase_file({"root": str(tmp_path), "path": "SECRETLESS"})
+
+    @pytest.mark.asyncio
+    async def test_code_search_includes_version_file(self, tmp_path: Path, monkeypatch):
+        from app.services.mcp_service import handle_codebase_search
+
+        (tmp_path / "VERSION").write_text("release-2.90.13\n", encoding="utf-8")
+        monkeypatch.setenv("MCP_DEV_ALLOWED_ROOTS", str(tmp_path))
+
+        result = await handle_codebase_search({"root": str(tmp_path), "path": ".", "query": "release-2.90.13"})
+        assert result["count"] == 1
+        assert result["results"][0]["file"] == "VERSION"
+
+    @pytest.mark.asyncio
     async def test_code_root_cannot_escape_to_sibling(self, tmp_path: Path, monkeypatch):
         from app.services.mcp_service import handle_codebase_file
 

@@ -29,6 +29,41 @@ READ_ONLY_TOOLS = ["file_read", "file_tree", "code_read", "code_tree", "code_sea
 DEFAULT_PROFILES = ("codex-mcp", "claude-mcp", "gemini-mcp", "opencode-mcp")
 
 
+_PROVIDER_FALLBACK_MARKERS = (
+    "account client failed",
+    "verify the linked account",
+    "not logged in",
+    "login required",
+    "authentication failed",
+    "unauthorized",
+    "unauthorised",
+    "insufficient_quota",
+    "quota exhausted",
+    "quota_exceeded",
+    "out of credits",
+    "credit balance",
+    "billing",
+    "payment required",
+    "rate limit",
+    "rate_limit",
+    "provider unavailable",
+)
+
+
+def _is_provider_fallback_error(error: str) -> bool:
+    """Return true only for provider/account availability failures safe to reroute."""
+    text = str(error or "").strip().lower()
+    return bool(text) and any(marker in text for marker in _PROVIDER_FALLBACK_MARKERS)
+
+
+def _automatic_profile_candidates(selected: str) -> list[str]:
+    """Return the selected default followed by each remaining default once."""
+    if selected not in DEFAULT_PROFILES:
+        return [selected]
+    start = DEFAULT_PROFILES.index(selected)
+    return [DEFAULT_PROFILES[(start + offset) % len(DEFAULT_PROFILES)] for offset in range(len(DEFAULT_PROFILES))]
+
+
 class IdleLeaseCoordinator:
     """Priority gate: foreground activity cancels idle readers of the same workspace."""
     def __init__(self, max_idle: int = 2):
@@ -204,10 +239,12 @@ def _parse_next_safe_work(text: str) -> tuple[str, str] | None:
 async def run_idle_once(*, workspace: str | Path = DEFAULT_WORKSPACE, profile_id: str | None = None,
                         timeout: int | None = None) -> dict[str, Any]:
     root = Path(workspace).resolve()
+    requested_profile = str(profile_id or "").strip()
     with _state_guard():
         state = _load_state()
         work_type, assignment, queued_profile = _next_assignment(state)
-        profile_id = queued_profile or profile_id or DEFAULT_PROFILES[int(state.get("profile_cursor") or 0) % len(DEFAULT_PROFILES)]
+        explicit_profile = bool(queued_profile or requested_profile)
+        selected_profile = queued_profile or requested_profile or DEFAULT_PROFILES[int(state.get("profile_cursor") or 0) % len(DEFAULT_PROFILES)]
         state["profile_cursor"] = int(state.get("profile_cursor") or 0) + 1
         _save_state(state)
     fingerprint = workspace_fingerprint(root)
@@ -216,31 +253,48 @@ async def run_idle_once(*, workspace: str | Path = DEFAULT_WORKSPACE, profile_id
     if not assignment and time.time() - float(dict(state.get("recent_tasks") or {}).get(task_digest, 0)) < cooldown:
         return {"status": "deduplicated", "work_type": work_type, "fingerprint": fingerprint}
 
-    profile = load_profile(profile_id)
-    model = str(profile.get("model") or "")
-    provider = model.split(":", 1)[-1].split("/", 1)[0] if model else profile_id
     findings = list(state.get("findings") or [])[-12:]
     previous = "\n".join(f"- {r.get('dedup_key','?')}: {r.get('title','')}" for r in findings) or "NONE"
+    candidates = [selected_profile] if explicit_profile else _automatic_profile_candidates(selected_profile)
     snapshot: Path | None = None
+    result = None
+    model = ""
+    active_profile = selected_profile
+    attempted_profiles: list[str] = []
     try:
-        async with lease_coordinator.idle(str(root), provider):
-            snapshot = create_snapshot(root)
-            home = prepare_instance_home(f"idle-{profile_id}")
-            isolated = dict(profile)
-            isolated.update({"workspace": str(snapshot), "enabled_tools": READ_ONLY_TOOLS, "approval_mode": "never", "team_mode": "off"})
-            apply_profile_state(home, isolated)
-            prompt = build_idle_prompt(work_type=work_type, assignment=assignment,
-                                       snapshot_fingerprint=fingerprint, previous_findings=previous)
-            result = await AICoderRunner().run(
-                profile_id=f"idle-{profile_id}", prompt=prompt, model=model or None,
-                workspace=snapshot, home=home,
-                timeout=int(timeout or os.environ.get("TRISTAR_IDLE_TIMEOUT", "300")), team_mode="off")
+        snapshot = create_snapshot(root)
+        prompt = build_idle_prompt(work_type=work_type, assignment=assignment,
+                                   snapshot_fingerprint=fingerprint, previous_findings=previous)
+        for index, candidate in enumerate(candidates):
+            active_profile = candidate
+            attempted_profiles.append(candidate)
+            profile = load_profile(candidate)
+            model = str(profile.get("model") or "")
+            provider = model.split(":", 1)[-1].split("/", 1)[0] if model else candidate
+            async with lease_coordinator.idle(str(root), provider):
+                home = prepare_instance_home(f"idle-{candidate}")
+                isolated = dict(profile)
+                isolated.update({"workspace": str(snapshot), "enabled_tools": READ_ONLY_TOOLS, "approval_mode": "never", "team_mode": "off"})
+                apply_profile_state(home, isolated)
+                result = await AICoderRunner().run(
+                    profile_id=f"idle-{candidate}", prompt=prompt, model=model or None,
+                    workspace=snapshot, home=home,
+                    timeout=int(timeout or os.environ.get("TRISTAR_IDLE_TIMEOUT", "300")), team_mode="off")
+            has_fallback = index + 1 < len(candidates)
+            if result.status == "success" or not has_fallback or not _is_provider_fallback_error(result.error):
+                break
+            logger.warning(
+                "idle provider unavailable profile=%s model=%s; falling back to %s: %s",
+                candidate, model, candidates[index + 1], str(result.error or "")[:300],
+            )
     except asyncio.CancelledError:
-        return {"status": "preempted", "work_type": work_type, "profile_id": profile_id, "fingerprint": fingerprint}
+        return {"status": "preempted", "work_type": work_type, "profile_id": active_profile, "fingerprint": fingerprint}
     finally:
         if snapshot is not None:
             shutil.rmtree(snapshot, ignore_errors=True)
 
+    if result is None:
+        raise RuntimeError("idle analysis produced no AICoder result")
     current = workspace_fingerprint(root)
     response = result.response or ""
     status = "stale" if current != fingerprint else result.status
@@ -254,7 +308,7 @@ async def run_idle_once(*, workspace: str | Path = DEFAULT_WORKSPACE, profile_id
             all_findings = list(state.get("findings") or [])
             if not any(row.get("dedup_key") == dedup_key for row in all_findings):
                 all_findings.append({"dedup_key": dedup_key, "title": _field(response, "TITLE"), "work_type": work_type,
-                                     "profile_id": profile_id, "fingerprint": fingerprint, "response": response[:12000],
+                                     "profile_id": active_profile, "fingerprint": fingerprint, "response": response[:12000],
                                      "created_at": int(time.time()), "status": "open"})
                 state["findings"] = all_findings[-500:]
         next_safe = _parse_next_safe_work(response) if status == "success" else None
@@ -268,7 +322,8 @@ async def run_idle_once(*, workspace: str | Path = DEFAULT_WORKSPACE, profile_id
                 state["suggested_queue"] = suggestions[-20:]
         _save_state(state)
     return {"status": status, "analysis_status": _field(response, "STATUS"), "work_type": work_type,
-            "profile_id": profile_id, "model": result.model or model, "fingerprint": fingerprint,
+            "profile_id": active_profile, "attempted_profiles": attempted_profiles,
+            "model": result.model or model, "fingerprint": fingerprint,
             "current_fingerprint": current, "response": response, "error": result.error}
 
 

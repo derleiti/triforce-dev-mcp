@@ -78,6 +78,8 @@ ALLOWED_EXTENSIONS = {
     ".hs", ".lhs", ".ml", ".mli", ".fs", ".fsi", ".fsx",  # Functional
     ".coffee", ".litcoffee",  # CoffeeScript
 }
+ALLOWED_EXTENSIONLESS_FILES = {"Dockerfile", "Makefile", "Rakefile", "Taskfile", "Vagrantfile", "VERSION"}
+
 BLOCKED_PATHS = {
     ".env", ".git", ".ssh", "secrets", "credentials",
     "__pycache__", ".venv", "node_modules", ".claude",
@@ -954,7 +956,7 @@ async def handle_codebase_file(params: Dict[str, Any]) -> Dict[str, Any]:
     safe_path = _resolve_code_path(str(file_path), str(root_value) if root_value else None)
     if not safe_path.exists() or not safe_path.is_file():
         raise ValueError(f"File not found: {file_path}")
-    if safe_path.suffix not in ALLOWED_EXTENSIONS and safe_path.name not in {"Dockerfile", "Makefile", "Rakefile", "Taskfile", "Vagrantfile"}:
+    if safe_path.suffix not in ALLOWED_EXTENSIONS and safe_path.name not in ALLOWED_EXTENSIONLESS_FILES:
         raise ValueError(f"File type not allowed: {safe_path.suffix or safe_path.name}")
     if safe_path.stat().st_size > 500_000:
         raise ValueError("File too large (max 500KB)")
@@ -1003,7 +1005,7 @@ async def handle_codebase_search(params: Dict[str, Any]) -> Dict[str, Any]:
     for source_file in files:
         if not source_file.is_file() or any(part in ignored for part in source_file.parts):
             continue
-        if source_file.suffix not in ALLOWED_EXTENSIONS and source_file.name not in {"Dockerfile", "Makefile", "Rakefile", "Taskfile", "Vagrantfile"}:
+        if source_file.suffix not in ALLOWED_EXTENSIONS and source_file.name not in ALLOWED_EXTENSIONLESS_FILES:
             continue
         try:
             if source_file.stat().st_size > 2_000_000:
