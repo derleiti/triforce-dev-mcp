@@ -4,7 +4,14 @@ set -Eeuo pipefail
 WORKSPACE_ROOT="${AILINUX_WORKSPACE_ROOT:-$HOME/workspace}"
 LINK_ROOT="${AILINUX_LINK_ROOT:-$HOME}"
 PUSH_REFS=0
-[[ "${1:-}" == "--push-refs" ]] && PUSH_REFS=1
+LEGACY_LINKS=0
+for arg in "$@"; do
+  case "$arg" in
+    --push-refs) PUSH_REFS=1 ;;
+    --legacy-links) LEGACY_LINKS=1 ;;
+    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
 
 mkdir -p "$WORKSPACE_ROOT"
 
@@ -33,12 +40,14 @@ sync_one() {
     git clone "$url" "$repo"
   fi
 
-  if [[ -e "$link" && ! -L "$link" ]]; then
-    if [[ "$(readlink -f "$link")" != "$(readlink -f "$repo")" ]]; then
-      echo "[$name] WARN legacy path is a real directory; leaving it untouched" >&2
+  if [[ "$LEGACY_LINKS" == 1 ]]; then
+    if [[ -e "$link" && ! -L "$link" ]]; then
+      if [[ "$(readlink -f "$link")" != "$(readlink -f "$repo")" ]]; then
+        echo "[$name] WARN legacy path is a real directory; leaving it untouched" >&2
+      fi
+    else
+      ln -sfn "workspace/$name" "$link"
     fi
-  else
-    ln -sfn "workspace/$name" "$link"
   fi
 
   git -C "$repo" fetch --all --prune --quiet
