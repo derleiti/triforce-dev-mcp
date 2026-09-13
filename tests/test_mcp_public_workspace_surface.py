@@ -105,6 +105,17 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
     assert 'AILinux Helper 2.90.11' in html
+    assert 'id="terminalBackend"' in html
+    assert 'native.setShellBackend' in html
+    assert "$('terminalBackend').onchange" in html
+    # Share fabric: the capability panel and the legacy terminal panel coexist.
+    assert 'id="nativeSharePanel"' in html
+    assert 'id="shareCompute"' in html
+    assert 'id="shareResources"' in html
+    assert 'Choose device capabilities' in html
+    # Compute prefers the hardened helper broker but keeps the native fallback.
+    assert "if(nativeHelper&&typeof nativeHelper.runCompute==='function')" in html
+    assert 'if(native)return result(await runNativeShell(args))' in html
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
     assert '/v1/mcp/helper/android' in html

@@ -5,7 +5,6 @@ import fnmatch
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -13,10 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from .backups import backup_directory_creation, backup_file, backup_workspace, shared_backup_root
+from .shell_backends import ShellUnavailable, build_shell_plan, shell_backend_status
 
 IGNORE_NAMES = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
 READ_TOOLS = {"workspace_info", "file_read", "file_tree", "code_read", "code_tree", "code_search", "code_grep", "git"}
-WRITE_TOOLS = READ_TOOLS | {"file_edit", "directory_create", "workspace_clear", "shell", "binary_exec", "task_runner", "lint", "test"}
+WRITE_TOOLS = READ_TOOLS | {"file_edit", "directory_create", "workspace_clear", "shell"}
 
 
 def _result(text: str, error: bool = False, **structured: Any) -> dict[str, Any]:
@@ -94,6 +94,7 @@ class WorkspaceRuntime:
             "directories": dirs,
             "bytes": bytes_total,
             "git_repository": git,
+            "shell": shell_backend_status(self.root),
             "top_extensions": sorted(extensions.items(), key=lambda item: (-item[1], item[0]))[:12],
             "sample_files": samples,
         }
@@ -161,33 +162,41 @@ class WorkspaceRuntime:
         if not self.writable:
             return "workspace is read-only", True
         work = self.resolve(cwd, must_exist=True)
-        rel = work.relative_to(self.root)
-        bwrap = shutil.which("bwrap")
-        if not bwrap:
-            return "bubblewrap (bwrap) is required for local execution", True
-        argv = [bwrap, "--die-with-parent", "--new-session", "--unshare-all",
-                "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-                "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib"]
-        if Path("/lib64").exists():
-            argv += ["--ro-bind", "/lib64", "/lib64"]
-        argv += ["--bind", str(self.root), "/workspace",
-                 "--chdir", "/workspace" + (("/" + rel.as_posix()) if rel.parts else ""),
-                 "--setenv", "HOME", "/workspace", "--setenv", "TMPDIR", "/tmp",
-                 "/bin/bash", "-o", "pipefail", "-c", command]
         try:
-            cp = subprocess.run(argv, text=True, capture_output=True, timeout=max(1, min(int(timeout), 300)))
+            plan = build_shell_plan(command, root=self.root, work=work)
+        except ShellUnavailable as exc:
+            return str(exc), True
+        try:
+            cp = subprocess.run(
+                plan.argv, cwd=plan.cwd, env=plan.env, text=True,
+                capture_output=True, timeout=max(1, min(int(timeout), 300)),
+            )
         except subprocess.TimeoutExpired:
             return f"command timed out after {timeout}s", True
+        except OSError as exc:
+            return f"shell backend '{plan.backend}' failed to start: {exc}", True
         text = ""
         if cp.stdout:
             text += "stdout:\n" + cp.stdout
         if cp.stderr:
             text += ("\n" if text else "") + "stderr:\n" + cp.stderr
-        text += ("\n" if text else "") + f"exit_code={cp.returncode}"
+        text += ("\n" if text else "") + f"exit_code={cp.returncode} backend={plan.backend} sandboxed={plan.sandboxed}"
         return text[:12000], cp.returncode != 0
 
+    def available_tools(self) -> set[str]:
+        """Tools this machine can really serve right now.
+
+        Execution tools are advertised only when a shell backend exists *and*
+        the user released the terminal. Capabilities are never faked: the
+        server-side capability check rejects what is not advertised here.
+        """
+        tools = set(WRITE_TOOLS if self.writable else READ_TOOLS)
+        if not bool(shell_backend_status(self.root).get("released")):
+            tools.discard("shell")
+        return tools
+
     def execute(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
-        allowed = WRITE_TOOLS if self.writable else READ_TOOLS
+        allowed = self.available_tools()
         if tool not in allowed:
             return _result(f"workspace mode {self.mode} blocks tool: {tool}", True)
         try:
@@ -267,18 +276,10 @@ class WorkspaceRuntime:
                     if not old or text.count(old) != 1: raise ValueError("old_text must match exactly once")
                     path.write_text(text.replace(old, str(args.get("new_text") or ""), 1), encoding="utf-8")
                 return _result(f"updated {self.display(path)}; backup={backup}", False, backup=str(backup))
-            if tool in {"shell", "task_runner"}:
+            if tool == "shell":
                 backup = backup_workspace(self.root, tool=tool)
-                text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), int(args.get("timeout") or (300 if tool == "task_runner" else 120)))
+                text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), int(args.get("timeout") or 120))
                 return _result(text + f"\nbackup={backup}", err, backup=str(backup))
-            if tool == "binary_exec":
-                program = str(args.get("program") or "").strip(); arguments = args.get("arguments") or []
-                if not program or not isinstance(arguments, list) or not all(isinstance(x, str) for x in arguments): raise ValueError("program and string arguments are required")
-                command = " ".join([shlex.quote(program), *(shlex.quote(x) for x in arguments)])
-                backup = backup_workspace(self.root, tool=tool)
-                text, err = self._sandbox(command, str(args.get("work_dir") or "."), int(args.get("timeout") or 120)); return _result(text + f"\nbackup={backup}", err, backup=str(backup))
-            if tool in {"lint", "test"}:
-                text, err = self._sandbox(str(args.get("command") or ""), str(args.get("cwd") or "."), 180); return _result(text, err)
         except Exception as exc:
             return _result(f"{tool} error: {exc}", True)
         return _result(f"unsupported workspace tool: {tool}", True)

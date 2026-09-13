@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from .runtime import READ_TOOLS, WRITE_TOOLS, WorkspaceRuntime
+from .shell_backends import shell_backend_status
 
 
 def node_url(base_url: str, pair_code: str) -> str:
@@ -97,7 +98,7 @@ class WorkspaceNode:
 
     @property
     def tool_names(self) -> list[str]:
-        return sorted(WRITE_TOOLS if self.runtime.writable else READ_TOOLS)
+        return sorted(self.runtime.available_tools())
 
     async def _announce(self, websocket) -> None:
         await websocket.send(json.dumps({
@@ -126,6 +127,7 @@ class WorkspaceNode:
                 "mode": self.runtime.mode,
                 "access_mode": self.runtime.mode,
                 "capabilities": self.tool_names,
+                "shell": shell_backend_status(self.runtime.root),
             },
         }))
 

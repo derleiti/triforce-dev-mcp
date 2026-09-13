@@ -23,7 +23,9 @@
     "artifactName": "AILinux-Workspace-${version}-${os}-${arch}.${ext}",
     "files": [
       "main.js",
-      "package.json"
+      "package.json",
+      "preload.js",
+      "shell_backends.js"
     ],
     "directories": {
       "output": "dist"
