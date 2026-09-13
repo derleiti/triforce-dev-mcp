@@ -252,6 +252,7 @@ data/n8n/crash.journal
 !tests/test_setup_job.py
 !tests/test_setup_runner_contract.py
 !tests/test_control_center_async_contract.py
+!tests/test_share_manifest.py
 
 # Local recovery/runtime build artifacts
 .local-backups/

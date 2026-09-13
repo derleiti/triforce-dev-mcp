@@ -562,13 +562,19 @@ async def websocket_connect(
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": False, "error": "client_workspace_tool must be advertised first"}})
                     continue
                 share = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
+                from app.services.share_manifest import build_share_manifest, legacy_workspace_view
+                # One normalizer for every share payload: default-off resources,
+                # advertised capabilities are authoritative, no implicit escalation.
+                share_manifest = build_share_manifest(share)
+                connection.share_manifest = share_manifest
+                legacy_share = legacy_workspace_view(share_manifest)
                 if workspace_pair_kind == "handoff" and handoff_context:
                     from app.services.mcp_workspace_sessions import complete_workspace_handoff
                     binding = complete_workspace_handoff(
                         handoff_context, connection,
-                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
-                        task=str(share.get("task") or ""),
-                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                        mode=legacy_share["mode"],
+                        task=legacy_share["task"],
+                        capabilities=legacy_share["capabilities"],
                     )
                     previous_connection = binding.pop("previous_connection", None)
                     logger.info(
@@ -599,9 +605,9 @@ async def websocket_connect(
                     from app.services.mcp_workspace_sessions import reconnect_workspace_with_resume_token
                     binding = reconnect_workspace_with_resume_token(
                         resume_token, connection,
-                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
-                        task=str(share.get("task") or ""),
-                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                        mode=legacy_share["mode"],
+                        task=legacy_share["task"],
+                        capabilities=legacy_share["capabilities"],
                     )
                     logger.info("Local workspace resumed | lease=%s client=%s mode=%s", str(binding.get("lease_id") or "")[:12], client_id, binding["mode"])
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True, "resume_token": binding.get("resume_token", resume_token)}})
@@ -609,9 +615,9 @@ async def websocket_connect(
                     from app.services.mcp_workspace_sessions import reconnect_web_workspace
                     binding = reconnect_web_workspace(
                         pair_code, connection,
-                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
-                        task=str(share.get("task") or ""),
-                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                        mode=legacy_share["mode"],
+                        task=legacy_share["task"],
+                        capabilities=legacy_share["capabilities"],
                     )
                     logger.info("Local workspace reconnected | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True}})
@@ -619,9 +625,9 @@ async def websocket_connect(
                     from app.services.mcp_workspace_sessions import promote_session_pair_to_web_lease
                     binding = promote_session_pair_to_web_lease(
                         pair_code, str(paired_mcp_session), connection,
-                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
-                        task=str(share.get("task") or ""),
-                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                        mode=legacy_share["mode"],
+                        task=legacy_share["task"],
+                        capabilities=legacy_share["capabilities"],
                     )
                     logger.info("Local workspace paired | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "resume_token": binding.get("resume_token", "")}})
@@ -629,9 +635,9 @@ async def websocket_connect(
                     from app.services.mcp_workspace_sessions import register_waiting_workspace
                     waiting = register_waiting_workspace(
                         pair_code, connection,
-                        mode=str(share.get("access_mode") or share.get("mode") or "read_only"),
-                        task=str(share.get("task") or ""),
-                        capabilities=[str(x) for x in (share.get("capabilities") or []) if isinstance(x, str)],
+                        mode=legacy_share["mode"],
+                        task=legacy_share["task"],
+                        capabilities=legacy_share["capabilities"],
                     )
                     logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
                     await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting", "access_mode": waiting["mode"], "mode": waiting["mode"], "waiting_for_session": True}})
