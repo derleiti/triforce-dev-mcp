@@ -122,7 +122,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'id="nativeSharePanel"' in html
     assert 'id="shareCompute"' in html
     assert 'id="shareResources"' in html
-    assert 'Choose device capabilities' in html
+    assert 'Choose capabilities' in html
     # P5: WebApp binds only to the typed native Helper broker for Docker/service control.
     assert 'id="dockerPanel"' in html
     assert 'id="dockerInstallBtn"' in html
@@ -135,7 +135,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "nativeHelper.dockerInstall()" in html
     assert "nativeHelper.dockerTest()" in html
     assert 'docker.sock' in html
-    assert 'page never talks to docker.sock or systemd directly' in html
+    assert 'The browser never receives docker.sock' in html
     assert 'id="shareBuilderPanel"' in html
     assert 'id="shareVisibility"' in html
     assert '<option value="private" selected>Private</option>' in html
@@ -158,7 +158,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "$('mobileNote')" not in html
     # Compute prefers the hardened helper broker but keeps the native fallback.
     assert "tool==='compute_execute'" in html
-    assert "typeof nativeHelper.runCompute!=='function'" in html
+    assert "typeof nativeHelper.runCompute==='function'" in html
+    assert "TriForce remote compute must be intercepted server-side" in html
     assert 'if(native)return result(await runNativeShell(args))' in html
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
@@ -243,7 +244,9 @@ def test_browser_helper_uses_runtime_capabilities_when_the_browser_exposes_them(
     assert "source:'browser-clipboard'" in html
     assert "effectiveShareProfile()" in html
     assert "display:{observe:s.display&&webShareProfile.screenObserve===true,control:false}" in html
-    assert "device:{observe:s.deviceInfo&&webShareProfile.resourceAdvertise===true,control:false}" in html
+    assert "device:{observe:false,control:false}" in html
+    assert "runtime:'triforce_docker'" in html
+    assert "webShareProfile.remoteCompute" in html
     assert "OS input injection is not exposed by this browser" in html
 
 
@@ -255,8 +258,25 @@ def test_browser_python_runtime_is_isolated_and_does_not_impersonate_docker_comp
     assert "new Worker(url)" in html
     assert "cdn.jsdelivr.net/pyodide/v314.0.6/full/" in html
     assert "runPythonAsync" in html
-    assert "native Docker compute bridge unavailable; browser Python is a separate local worker runtime" in html
-    assert "compute:{advertise:false,available:false,runtime:'browser-worker'}" in html
+    assert "TriForce remote compute must be intercepted server-side" in html
+    assert "runtime:'triforce_docker'" in html
+    assert "browser Python is local to the page" not in html
+
+
+def test_browser_remote_compute_and_opfs_workspace_are_explicit_capabilities():
+    from app.routes.mcp import _workspace_setup_html
+    html = _workspace_setup_html()
+    assert 'TriForce cloud sandbox · internet + shell + ~/workspace' in html
+    assert "if(webShareProfile.remoteCompute&&s.remoteCompute)out.push('compute_execute')" in html
+    assert "remote_requested:remote" in html
+    assert "internet:'public_only'" in html
+    assert "workspace_path:'~/workspace'" in html
+    assert 'id="opfsBtn"' in html
+    assert 'navigator.storage.getDirectory()' in html
+    assert "workspaceBackend='opfs'" in html
+    assert "access:workspaceBackend==='opfs'?'opfs'" in html
+    assert 'Browser hardware counters are not advertised as compute capacity' in html
+
 
 def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
     from app.routes.mcp import _workspace_setup_html
