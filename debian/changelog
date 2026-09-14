@@ -1,4 +1,4 @@
-triforce-backend (1:2.86.5-1) noble; urgency=medium
+triforce-backend (1:2.86.6-1) noble; urgency=medium
 
   * Consolidate MCP discovery into global, aihelper, authenticated and admin scopes.
   * Add canonical aihelper_* device tools with legacy Helper wire compatibility.
