@@ -13,10 +13,12 @@ def render(ip="10.10.0.2", backend="127.0.0.1:9100") -> str:
     )
 
 
-def test_socket_waits_for_wireguard_and_network_online():
+def test_socket_can_bind_before_wireguard_without_ordering_cycle():
     text = render()
-    assert "Wants=network-online.target wg-quick@wg0.service" in text
-    assert "After=network-online.target wg-quick@wg0.service" in text
+    assert "FreeBind=true" in text
+    assert "Wants=network-online.target" not in text
+    assert "After=network-online.target" not in text
+    assert "wg-quick@wg0.service" not in text
 
 
 def test_socket_binds_only_requested_wireguard_address():

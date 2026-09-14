@@ -23,7 +23,13 @@ WORKSPACE_TOOL_NAMES = ('workspace_status',
  'compute_execute',
  'file_edit',
  'directory_create',
- 'workspace_clear')
+ 'workspace_clear',
+ 'device_info',
+ 'process_ops',
+ 'service_ops',
+ 'app_ops',
+ 'window_ops',
+ 'computer_input')
 
 WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
   'description': 'Check whether this MCP session is paired with a browser-selected local workspace. If the user '

@@ -48,6 +48,12 @@ TIMEOUT      = 15
 
 JSON_API_MIME = "application/vnd.api+json"
 
+
+def is_flarum_configured() -> bool:
+    """Return whether Flarum authentication is available for background work."""
+    return bool(_env_value("FLARUM_TOKEN"))
+
+
 # ── HTTP Client ───────────────────────────────────────────────────────────────
 def _headers(token: Optional[str] = None, user_id: Optional[int] = None) -> Dict[str, str]:
     token = token or FLARUM_TOKEN

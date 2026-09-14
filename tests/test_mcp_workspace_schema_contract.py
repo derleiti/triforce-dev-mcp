@@ -36,7 +36,19 @@ def _full_share_binding() -> dict:
         tool["name"] for tool in bridge.canonical_workspace_tools()
         if tool["name"] not in bridge.CONTROL_TOOLS
     ]
-    return {"mode": "write", "capabilities": capabilities, "connection": None}
+    grants = [
+        {"resource": "workspace", "action": "read"},
+        {"resource": "workspace", "action": "write"},
+        {"resource": "display", "action": "observe"},
+        {"resource": "display", "action": "control"},
+        {"resource": "device", "action": "read"},
+        {"resource": "device", "action": "control"},
+        {"resource": "clipboard", "action": "read"},
+        {"resource": "clipboard", "action": "write"},
+        {"resource": "compute", "action": "execute"},
+    ]
+    connection = SimpleNamespace(share_manifest={"grants": grants})
+    return {"mode": "write", "capabilities": capabilities, "connection": connection}
 
 
 @pytest.mark.asyncio

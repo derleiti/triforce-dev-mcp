@@ -29,11 +29,10 @@ render_socket() {
 cat <<UNIT
 [Unit]
 Description=TriForce Federation WireGuard listener
-Wants=network-online.target wg-quick@wg0.service
-After=network-online.target wg-quick@wg0.service
 
 [Socket]
 ListenStream=${BIND_IP}:9100
+FreeBind=true
 Accept=no
 NoDelay=true
 

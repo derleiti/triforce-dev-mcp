@@ -23,10 +23,11 @@ from .share_manifest import (
     CLIPBOARD_READ_TOOLS,
     CLIPBOARD_WRITE_TOOLS,
     COMPUTE_TOOLS,
-    DISPLAY_OBSERVE_TOOLS,
+    DISPLAY_OBSERVE_TOOLS, DISPLAY_CONTROL_TOOLS, DEVICE_READ_TOOLS as SHARE_DEVICE_READ_TOOLS, DEVICE_CONTROL_TOOLS, DEVICE_MUTATING_TOOLS,
     RESOURCE_CLIPBOARD,
     RESOURCE_COMPUTE,
     RESOURCE_DISPLAY,
+    RESOURCE_DEVICE,
     RESOURCE_WORKSPACE,
     WORKSPACE_READ_TOOLS,
     WORKSPACE_WRITE_TOOLS,
@@ -46,8 +47,8 @@ BROWSER_READ_TOOLS = {
 BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {
     "file_edit", "directory_create", "workspace_clear", "code_edit", "shell",
 }
-DEVICE_READ_TOOLS = {"computer_observe", "computer_screenshot", "clipboard_read"}
-DEVICE_WRITE_TOOLS = {"clipboard_write"}
+DEVICE_READ_TOOLS = {"computer_observe", "computer_screenshot", "clipboard_read", "device_info", "process_ops", "service_ops"}
+DEVICE_WRITE_TOOLS = {"clipboard_write", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input"}
 DEVICE_TOOLS = DEVICE_READ_TOOLS | DEVICE_WRITE_TOOLS
 READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS | DEVICE_TOOLS
 WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS | DEVICE_TOOLS | set(COMPUTE_TOOLS)
@@ -198,6 +199,12 @@ def _local_tool_visible(name: str, binding: Optional[Dict[str, Any]]) -> bool:
         return manifest_has_grant(manifest, RESOURCE_WORKSPACE, "read")
     if name in DISPLAY_OBSERVE_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_DISPLAY, "observe")
+    if name in DISPLAY_CONTROL_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_DISPLAY, "control")
+    if name in SHARE_DEVICE_READ_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_DEVICE, "read")
+    if name in DEVICE_CONTROL_TOOLS:
+        return manifest_has_grant(manifest, RESOURCE_DEVICE, "control")
     if name in CLIPBOARD_WRITE_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_CLIPBOARD, "write")
     if name in CLIPBOARD_READ_TOOLS:
@@ -308,10 +315,12 @@ def _workspace_required(request: Request) -> Dict[str, Any]:
 
 def workspace_tool_requires_write(name: str, arguments: Dict[str, Any] | None = None) -> bool:
     args = arguments or {}
-    if name in {"file_edit", "directory_create", "workspace_clear", "code_edit", "shell"}:
+    if name in {"file_edit", "directory_create", "workspace_clear", "code_edit", "shell", "computer_input"}:
         return True
     if name == "file_ops":
         return str(args.get("action") or "read").lower() in {"write", "append", "delete", "remove"}
+    if name in {"process_ops", "service_ops", "app_ops", "window_ops"}:
+        return str(args.get("action") or "list").lower() not in {"list", "get"}
     if name == "git":
         mode = str(args.get("mode") or args.get("action") or "status").lower()
         return mode not in {"status", "diff", "log", "show", "blame"}
@@ -680,6 +689,30 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         return _tool_error(
             "WORKSPACE_DISPLAY_GRANT_REQUIRED",
             "The paired helper has not granted display observation for this workspace.",
+            tool=name,
+        )
+    if name in DISPLAY_CONTROL_TOOLS and not manifest_has_grant(
+        _binding_share_manifest(binding), RESOURCE_DISPLAY, "control"
+    ):
+        return _tool_error(
+            "WORKSPACE_DISPLAY_CONTROL_GRANT_REQUIRED",
+            "The paired helper has not granted desktop control for this workspace.",
+            tool=name,
+        )
+    if name in SHARE_DEVICE_READ_TOOLS and not manifest_has_grant(
+        _binding_share_manifest(binding), RESOURCE_DEVICE, "read"
+    ):
+        return _tool_error(
+            "WORKSPACE_DEVICE_GRANT_REQUIRED",
+            "The paired helper has not granted device inspection for this workspace.",
+            tool=name,
+        )
+    if name in DEVICE_MUTATING_TOOLS and workspace_tool_requires_write(name, arguments) and not manifest_has_grant(
+        _binding_share_manifest(binding), RESOURCE_DEVICE, "control"
+    ):
+        return _tool_error(
+            "WORKSPACE_DEVICE_CONTROL_GRANT_REQUIRED",
+            "The paired helper has not granted device control for this workspace.",
             tool=name,
         )
     if name in COMPUTE_TOOLS and not manifest_has_grant(

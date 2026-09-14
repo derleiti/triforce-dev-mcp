@@ -7,6 +7,7 @@ from ..utils.tool_normalizer import normalize_tool_name
 # v4 shim - no longer needed, all aliases in V5_ALIASES
 from .tool_registry_v5 import get_all_tools as v5_get_all_tools, V5_ALIASES
 from .workspace_tool_contract import WORKSPACE_CONTROL_TOOLS
+from .portable_tool_contract import PORTABLE_DEVICE_TOOLS
 
 
 DEFAULT_EXAMPLES: Dict[str, Dict[str, Any]] = {
@@ -130,6 +131,12 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "file_edit": "filesystem",
     "directory_create": "filesystem",
     "computer_observe": "device",
+    "computer_input": "device",
+    "window_ops": "device",
+    "app_ops": "device",
+    "service_ops": "device",
+    "process_ops": "device",
+    "device_info": "device",
     "computer_screenshot": "device",
     "clipboard_read": "device",
     "clipboard_write": "device",
@@ -193,6 +200,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     "workspace_status", "workspace_pair", "workspace_info", "workspace_clear",
     "file_read", "file_tree", "code_read", "code_grep", "file_edit", "directory_create",
     "computer_observe", "computer_screenshot", "clipboard_read", "clipboard_write", "compute_execute",
+    "device_info", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input",
     # Integrations
     "n8n_mcp_call",
 })
@@ -309,6 +317,7 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     # v4 schemas removed — v5 is canonical source (2026-03-16)
     raw_tools.extend(v5_get_all_tools())
     raw_tools.extend(WORKSPACE_CONTROL_TOOLS)
+    raw_tools.extend(PORTABLE_DEVICE_TOOLS)
     from .handlers_memory_history import HISTORY_TOOLS
     raw_tools.extend(HISTORY_TOOLS)
 
