@@ -84,7 +84,7 @@ prometheus_client==0.26.0
 propcache==0.5.2
 Protego==0.6.2
 protobuf==5.29.6
-proto-plus==1.28.2
+proto-plus==1.28.4
 psutil==7.2.2
 pyasn1==0.6.4
 pyasn1_modules==0.4.2
