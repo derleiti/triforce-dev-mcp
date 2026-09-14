@@ -1574,7 +1574,8 @@ async def _run_notify_model(*, target: str, model: str, prompt: str, timeout: in
     bounded_timeout = max(10, min(int(timeout), 300))
     safe_id = "notify-" + hashlib.sha256(f"{target}:{model}".encode()).hexdigest()[:16]
     home = prepare_instance_home(safe_id)
-    workspace = Path(os.environ.get("TRIFORCE_NOTIFY_WORKSPACE", "/var/tristar/agents/notify-workspace"))
+    from app.paths import TRISTAR_DIR
+    workspace = Path(os.environ.get("TRIFORCE_NOTIFY_WORKSPACE", str(TRISTAR_DIR / "agents" / "notify-workspace")))
     workspace.mkdir(parents=True, exist_ok=True)
     # Hard execution boundary: notify is communication, never an implicit task runner.
     apply_profile_state(home, {

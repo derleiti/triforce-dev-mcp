@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 
-from app.paths import PROJECT_ROOT
+from app.paths import PROJECT_ROOT, TRISTAR_DIR
 from ..aicoder_runner import (
     AICoderRunResult, AICoderRunner, apply_profile_state, load_profile,
     prepare_instance_home, query_account_provider_quota,
@@ -24,10 +24,10 @@ from .idle_prompt import WORK_CATALOGUE, build_idle_prompt
 
 logger = logging.getLogger("ailinux.tristar.idle_worker")
 DEFAULT_WORKSPACE = Path(os.environ.get("TRISTAR_IDLE_WORKSPACE", str(PROJECT_ROOT))).expanduser().resolve()
-STATE_FILE = Path(os.environ.get("TRISTAR_IDLE_STATE_FILE", "/var/tristar/agents/idle-state.json"))
-STATE_LOCK_FILE = Path(os.environ.get("TRISTAR_IDLE_STATE_LOCK_FILE", "/var/tristar/agents/idle-state.lock"))
-WORKER_LOCK_FILE = Path(os.environ.get("TRISTAR_IDLE_WORKER_LOCK_FILE", "/var/tristar/agents/idle-worker.lock"))
-SNAPSHOT_ROOT = Path(os.environ.get("TRISTAR_IDLE_SNAPSHOT_ROOT", "/var/tristar/agents/idle-snapshots"))
+STATE_FILE = Path(os.environ.get("TRISTAR_IDLE_STATE_FILE", str(TRISTAR_DIR / "agents" / "idle-state.json")))
+STATE_LOCK_FILE = Path(os.environ.get("TRISTAR_IDLE_STATE_LOCK_FILE", str(TRISTAR_DIR / "agents" / "idle-state.lock")))
+WORKER_LOCK_FILE = Path(os.environ.get("TRISTAR_IDLE_WORKER_LOCK_FILE", str(TRISTAR_DIR / "agents" / "idle-worker.lock")))
+SNAPSHOT_ROOT = Path(os.environ.get("TRISTAR_IDLE_SNAPSHOT_ROOT", str(TRISTAR_DIR / "agents" / "idle-snapshots")))
 READ_ONLY_TOOLS = ["file_read", "file_tree", "code_read", "code_tree", "code_search", "code_grep"]
 DEFAULT_PROFILES = ("codex-mcp", "claude-mcp", "gemini-mcp", "opencode-mcp")
 

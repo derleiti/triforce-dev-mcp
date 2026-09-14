@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 
 from ...mcp.agent_instructions import build_agent_system_prompt
+from app.paths import PROJECT_ROOT, TRISTAR_DIR
 from ..aicoder_runner import apply_profile_state, load_profile, prepare_instance_home, query_account_provider_quota, run_profile
 from ..aicoder_agent_events import record_agent_quota_limited, record_aicoder_run
 from ..aicoder_task_router import AgentExecutionMode, classify_agent_task
@@ -337,7 +338,7 @@ def _inject_nova_env(env: Dict[str, str]) -> Dict[str, str]:
     return env
 
 
-def _sync_builtin_aicoder_profile_prompts(profile_root: str | Path = "/var/tristar/agents/profiles") -> list[str]:
+def _sync_builtin_aicoder_profile_prompts(profile_root: str | Path = TRISTAR_DIR / "agents" / "profiles") -> list[str]:
     """Keep built-in AICoder profile prompts on the canonical TriForce policy.
 
     Profiles explicitly marked ``system_prompt_source=custom`` are never touched.
@@ -381,9 +382,9 @@ BUILTIN_AICODER_PROFILE_DEFAULTS: Dict[str, Dict[str, Any]] = {
 
 
 def _ensure_builtin_aicoder_profiles(
-    profile_root: str | Path = "/var/tristar/agents/profiles",
+    profile_root: str | Path = TRISTAR_DIR / "agents" / "profiles",
     *,
-    workspace: str = "/home/zombie/workspace/triforce",
+    workspace: str = str(PROJECT_ROOT),
 ) -> list[str]:
     """Create missing built-in AICoder profiles without overwriting operator choices."""
     root = Path(profile_root)
@@ -421,7 +422,7 @@ class AgentController:
     Integriert mit TriStar/TriForce für System-Prompts und Steuerung.
     """
 
-    def __init__(self, data_dir: str = "/var/tristar/agents"):
+    def __init__(self, data_dir: str | Path = TRISTAR_DIR / "agents"):
         self.data_dir = Path(data_dir)
         self.agents: Dict[str, AgentInstance] = {}
         self._lock = asyncio.Lock()
@@ -1099,7 +1100,7 @@ class AgentController:
             elif agent_type == AgentType.OPENCODE:
                 # OpenCode defaults to its TUI too. Use the explicit one-shot
                 # runner so MCP calls terminate and return their result.
-                opencode_workspace = "/var/tristar/agents/opencode-workspace"
+                opencode_workspace = str(TRISTAR_DIR / "agents" / "opencode-workspace")
                 os.makedirs(opencode_workspace, exist_ok=True)
 
                 cmd = [

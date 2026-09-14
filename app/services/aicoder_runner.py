@@ -14,10 +14,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.paths import TRISTAR_DIR
+
 DEFAULT_AICODER = "/usr/bin/aicoder"
 DEFAULT_AICODER_SOURCE_ROOT = Path("/home/zombie/workspace/ai-coder")
 DEFAULT_AICODER_RUNNER_MODE = "installed"
-DEFAULT_INSTANCE_ROOT = Path("/var/tristar/agents/instances")
+DEFAULT_INSTANCE_ROOT = TRISTAR_DIR / "agents" / "instances"
 PROVIDER_HOME_DIRS = (".codex", ".claude", ".vibe", ".gemini", ".antigravity")
 PROVIDER_HOME_FILES = (".claude.json",)
 PROVIDER_EXEC_LINKS = (
@@ -528,7 +530,7 @@ class AICoderRunner:
             raw_lines=raw[-100:],
         )
 
-DEFAULT_PROFILE_ROOT = Path("/var/tristar/agents/profiles")
+DEFAULT_PROFILE_ROOT = TRISTAR_DIR / "agents" / "profiles"
 
 
 def load_profile(profile_id: str, profile_root: str | Path = DEFAULT_PROFILE_ROOT) -> dict[str, Any]:

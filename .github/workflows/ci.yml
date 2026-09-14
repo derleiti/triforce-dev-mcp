@@ -20,13 +20,15 @@ jobs:
     env:
       AILINUX_HELPER_SOURCE: ${{ github.workspace }}/ailinux-helper
       AILINUX_HELPER_RELEASE_MANIFEST: ${{ github.workspace }}/ailinux-helper/release.json
+      TRIFORCE_STATE_DIR: ${{ runner.temp }}/triforce-state
+      TRIFORCE_LOG_DIR: ${{ runner.temp }}/triforce-logs
     steps:
       - uses: actions/checkout@v7
       - name: Checkout pinned AILinux Helper WebMCP source
         uses: actions/checkout@v7
         with:
           repository: derleiti/ailinux-helper
-          ref: d5309f195553ae3ababa83e8a77b1dfa63b96e75
+          ref: a030114de94aa2f987cb6ef36e1bfe73c9ebf92a
           path: ailinux-helper
       - uses: actions/setup-python@v7
         with:
