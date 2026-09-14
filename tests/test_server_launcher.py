@@ -84,3 +84,21 @@ def test_launcher_rejects_fractional_graceful_shutdown(tmp_path: Path):
     cfg.write_text("TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT=5.5\n")
     with pytest.raises(ValidationError):
         build_server_process(config_path=cfg, environ={}, python="/x/python")
+
+
+def test_launcher_trusts_only_configured_forwarding_proxy(tmp_path: Path):
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text("TRIFORCE_FORWARDED_ALLOW_IPS=172.18.0.10\n")
+    argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
+    assert "--proxy-headers" in argv
+    assert argv[argv.index("--forwarded-allow-ips") + 1] == "172.18.0.10"
+
+
+def test_launcher_does_not_trust_arbitrary_forwarding_peers_by_default(tmp_path: Path, monkeypatch):
+    cfg = tmp_path / "triforce.env"
+    cfg.write_text("")
+    # BaseSettings also consults the real process environment. Remove the
+    # production proxy override so this assertion exercises the schema default.
+    monkeypatch.delenv("TRIFORCE_FORWARDED_ALLOW_IPS", raising=False)
+    argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
+    assert argv[argv.index("--forwarded-allow-ips") + 1] == "127.0.0.1"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 from types import SimpleNamespace
 
@@ -115,3 +117,13 @@ async def test_each_tools_list_call_rebuilds_workspace_contract(monkeypatch):
     assert "contract_refresh_probe" in second_tool["inputSchema"]["properties"]
     assert first_tool["x_schema_fingerprint"] != second_tool["x_schema_fingerprint"]
     assert first_tool["x_workspace_contract_fingerprint"] != second_tool["x_workspace_contract_fingerprint"]
+
+
+def test_workspace_node_supports_secret_free_native_handshake_and_hashed_identity():
+    source = (Path(__file__).resolve().parents[1] / "app/routes/mcp_node.py").read_text(encoding="utf-8")
+    assert 'getattr(websocket, "headers", {})' in source
+    assert 'request_headers.get("x-ailinux-pair-code")' in source
+    assert 'request_headers.get("x-ailinux-handoff-code")' in source
+    assert 'request_headers.get("x-ailinux-machine-id")' in source
+    assert 'hashlib.sha256(workspace_credential_id.encode("utf-8"))' in source
+    assert "workspace_credential_id.replace('-', '')[:12]" not in source

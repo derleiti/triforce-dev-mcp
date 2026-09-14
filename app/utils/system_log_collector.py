@@ -29,6 +29,8 @@ from logging.handlers import RotatingFileHandler
 import json
 import os
 
+from app.utils.log_formatters import redact_sensitive
+
 logger = logging.getLogger("ailinux.system.collector")
 
 # Base directories
@@ -188,7 +190,7 @@ class SystemLogCollector:
                         f.write(f"\n{'='*60}\n")
                         f.write(f"=== Log Collection: {datetime.now().isoformat()} ===\n")
                         f.write(f"{'='*60}\n")
-                        f.write(output)
+                        f.write(redact_sensitive(output))
                         f.write("\n")
 
                     results["sources_collected"].append(source_name)
@@ -284,7 +286,7 @@ class SystemLogCollector:
             output_file = KERNEL_LOG_DIR / "dmesg.log"
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(f"# dmesg collected at {datetime.now().isoformat()}\n")
-                f.write(output)
+                f.write(redact_sensitive(output))
             return output
         return None
 
@@ -354,7 +356,7 @@ class SystemLogCollector:
                     error_file = ERROR_DEBUG_DIR / "system-errors.log"
                     with open(error_file, "a", encoding="utf-8") as f:
                         f.write(f"\n--- {datetime.now().isoformat()} ---\n")
-                        f.write(output)
+                        f.write(redact_sensitive(output))
 
                     # Also extract and log via Python logging
                     self._extract_and_log_errors("journald", output)

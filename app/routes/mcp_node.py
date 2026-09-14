@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import asyncio
 import json
+import hashlib
 import logging
 import uuid
 from datetime import datetime
@@ -432,8 +433,25 @@ async def websocket_connect(
     mode = websocket.query_params.get("mode", "full")
     is_telemetry_only = mode == "telemetry"
     is_workspace_node = mode == "workspace"
-    pair_code = str(websocket.query_params.get("pair_code") or "").strip().upper()
-    handoff_code = str(websocket.query_params.get("handoff_code") or "").strip().upper()
+    # Native clients keep workspace credentials out of URLs. Query parameters
+    # remain a compatibility fallback for older/browser clients; log formatters
+    # redact them while those clients are upgraded.
+    request_headers = getattr(websocket, "headers", {}) or {}
+    pair_code = str(
+        request_headers.get("x-ailinux-pair-code")
+        or websocket.query_params.get("pair_code")
+        or ""
+    ).strip().upper()
+    handoff_code = str(
+        request_headers.get("x-ailinux-handoff-code")
+        or websocket.query_params.get("handoff_code")
+        or ""
+    ).strip().upper()
+    machine_id = str(
+        request_headers.get("x-ailinux-machine-id")
+        or machine_id
+        or ""
+    ).strip() or None
     resume_token = ""
     handoff_context: dict[str, Any] = {}
     paired_mcp_session = None
@@ -498,9 +516,10 @@ async def websocket_connect(
     # Ownership and tier come from authenticated server state, never query claims.
     if is_workspace_node:
         workspace_credential_id = handoff_code or pair_code
+        credential_fingerprint = hashlib.sha256(workspace_credential_id.encode("utf-8")).hexdigest()[:12]
         resolved_user_id = (
             f"workspace:{paired_mcp_session[:12]}" if paired_mcp_session
-            else f"workspace:web:{workspace_credential_id.replace('-', '')[:12].lower()}"
+            else f"workspace:web:{credential_fingerprint}"
         )
     else:
         resolved_user_id = payload.get("sub") or client_id
@@ -515,6 +534,11 @@ async def websocket_connect(
             await websocket.close(code=4003, reason="Client identifier belongs to another account")
             return
     
+    if is_workspace_node and str(machine_id or "").lower() in {"android", "ios", "desktop", "pc", "client", "unknown"}:
+        logger.warning(
+            "Workspace client uses non-unique machine_id=%s; upgrade the client to persistent device identity",
+            machine_id,
+        )
     logger.info(f"MCP Node connecting: session={session_id}, machine={machine_id}, user={resolved_user_id}, tier={resolved_tier.value}, version={client_version}")
 
     # Client-Verbindung registrieren
@@ -593,6 +617,13 @@ async def websocket_connect(
                 share_manifest = build_share_manifest(share)
                 connection.share_manifest = share_manifest
                 legacy_share = legacy_workspace_view(share_manifest)
+                shared_capabilities = list(legacy_share.get("capabilities") or [])
+                logger.info(
+                    "Workspace capability manifest | client=%s count=%d capabilities=%s",
+                    client_id,
+                    len(shared_capabilities),
+                    shared_capabilities,
+                )
                 if workspace_pair_kind == "handoff" and handoff_context:
                     from app.services.mcp_workspace_sessions import complete_workspace_handoff
                     binding = complete_workspace_handoff(

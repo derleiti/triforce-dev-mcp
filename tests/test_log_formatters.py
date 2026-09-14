@@ -57,3 +57,49 @@ def test_console_format_can_colour_severity_category_and_status():
     assert 'DELETE' in text
     assert 'status=' in text
     assert '503' in text
+
+
+def test_console_redacts_workspace_credentials_and_tokens():
+    formatter = TriForceConsoleFormatter(use_color=False, include_source=False)
+    record = _record(
+        'uvicorn.error', logging.INFO,
+        'WebSocket /v1/mcp/node/connect?mode=workspace&pair_code=ABCD-EFGH&machine_id=android Authorization: Bearer topsecret',
+    )
+    text = formatter.format(record)
+    assert 'ABCD-EFGH' not in text
+    assert 'topsecret' not in text
+    assert 'pair_code=[REDACTED]' in text
+    assert 'Bearer [REDACTED]' in text
+
+
+def test_access_formatter_redacts_sensitive_query_parameters():
+    formatter = TriForceConsoleFormatter(use_color=False, include_source=False)
+    record = _record(
+        'uvicorn.access', logging.INFO,
+        '%s - "%s %s HTTP/%s" %d',
+        ('172.18.0.10:1234', 'GET', '/connect?handoff_code=SECRET-CODE&x=1', '1.1', 200),
+    )
+    text = formatter.format(record)
+    assert 'SECRET-CODE' not in text
+    assert 'handoff_code=[REDACTED]' in text
+
+
+def test_structured_failure_context_is_visible_without_arbitrary_extra_dump():
+    formatter = TriForceConsoleFormatter(use_color=False, include_source=False)
+    record = _record('ailinux.memory', logging.WARNING, 'memory_degraded')
+    record.failure_type = 'provider_timeout'
+    record.provider = 'episodic'
+    record.fallback = 'cache'
+    text = formatter.format(record)
+    assert 'failure=provider_timeout' in text
+    assert 'provider=episodic' in text
+    assert 'fallback=cache' in text
+
+
+def test_plain_file_formatter_redacts_secrets():
+    from app.utils.log_formatters import RedactingFormatter
+    formatter = RedactingFormatter('%(message)s')
+    record = _record('ailinux.mcp', logging.INFO, "payload={'resume_token': 'dont-log-me', 'ok': True}")
+    text = formatter.format(record)
+    assert 'dont-log-me' not in text
+    assert '[REDACTED]' in text

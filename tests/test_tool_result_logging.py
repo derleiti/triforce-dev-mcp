@@ -29,3 +29,11 @@ def test_call_tool_logs_structured_handler_failure_as_error():
     assert returned == result
     assert any("TOOL_CALL_RESULT_ERROR | browser_navigate" in call.args[0] for call in log_error.call_args_list)
     assert not any("TOOL_CALL_OK | browser_navigate" in call.args[0] for call in log_info.call_args_list)
+
+
+def test_tool_result_error_detects_process_and_structured_failures():
+    assert tool_result_error({"exit_code": 7, "stderr": "permission denied"}) == "process exited with code 7: permission denied"
+    assert tool_result_error({"timed_out": True, "exit_code": None}) == "execution timed out"
+    assert tool_result_error({"success": False, "message": "operation rejected"}) == "operation rejected"
+    assert tool_result_error({"ok": False, "error": "not authorized"}) == "not authorized"
+    assert tool_result_error({"status": "failed", "message": "provider unavailable"}) == "provider unavailable"

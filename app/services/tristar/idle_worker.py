@@ -313,7 +313,7 @@ async def run_idle_once(*, workspace: str | Path = DEFAULT_WORKSPACE, profile_id
             has_fallback = index + 1 < len(candidates)
             if result.status == "success" or not has_fallback or not _is_provider_fallback_error(result.error):
                 break
-            logger.info(
+            logger.warning(
                 "idle provider unavailable profile=%s model=%s; falling back to %s: %s",
                 candidate, model, candidates[index + 1], str(result.error or "")[:300],
             )

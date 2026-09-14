@@ -1,5 +1,5 @@
 # TriForce Backend Version
-VERSION = "2.86.6"
+VERSION = "2.86.7"
 
 from functools import lru_cache
 from typing import Dict, List, Optional, Literal
@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     server_port: int = Field(9100, ge=1, le=65535, validation_alias="TRIFORCE_API_PORT")
     server_keepalive: int = Field(75, ge=5, le=600, validation_alias="TRIFORCE_KEEPALIVE")
     server_graceful_shutdown: int = Field(5, ge=1, le=30, validation_alias="TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT")
+    # Uvicorn only honors Forwarded/X-Forwarded-* from these direct peers.
+    # Keep this list narrow: trusting arbitrary peers makes client IP spoofable.
+    forwarded_allow_ips: str = Field("127.0.0.1", validation_alias="TRIFORCE_FORWARDED_ALLOW_IPS")
     # WebSocket transport liveness. The interval keeps proxy/NAT paths warm,
     # the timeout must survive mobile background pauses and stay below the
     # workspace heartbeat so TriForce decides executor liveness, not Uvicorn.

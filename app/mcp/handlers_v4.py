@@ -11,6 +11,8 @@ Version: 4.0.0
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from typing import Any, Dict
 
 from app.mcp.tool_registry_v4 import (
@@ -1138,20 +1140,35 @@ async def call_tool(tool_name: str, params: Dict[str, Any]) -> Any:
         log_tool_call = None
         tool_result_error = lambda result: None
     
-    logger.info(f"TOOL_CALL_START | {tool_name} | params={list(params.keys())}")
-    
+    call_id = uuid.uuid4().hex[:12]
+    started = time.monotonic()
+    base_extra = {"tool_name": tool_name, "tool_call_id": call_id}
+    logger.info("TOOL_CALL_START | %s | params=%s", tool_name, list(params.keys()), extra=base_extra)
+
     try:
         result = await handler_registry.call(tool_name, params)
+        duration_ms = int((time.monotonic() - started) * 1000)
+        extra = {**base_extra, "duration_ms": duration_ms}
         result_error = tool_result_error(result)
+        if isinstance(result, dict):
+            if "exit_code" in result:
+                extra["exit_code"] = result.get("exit_code")
+            if "timed_out" in result:
+                extra["timed_out"] = bool(result.get("timed_out"))
+            if result.get("timed_out"):
+                result_error = result_error or "execution timed out"
+            elif result.get("exit_code") not in (None, 0):
+                result_error = result_error or f"process exited with code {result.get('exit_code')}"
         if result_error:
-            logger.error(f"TOOL_CALL_RESULT_ERROR | {tool_name} | error={result_error}")
+            logger.error(f"TOOL_CALL_RESULT_ERROR | {tool_name} | error={str(result_error)[:300]}", extra=extra)
         else:
-            logger.info(f"TOOL_CALL_OK | {tool_name} | result_type={type(result).__name__}")
+            logger.info(f"TOOL_CALL_OK | {tool_name} | result_type={type(result).__name__}", extra=extra)
         if log_tool_call:
             log_tool_call(tool_name, params, result=result)
         return result
     except Exception as e:
-        logger.error(f"TOOL_CALL_ERROR | {tool_name} | error={e}")
+        duration_ms = int((time.monotonic() - started) * 1000)
+        logger.error("TOOL_CALL_ERROR | %s | error=%s", tool_name, str(e)[:300], extra={**base_extra, "duration_ms": duration_ms})
         if log_tool_call:
             log_tool_call(tool_name, params, error=str(e))
         raise

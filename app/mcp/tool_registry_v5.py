@@ -1380,24 +1380,6 @@ V5_TOOLS += [
         },
     },
     {
-        "name": "flarum_discussions",
-        "description": (
-            "Listet oder durchsucht Flarum-Discussions. "
-            "Unterstützt Suche, Tag-Filter und Sortierung. "
-            "Gibt Titel, ID, Post-Anzahl, URL und Zeitstempel zurück."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query":  {"type": "string", "description": "Suchbegriff (optional)"},
-                "tag":    {"type": "string", "description": "Tag-Slug Filter (optional)"},
-                "sort":   {"type": "string", "enum": ["newest", "top", "latest"], "description": "Sortierung (default: latest)"},
-                "limit":  {"type": "integer", "description": "Max Einträge (default: 20, max: 50)"},
-                "offset": {"type": "integer", "description": "Pagination offset"},
-            },
-        },
-    },
-    {
         "name": "flarum_discussion",
         "description": "Liest eine einzelne Discussion mit allen Posts. Gibt vollständigen Thread-Inhalt zurück.",
         "inputSchema": {
@@ -1420,59 +1402,6 @@ V5_TOOLS += [
                 "author_id":     {"type": "string", "description": "Nur Posts dieses Users"},
             },
         },
-    },
-    {
-        "name": "flarum_post_create",
-        "description": "Schreibt einen neuen Post in eine Discussion (als Nova/ailinux-nova-ai). Inhalt in Markdown.",
-        "inputSchema": {
-            "type": "object",
-            "required": ["discussion_id", "content"],
-            "properties": {
-                "discussion_id": {"type": "string", "description": "Discussion ID"},
-                "content":       {"type": "string", "description": "Post-Inhalt (Markdown)"},
-            },
-        },
-    },
-    {
-        "name": "flarum_post_edit",
-        "description": "Bearbeitet einen bestehenden eigenen Post. Nur für Posts von Nova/ailinux-nova-ai.",
-        "inputSchema": {
-            "type": "object",
-            "required": ["post_id", "content"],
-            "properties": {
-                "post_id": {"type": "string", "description": "Post ID"},
-                "content": {"type": "string", "description": "Neuer Inhalt (Markdown)"},
-            },
-        },
-    },
-    {
-        "name": "flarum_discussion_create",
-        "description": "Erstellt eine neue Discussion im Forum (als Nova). Titel, Inhalt und optionale Tags.",
-        "inputSchema": {
-            "type": "object",
-            "required": ["title", "content"],
-            "properties": {
-                "title":   {"type": "string", "description": "Discussion-Titel"},
-                "content": {"type": "string", "description": "Erster Post-Inhalt (Markdown)"},
-                "tag_ids": {"type": "array", "items": {"type": "integer"}, "description": "Tag-IDs (optional)"},
-            },
-        },
-    },
-    {
-        "name": "flarum_users",
-        "description": "Listet Forum-User mit Stats (Discussions, Posts, Admin-Status).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "limit": {"type": "integer", "description": "Max Einträge (default: 20)"},
-                "query": {"type": "string", "description": "Username-Filter (optional)"},
-            },
-        },
-    },
-    {
-        "name": "flarum_tags",
-        "description": "Listet alle verfügbaren Forum-Tags mit ID, Slug, Beschreibung und Discussion-Anzahl.",
-        "inputSchema": {"type": "object", "properties": {}},
     },
     # ── Notification Manager ──────────────────────────────────────────────────
     {

@@ -12,7 +12,7 @@ from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from .log_formatters import TriForceConsoleFormatter
+from .log_formatters import RedactingFormatter, TriForceConsoleFormatter
 
 # Directories
 _BASE = Path(__file__).parent.parent.parent
@@ -55,7 +55,7 @@ def _handler(path: str, level: int = logging.DEBUG) -> RotatingFileHandler:
     """Cached rotating file handler factory."""
     h = RotatingFileHandler(path, maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     h.setLevel(level)
-    h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     return h
 
 
@@ -131,20 +131,20 @@ def _setup_error_debug(root: logging.Logger) -> None:
     # Error handler
     err_h = RotatingFileHandler(target / "error.log", maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     err_h.setLevel(logging.ERROR)
-    err_h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    err_h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     root.addHandler(err_h)
 
     # Debug handler (DEBUG only)
     dbg_h = RotatingFileHandler(target / "debug.log", maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     dbg_h.setLevel(logging.DEBUG)
-    dbg_h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    dbg_h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     dbg_h.addFilter(LevelFilter(logging.DEBUG))
     root.addHandler(dbg_h)
 
     # Warning handler (WARNING only)
     warn_h = RotatingFileHandler(target / "warning.log", maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     warn_h.setLevel(logging.WARNING)
-    warn_h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    warn_h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     warn_h.addFilter(LevelFilter(logging.WARNING))
     root.addHandler(warn_h)
 

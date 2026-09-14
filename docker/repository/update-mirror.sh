@@ -429,6 +429,11 @@ ensure_local_repo_tree() {
     # The project-level pool is the recoverable source of truth. Do not use
     # --delete here: packages published directly into the live pool are kept.
     cp -a "$staging_pool/." "$local_repo/pool/"
+    # Release assets may arrive with a restrictive 0640 mode. The repository
+    # nginx worker is intentionally unprivileged, so published package payloads
+    # must be world-readable just like generated APT metadata.
+    find "$local_repo/pool" -type d -exec chmod 0755 {} +
+    find "$local_repo/pool" -type f -name '*.deb' -exec chmod 0644 {} +
 
     local package_count
     package_count=$(find "$local_repo/pool" -type f -name '*.deb' 2>/dev/null | wc -l | tr -d ' ')
@@ -444,7 +449,9 @@ step_generate_packages() {
     local kernel_meta_script="${REPO_ROOT}/update-kernel-meta.sh"
     if [[ -x "$kernel_meta_script" ]]; then
         log "Updating AILinux kernel meta package before repository scan..."
-        if REPO_ROOT="$REPO_ROOT" bash "$kernel_meta_script" 2>&1 | tee -a "$LOGFILE"; then
+        # dpkg-deb requires DEBIAN/ to remain at least 0755. Service umasks can
+        # otherwise create it as 0750, so isolate the generator under umask 022.
+        if (umask 022; REPO_ROOT="$REPO_ROOT" bash "$kernel_meta_script") 2>&1 | tee -a "$LOGFILE"; then
             log_ok "AILinux kernel meta package updated"
         else
             log_err "AILinux kernel meta package update failed"

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -67,6 +68,36 @@ def _paint(text: str, style: str, enabled: bool) -> str:
     if not enabled or not style:
         return text
     return f"{style}{text}{_RESET}"
+
+
+def redact_sensitive(value: Any) -> str:
+    """Redact credentials from arbitrary log text without mutating application data."""
+    text = str(value)
+    key = r"(?:pair_code|handoff_code|resume_token|access_token|refresh_token|api_key|apikey)"
+    # Authorization schemes need to be handled before generic key/value masking.
+    text = re.sub(r"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+", r"\1[REDACTED]", text)
+    # URL query strings.
+    text = re.sub(rf"(?i)([?&]{key}=)[^&#\s]+", lambda m: f"{m.group(1)}[REDACTED]", text)
+    # Dict/JSON/logfmt values surrounded by quotes.
+    text = re.sub(
+        rf"(?i)((?:['\"]?){key}(?:['\"]?)\s*[:=]\s*['\"])[^'\"]*(['\"])",
+        lambda m: f"{m.group(1)}[REDACTED]{m.group(2)}",
+        text,
+    )
+    # Remaining unquoted key/value forms.
+    text = re.sub(
+        rf"(?i)(\b{key}\b\s*[:=]\s*)(?!\[REDACTED\])[^\s,;&}}\]]+",
+        lambda m: f"{m.group(1)}[REDACTED]",
+        text,
+    )
+    return text
+
+
+class RedactingFormatter(logging.Formatter):
+    """Plain file formatter that applies the same credential redaction as the console."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_sensitive(super().format(record))
 
 
 def _status_style(status: int) -> str:
@@ -141,6 +172,13 @@ class TriForceConsoleFormatter(logging.Formatter):
             ("session_id", "sess"),
             ("agent_id", "agent"),
             ("tool_name", "tool"),
+            ("tool_call_id", "call"),
+            ("failure_type", "failure"),
+            ("provider", "provider"),
+            ("fallback", "fallback"),
+            ("duration_ms", "ms"),
+            ("exit_code", "exit"),
+            ("timed_out", "timeout"),
         ):
             value = getattr(record, key, None)
             if value not in (None, ""):
@@ -175,12 +213,13 @@ class TriForceConsoleFormatter(logging.Formatter):
         method_field = _paint(f"{method_text:<7}", _METHOD_STYLE.get(method_text, ""), self.use_color)
         status_field = _paint(str(status), _status_style(status), self.use_color)
         client_field = _paint(str(client), _DIM, self.use_color)
-        return f"{client_field} │ {method_field} {path} HTTP/{http_version} │ status={status_field}"
+        safe_path = redact_sensitive(path)
+        return f"{client_field} │ {method_field} {safe_path} HTTP/{http_version} │ status={status_field}"
 
     def format(self, record: logging.LogRecord) -> str:
         prefix = self._prefix(record)
         access_message = self._access_message(record)
-        message = access_message if access_message is not None else record.getMessage()
+        message = access_message if access_message is not None else redact_sensitive(record.getMessage())
 
         context = self._context(record)
         if context:
@@ -198,7 +237,7 @@ class TriForceConsoleFormatter(logging.Formatter):
             rendered += "\n" + continuation
 
         if record.exc_info:
-            exc = self.formatException(record.exc_info)
+            exc = redact_sensitive(self.formatException(record.exc_info))
             rendered += "\n" + "\n".join(f"    │ {line}" for line in exc.splitlines())
         if record.stack_info:
             rendered += "\n" + "\n".join(f"    │ {line}" for line in self.formatStack(record.stack_info).splitlines())

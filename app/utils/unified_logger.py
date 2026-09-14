@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-from .log_formatters import TriForceConsoleFormatter
+from .log_formatters import TriForceConsoleFormatter, redact_sensitive
 
 UNIFIED_LOG_PATH = Path(os.environ.get("TRIFORCE_LOG_DIR", str(Path(__file__).parent.parent.parent / "logs"))) / "unified.log"
 UNIFIED_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -24,7 +24,7 @@ class UnifiedFormatter(logging.Formatter):
         if len(name) > 25:
             name = name[:22] + "..."
         record.short_name = name.ljust(25)
-        return super().format(record)
+        return redact_sensitive(super().format(record))
 
 LOG_FORMAT = '%(asctime)s|%(levelname)-7s|%(short_name)s|%(message)s'
 LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
@@ -90,18 +90,35 @@ def tool_result_error(result):
             return None
     if not isinstance(payload, dict):
         return None
+    if payload.get("timed_out") is True:
+        return "execution timed out"
+    exit_code = payload.get("exit_code")
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code != 0:
+        detail = payload.get("stderr") or payload.get("errors") or payload.get("error")
+        return f"process exited with code {exit_code}" + (f": {str(detail)[:240]}" if detail else "")
+    if payload.get("success") is False or payload.get("ok") is False:
+        detail = payload.get("error") or payload.get("errors") or payload.get("message") or "structured failure"
+        return str(detail)[:300]
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {"error", "failed", "failure"}:
+        return str(payload.get("error") or payload.get("message") or status)[:300]
     error = payload.get("error")
     if error in (None, "", False):
         return None
     if isinstance(error, dict):
-        return str(error.get("message") or error.get("detail") or error)
-    return str(error)
+        return str(error.get("message") or error.get("detail") or error)[:300]
+    return str(error)[:300]
 
 def log_tool_call(tool_name: str, params: dict, result=None, error=None):
+    """Audit a tool call without copying commands, prompts, stdout or credentials into logs."""
     logger = logging.getLogger("ailinux.mcp.tools")
     structured_error = error or tool_result_error(result)
+    safe_meta = {"tool_name": tool_name}
+    if isinstance(result, dict):
+        for key in ("exit_code", "timed_out", "elapsed_ms"):
+            if key in result:
+                safe_meta["duration_ms" if key == "elapsed_ms" else key] = result.get(key)
     if structured_error:
-        logger.error(f"TOOL_CALL | {tool_name} | ERROR: {structured_error}")
+        logger.error("TOOL_CALL | %s | ERROR | %s", tool_name, str(structured_error)[:300], extra=safe_meta)
     else:
-        result_preview = str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
-        logger.info(f"TOOL_CALL | {tool_name} | OK | {result_preview}")
+        logger.info("TOOL_CALL | %s | OK | result_type=%s", tool_name, type(result).__name__, extra=safe_meta)

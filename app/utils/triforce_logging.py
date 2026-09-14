@@ -25,6 +25,7 @@ from enum import Enum
 from pathlib import Path
 
 from app.paths import LOG_DIR
+from app.utils.log_formatters import redact_sensitive
 from typing import Any, Dict, List, Optional, Set
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -223,7 +224,7 @@ class TriForceLogHandler(logging.Handler):
                 category=category,
                 level=level,
                 source=record.name,
-                message=record.getMessage(),
+                message=redact_sensitive(record.getMessage()),
                 metadata={
                     "filename": record.filename,
                     "lineno": record.lineno,
@@ -235,8 +236,8 @@ class TriForceLogHandler(logging.Handler):
             if record.exc_info:
                 import traceback
                 entry.error_type = record.exc_info[0].__name__ if record.exc_info[0] else None
-                entry.error_message = str(record.exc_info[1]) if record.exc_info[1] else None
-                entry.stack_trace = ''.join(traceback.format_exception(*record.exc_info))
+                entry.error_message = redact_sensitive(record.exc_info[1]) if record.exc_info[1] else None
+                entry.stack_trace = redact_sensitive(''.join(traceback.format_exception(*record.exc_info)))
 
             # Queue for async processing
             self.central_logger.queue_log(entry)

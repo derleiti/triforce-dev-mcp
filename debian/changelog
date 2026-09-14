@@ -1,3 +1,14 @@
+triforce-backend (1:2.86.7-1) noble; urgency=medium
+
+  * Redact pair, handoff, resume and API credentials from console and file logs.
+  * Add tool-call IDs, durations and structured execution outcome context.
+  * Prefer workspace pairing credentials in WebSocket headers with URL fallback compatibility.
+  * Remove duplicate Flarum V5 schema definitions from model discovery.
+  * Make repository package publishing normalize directory/file permissions for nginx.
+  * Fix kernel meta-package builds under restrictive service umasks.
+
+ -- AILinux <admin@ailinux.me>  Mon, 14 Sep 2026 13:45:00 +0200
+
 triforce-backend (1:2.86.6-1) noble; urgency=medium
 
   * Add structured, color-organized Uvicorn/TriForce operator logging with subsystem badges, HTTP method/status highlighting and source context.
