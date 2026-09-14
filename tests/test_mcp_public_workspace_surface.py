@@ -32,8 +32,14 @@ async def test_public_guest_defaults_local_capabilities_off_until_share_exists()
     # No local resource is advertised before the client explicitly shared it.
     assert {'shell', 'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
             'workspace_info', 'file_read', 'file_tree', 'file_edit',
-            'directory_create', 'workspace_clear', 'computer_observe',
-            'computer_screenshot', 'clipboard_read', 'clipboard_write'}.isdisjoint(names)
+            'directory_create', 'workspace_clear', 'clipboard_read', 'clipboard_write'}.isdisjoint(names)
+
+    # Static connectors discover native vision/input before pairing, but the
+    # schemas are explicitly locked until a workspace/helper lease exists.
+    for name in {'computer_observe', 'computer_screenshot', 'computer_input'}:
+        assert name in names
+        assert by_name[name]['x_execution'] == 'local_workspace'
+        assert by_name[name]['x_requires_workspace'] is True
 
     # Shared-service administration is intentionally absent from Local MCP.
     assert not any(name.startswith('mail_') for name in names)

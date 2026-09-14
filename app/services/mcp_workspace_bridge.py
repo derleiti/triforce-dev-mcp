@@ -59,6 +59,10 @@ LOCAL_TOOL_NAMES = WRITE_TOOLS
 # product domains intentionally stay invisible because they operate privileged
 # shared services rather than the user's paired workspace.
 LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
+# Static MCP clients may cache tools/list before the user pairs a native Helper.
+# Keep the AI-facing vision/input schemas discoverable, but mark them locked;
+# execution still requires a live lease, advertised capability and manifest grant.
+DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset({"computer_observe", "computer_screenshot", "computer_input"})
 WORKSPACE_EXECUTOR_WAIT_SECONDS = 25.0
 WORKSPACE_EXECUTOR_POLL_SECONDS = 0.25
 
@@ -236,11 +240,14 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             inventory = str(tool.get("x_inventory") or "misc")
             if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
                 continue
-            if name in LOCAL_TOOL_NAMES and not _local_tool_visible(name, binding):
+            locked_local = name in LOCAL_TOOL_NAMES and not _local_tool_visible(name, binding)
+            if locked_local and not (binding is None and name in DISCOVERABLE_LOCKED_LOCAL_TOOLS):
                 continue
             cloned = deepcopy(tool)
             execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
             cloned["x_execution"] = execution
+            if locked_local:
+                cloned["x_requires_workspace"] = True
             if execution == "triforce_server" and name in PRIVILEGED_TOOLS:
                 cloned["x_requires_admin"] = True
             merged[name] = cloned
