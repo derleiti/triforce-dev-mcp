@@ -41,6 +41,8 @@ services:
     volumes:
       - ${FLARUM_ASSETS_PATH:-./flarum/assets}:/flarum/app/public/assets:rw
       - ${FLARUM_EXTENSIONS_PATH:-./flarum/extensions}:/flarum/app/extensions:rw
+      - ./extensions.list:/flarum/app/extensions/list:ro
+      - ./custom-vhost-flarum.conf:/etc/nginx/flarum/custom-vhost-flarum.conf:ro
       - ${FLARUM_STORAGE_PATH:-./flarum/storage}:/flarum/app/storage:rw
     networks:
       - ${FLARUM_NETWORK:-flarum-network}

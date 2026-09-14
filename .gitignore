@@ -274,6 +274,8 @@ docker/wordpress/.cf_token.DISABLED
 docker/flarum/*
 !docker/flarum/docker-compose.yml
 !docker/flarum/README.md
+!docker/flarum/extensions.list
+!docker/flarum/custom-vhost-flarum.conf
 
 !docker/mailserver/
 docker/mailserver/*
