@@ -31,7 +31,7 @@ fastapi==0.141.1
 fastapi-limiter==0.2.0
 filelock==3.32.6
 frozenlist==1.8.0
-google-ai-generativelanguage==0.6.15
+google-ai-generativelanguage==0.12.0
 google-api-core==2.25.2
 google-api-python-client==2.200.0
 googleapis-common-protos==1.75.0
