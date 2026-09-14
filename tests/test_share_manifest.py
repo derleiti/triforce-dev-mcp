@@ -246,3 +246,21 @@ def test_display_observe_and_control_are_independent():
     assert display["enabled"] is True
     assert display["observe"] is False
     assert display["control"] is True
+
+
+def test_android_remote_compute_requires_explicit_capability_and_preserves_runtime():
+    manifest = build_share_manifest({
+        "access_mode": "write",
+        "capabilities": READ_CAPS + WRITE_CAPS + ["compute_execute"],
+        "resources": {"native": {"compute": {
+            "remote_requested": True,
+            "runtime": "triforce_docker",
+            "available": True,
+            "ephemeral": True,
+        }}},
+    })
+    compute = manifest_resource(manifest, RESOURCE_COMPUTE)
+    assert compute["enabled"] is True
+    assert compute["runtime"] == "triforce_docker"
+    assert compute["available"] is True
+    assert manifest_has_grant(manifest, RESOURCE_COMPUTE, "execute") is True

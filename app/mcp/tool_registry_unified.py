@@ -220,11 +220,90 @@ CORE_TOOL_NAMES = frozenset({
 })
 
 
+SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
+    "debug": {
+        "description": "Failure analysis, logs, telemetry, MCP diagnostics and bounded status evidence.",
+        "tools": {"debug", "log_viewer", "mcp_analytics", "status"},
+    },
+    "code": {
+        "description": "Source inspection, search, structured code edits and version-control work.",
+        "tools": {"code_read", "code_search", "code_tree", "code_edit", "code_grep", "git"},
+    },
+    "files": {
+        "description": "General file and directory inspection or mutation without implying code semantics.",
+        "tools": {"file_read", "file_tree", "file_edit", "file_ops", "directory_create"},
+    },
+    "vision": {
+        "description": "Screen/browser observation and screenshots; input control remains a separate device-control capability.",
+        "tools": {"computer_observe", "computer_screenshot", "browser_screenshot"},
+    },
+    "system": {
+        "description": "Portable host/device state, processes, services, applications and container/system control.",
+        "tools": {"device_info", "process_ops", "service_ops", "app_ops", "status", "service_control", "container_control", "docker_stack"},
+    },
+    "research": {
+        "description": "Current web/document research plus scoped memory recall for evidence-backed work.",
+        "tools": {"search", "crawl", "memory_search", "memory_history"},
+    },
+    "automation": {
+        "description": "Execution and workflow automation primitives. Prefer typed tools over shell-like execution.",
+        "inventories": {"execution", "integration"},
+    },
+    "communication": {
+        "description": "Mail, notifications, forum and publishing surfaces.",
+        "inventories": {"mail", "forum", "wordpress", "observability"},
+        "exclude_tools": {"log_viewer", "mcp_analytics"},
+    },
+    "collaboration": {
+        "description": "AI agents, group chat and orchestration tools.",
+        "inventories": {"agents", "group_chat", "swarm", "ai"},
+    },
+}
+
+
+def _semantic_inventory_groups(tool: Dict[str, Any]) -> List[str]:
+    name = str(tool.get("name") or "")
+    inventory = str(tool.get("x_inventory") or _inventory_for_tool(name))
+    groups: List[str] = []
+    for profile, rule in SEMANTIC_INVENTORY_PROFILES.items():
+        tools = set(rule.get("tools") or ())
+        inventories = set(rule.get("inventories") or ())
+        excluded = set(rule.get("exclude_tools") or ())
+        if name in excluded:
+            continue
+        if name in tools or inventory in inventories:
+            groups.append(profile)
+    return sorted(set(groups))
+
+
+def usage_hint_for_tool(tool: Dict[str, Any]) -> str:
+    name = str(tool.get("name") or "")
+    annotations = tool.get("annotations") or {}
+    if annotations.get("readOnlyHint") is True:
+        effect = "read-only"
+    elif annotations.get("destructiveHint") is True:
+        effect = "destructive; verify target and backup first"
+    else:
+        effect = "may change state; use approval/backup workflow"
+    groups = _semantic_inventory_groups(tool)
+    group_hint = ", ".join(groups[:3]) or str(tool.get("x_inventory") or "misc")
+    return f"{group_hint}; {effect}"
+
+
+def get_inventory_catalog(tools: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Compact discovery index; semantic profiles never grant authority."""
+    catalog: Dict[str, Dict[str, Any]] = {}
+    canonical = get_inventory_map(tools)
+    for name, members in canonical.items():
+        catalog[name] = {"count": len(members), "description": f"Canonical {name} security/ownership inventory."}
+    for profile, rule in SEMANTIC_INVENTORY_PROFILES.items():
+        members = filter_tools_by_inventory(tools, profile)
+        catalog[profile] = {"count": len(members), "description": str(rule.get("description") or "")}
+    return dict(sorted(catalog.items()))
+
+
 INVENTORY_SYNONYMS: Dict[str, str] = {
-    "code": "filesystem",
-    "files": "filesystem",
     "fs": "filesystem",
-    "system": "admin",
     "ops": "admin",
     "config": "settings",
     "prompts": "settings",
@@ -354,6 +433,8 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     for tool in tools:
         name = tool.get("name", "")
         tool.setdefault("x_inventory", _inventory_for_tool(name))
+        tool.setdefault("x_inventory_groups", _semantic_inventory_groups(tool))
+        tool.setdefault("x_usage_hint", usage_hint_for_tool(tool))
     return tools
 
 
@@ -404,7 +485,11 @@ def filter_tools_by_inventory(tools: List[Dict[str, Any]], inventory: str) -> Li
     wanted = INVENTORY_SYNONYMS.get(wanted, wanted)
     if not wanted or wanted in ("all", "*"):
         return tools
-    return [tool for tool in tools if (tool.get("x_inventory") or _inventory_for_tool(tool.get("name", ""))) == wanted]
+    return [
+        tool for tool in tools
+        if (tool.get("x_inventory") or _inventory_for_tool(tool.get("name", ""))) == wanted
+        or wanted in set(tool.get("x_inventory_groups") or _semantic_inventory_groups(tool))
+    ]
 
 
 def filter_tools_for_profile(tools: List[Dict[str, Any]], profile: str) -> List[Dict[str, Any]]:
@@ -432,6 +517,8 @@ def decorate_tools(
         t = deepcopy(tool)
         name = t.get("name", "")
         t["x_inventory"] = t.get("x_inventory") or _inventory_for_tool(name)
+        t["x_inventory_groups"] = t.get("x_inventory_groups") or _semantic_inventory_groups(t)
+        t["x_usage_hint"] = t.get("x_usage_hint") or usage_hint_for_tool(t)
         if include_links:
             t["x_call"] = {
                 "method": "tools/call",

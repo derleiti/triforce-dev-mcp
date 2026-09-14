@@ -282,3 +282,44 @@ For long-running operations, use SSE endpoint:
 curl -N "https://api.ailinux.me/v1/mcp/sse" \
   -H "Authorization: Basic <credentials>"
 ```
+
+## Semantic inventory discovery
+
+TriForce keeps **authorization inventories** (`admin`, `filesystem`, `device`, …) separate from **semantic discovery profiles**. The semantic profiles are intentionally overlapping and exist only to reduce model context:
+
+- `debug` — logs, MCP analytics, bounded status and failure evidence
+- `code` — source search/read/edit and Git
+- `files` — general file/directory operations
+- `vision` — screen/browser observation and screenshots
+- `system` — host/device/process/service/application/container operations
+- `research` — current web/document research plus scoped memory recall
+- `automation` — execution/integration primitives
+- `communication` — mail, notifications, forum and publishing
+- `collaboration` — agents, AI and group orchestration
+
+Clients should start with the smallest relevant profile and expand only when needed. `x_inventory_groups` and `x_usage_hint` are discovery metadata; they never grant access or weaken per-tool RBAC, local approval, capability grants, or destructive-action policy.
+
+### AI change discipline
+
+For state-changing development work the common policy is: persistent `.workspacebackup` first, coherent architecture inspection, evidence-based root-cause analysis, smallest correct patch, focused regression tests plus relevant logs/reproducer, documentation update, then a reusable feature-memory summary. Version-sensitive framework/API/security assumptions are verified against current primary documentation. Existing authoritative documentation is updated in place; when no project change log exists, `docs/AI_CHANGELOG.md` is the fallback record.
+
+## Session Docker compute sandbox
+
+`compute_execute` may be granted by AILinux Helper as a **separate remote-compute capability**. It never turns the TriForce host into a shell target and does not expose Android Termux.
+
+For the `triforce_docker` runtime TriForce creates an ephemeral, per-session Docker execution environment with these invariants:
+
+- explicit Helper opt-in is required (`compute_execute` + compute `execute` grant),
+- the container has public Internet egress but traffic to the TriForce host, RFC1918/private networks, link-local and other reserved destinations is rejected,
+- Docker host networking, published ports, devices, privileged mode and `/var/run/docker.sock` are never exposed,
+- all Linux capabilities are dropped, `no-new-privileges` is enabled, the root filesystem is read-only, and CPU/memory/PID limits apply,
+- the only host bind mount is a bounded per-session mirror of the explicitly paired workspace,
+- inside the container that share is available as `~/workspace`,
+- read-only shares are mounted read-only; write shares are synchronized back only after creating `.workspacebackup/<run>-compute-sandbox/backup.md` and copies of changed/deleted files,
+- the current mirror contract is UTF-8/source-oriented (1000 files, 2 MiB/file, 64 MiB total); unsupported/binary content is never silently rewritten.
+
+The dedicated `triforce-sandbox-egress` network uses an isolated subnet and fail-closed host firewall rules. If TriForce cannot verify the expected subnet or install the isolation rules, compute execution is refused.
+
+### Restart-safe workspace pairing
+
+Web-first pair tickets are persisted in Redis **by SHA-256 hash only** for their short TTL. The raw pairing code is never persisted. This lets an Android/Helper executor reconnect after a TriForce restart or worker handoff without turning a still-valid code into `WORKSPACE_PAIR_FAILED`. Once a durable workspace lease exists, the ordinary lease/resume indexes replace the temporary pair-ticket record.

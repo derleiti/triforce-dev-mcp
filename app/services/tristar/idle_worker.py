@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from app.paths import PROJECT_ROOT
-from ..aicoder_runner import AICoderRunner, apply_profile_state, load_profile, prepare_instance_home
+from ..aicoder_runner import (
+    AICoderRunResult, AICoderRunner, apply_profile_state, load_profile,
+    prepare_instance_home, query_account_provider_quota,
+)
 from .idle_prompt import WORK_CATALOGUE, build_idle_prompt
 
 logger = logging.getLogger("ailinux.tristar.idle_worker")
@@ -62,6 +65,24 @@ def _automatic_profile_candidates(selected: str) -> list[str]:
         return [selected]
     start = DEFAULT_PROFILES.index(selected)
     return [DEFAULT_PROFILES[(start + offset) % len(DEFAULT_PROFILES)] for offset in range(len(DEFAULT_PROFILES))]
+
+
+async def _provider_preflight(model: str) -> str:
+    """Return a fail-fast availability error for known account-provider outages."""
+    value = str(model or "").strip()
+    if not value.startswith("account:gemini/"):
+        return ""
+    quota = await query_account_provider_quota("gemini")
+    if quota.get("quota_exhausted") is not True:
+        return ""
+    reset_at = str(quota.get("quota_reset_at") or "").strip()
+    retry_after = max(0, int(quota.get("quota_retry_after_seconds") or 0))
+    detail = "Gemini/Antigravity quota exhausted"
+    if reset_at:
+        detail += f" until {reset_at}"
+    elif retry_after:
+        detail += f"; retry after about {retry_after}s"
+    return detail
 
 
 class IdleLeaseCoordinator:
@@ -271,15 +292,22 @@ async def run_idle_once(*, workspace: str | Path = DEFAULT_WORKSPACE, profile_id
             profile = load_profile(candidate)
             model = str(profile.get("model") or "")
             provider = model.split(":", 1)[-1].split("/", 1)[0] if model else candidate
-            async with lease_coordinator.idle(str(root), provider):
-                home = prepare_instance_home(f"idle-{candidate}")
-                isolated = dict(profile)
-                isolated.update({"workspace": str(snapshot), "enabled_tools": READ_ONLY_TOOLS, "approval_mode": "never", "team_mode": "off"})
-                apply_profile_state(home, isolated)
-                result = await AICoderRunner().run(
-                    profile_id=f"idle-{candidate}", prompt=prompt, model=model or None,
-                    workspace=snapshot, home=home,
-                    timeout=int(timeout or os.environ.get("TRISTAR_IDLE_TIMEOUT", "300")), team_mode="off")
+            preflight_error = await _provider_preflight(model)
+            if preflight_error:
+                result = AICoderRunResult(
+                    profile_id=f"idle-{candidate}", status="error", model=model,
+                    error=preflight_error,
+                )
+            else:
+                async with lease_coordinator.idle(str(root), provider):
+                    home = prepare_instance_home(f"idle-{candidate}")
+                    isolated = dict(profile)
+                    isolated.update({"workspace": str(snapshot), "enabled_tools": READ_ONLY_TOOLS, "approval_mode": "never", "team_mode": "off"})
+                    apply_profile_state(home, isolated)
+                    result = await AICoderRunner().run(
+                        profile_id=f"idle-{candidate}", prompt=prompt, model=model or None,
+                        workspace=snapshot, home=home,
+                        timeout=int(timeout or os.environ.get("TRISTAR_IDLE_TIMEOUT", "300")), team_mode="off")
             has_fallback = index + 1 < len(candidates)
             if result.status == "success" or not has_fallback or not _is_provider_fallback_error(result.error):
                 break

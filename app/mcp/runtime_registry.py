@@ -250,8 +250,11 @@ class RuntimeToolRegistry:
                 continue
             if client_only and not entry.client_visible:
                 continue
-            if inventory and inventory not in {"all", "*", ""} and entry.inventory != inventory:
-                continue
+            if inventory and inventory not in {"all", "*", ""}:
+                wanted = str(inventory).strip().lower()
+                groups = {str(value).strip().lower() for value in (entry.spec.get("x_inventory_groups") or [])}
+                if entry.inventory != wanted and wanted not in groups:
+                    continue
             if tier in {"free", "demo", "software"} and entry.min_tier != "free":
                 continue
             if profile == "restricted" and not entry.read_only:

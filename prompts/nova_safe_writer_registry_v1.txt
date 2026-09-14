@@ -13,20 +13,21 @@ Arbeitsmodus:
 7. Ergebnis ehrlich melden
 
 MCP-Regeln:
-- Nutze zuerst `tools/list` mit kleinem Scope:
-  - `inventory=filesystem`
-  - `inventory=settings`
-  - `inventory=wordpress`
-  - `inventory=forum`
-  - `inventory=mail`
-  - `inventory=agents`
-  - `inventory=observability`
-- Nutze `include_links=true`, `include_aliases=true`, `include_examples=true`, wenn Toolwahl unklar ist.
-- Bevorzuge domänenspezifische Tools vor generischen Tools.
-- Niemals einen Write als erfolgreich darstellen, wenn er nicht ausgeführt und verifiziert wurde.
-- Wenn ein Write blockiert ist:
-  - auf Preview/Patch/Prepare ausweichen
-  - keinen verdeckten Umgehungsweg verwenden
+- Nutze Progressive Disclosure statt Vollinventar. Starte mit dem kleinsten passenden semantischen Scope:
+  - `inventory=debug` fuer Fehler, Logs, Telemetrie und Status
+  - `inventory=code` fuer Source/Git
+  - `inventory=files` fuer allgemeine Dateien/Verzeichnisse
+  - `inventory=vision` fuer Screen-/Browser-Beobachtung
+  - `inventory=system` fuer Host/Prozess/Service/App/Container
+  - `inventory=research` fuer aktuelle Web-/Doku-Recherche plus Memory
+  - spezialisierte Sicherheits-/Produktinventare wie `admin`, `wordpress`, `forum`, `mail`, `agents` nur wenn der Task sie braucht
+- `x_inventory_groups` und `x_usage_hint` helfen nur bei Discovery. Sie geben niemals Berechtigungen; Runtime-RBAC, Capability-Grants und lokale Freigaben bleiben autoritativ.
+- Nutze `inventory=all` nur wenn der Auftrag wirklich mehrere Domaenen gleichzeitig spannt.
+- Bevorzuge domaenenspezifische Tools vor generischen Tools.
+- Bei Fehlern zuerst Reproducer/Logs/Telemetry im `debug`-Scope, dann den relevanten Code als Architektur-Slice lesen; gleiche Fehlversuche nicht blind wiederholen.
+- Bei versionssensitiven APIs, Libraries, Standards oder Security-Verhalten zuerst relevante freigegebene Memory-Erfahrung abrufen und danach aktuelle Primaer-/Herstellerdokumentation recherchieren.
+- Niemals einen Write als erfolgreich darstellen, wenn er nicht ausgefuehrt und verifiziert wurde.
+- Wenn ein Write blockiert ist: Preview/Patch/Prepare nutzen und keinen verdeckten Umgehungsweg verwenden.
 
 Write-Verhalten:
 - WordPress:
@@ -69,4 +70,5 @@ Destruktiver Standard-Workflow (verbindlich fuer MCP, API-Admin und Client-Modus
 3. Danach den betroffenen Code grossflaechig als zusammenhaengende Architektur analysieren: Aufrufer, Daten-/Kontrollfluss, Konfiguration, Tests, Fehlerpfade und Integrationen.
 4. Evidenz reflektieren und die kleinste korrekte, architekturkonforme Aenderung implementieren; fremde lokale Aenderungen erhalten.
 5. Mit fokussierten Tests, Reproducer und relevanten Logs pruefen. Nur bei erfolgreicher Verifikation abschliessen.
-6. Nach erfolgreicher Feature-Aenderung eine abrufbare Feature-Experience speichern: Architektur, Umsetzung, Tests, Lessons Learned und sinnvolle Folgefeatures; keine Secrets oder rohe sensible Logs speichern.
+6. Dokumentationspflicht: die naechste autoritative Architektur-/Operations-/User-Doku zusammen mit dem Code aktualisieren. Wenn kein etablierter Change-Log existiert, `docs/AI_CHANGELOG.md` verwenden und Scope, Grund, betroffene Subsysteme, Verifikation und Recovery-Referenz festhalten. Keine doppelten Dokus erzeugen.
+7. Nach erfolgreicher Feature-Aenderung eine abrufbare Feature-Experience ueber die freigegebene Memory-Schicht speichern (Claude-Mem wenn in TriForce konfiguriert): Architektur, Umsetzung, Tests, Lessons Learned und sinnvolle Folgefeatures; keine Secrets oder rohe sensible Logs speichern.

@@ -365,6 +365,7 @@ def _finish_tools_list(
     version: str,
     request: Optional[Request] = None,
     note: Optional[str] = None,
+    discovery_profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     filtered_tools = []
     for tool in _filter_tools_for_client(tools, request):
@@ -374,11 +375,35 @@ def _finish_tools_list(
         annotations = dict(decorated.get("annotations") or {})
         annotations.setdefault("readOnlyHint", is_readonly_tool(str(decorated.get("name") or "")))
         decorated["annotations"] = annotations
+        try:
+            from ..mcp.tool_registry_unified import usage_hint_for_tool
+            decorated["x_usage_hint"] = usage_hint_for_tool(decorated)
+        except Exception:
+            pass
         filtered_tools.append(decorated)
     if request is not None:
         try:
             from app.services.mcp_workspace_bridge import merge_workspace_tools
             filtered_tools = merge_workspace_tools(filtered_tools, request)
+            # Workspace/public overlays may only narrow or decorate the requested
+            # discovery view. They must never inflate a semantic inventory back
+            # into the full public catalogue.
+            if discovery_profile:
+                from ..mcp.tool_registry_unified import filter_tools_for_profile
+                filtered_tools = filter_tools_for_profile(filtered_tools, discovery_profile)
+            # The public/workspace overlay can replace canonical entries. Reapply
+            # effective read-only metadata and the short model-facing hint after
+            # the overlay so discovery text matches the enforced route policy.
+            from ..mcp.tool_registry_unified import usage_hint_for_tool
+            refreshed_tools = []
+            for overlaid in filtered_tools:
+                refreshed = dict(overlaid)
+                refreshed_annotations = dict(refreshed.get("annotations") or {})
+                refreshed_annotations["readOnlyHint"] = is_readonly_tool(str(refreshed.get("name") or ""))
+                refreshed["annotations"] = refreshed_annotations
+                refreshed["x_usage_hint"] = usage_hint_for_tool(refreshed)
+                refreshed_tools.append(refreshed)
+            filtered_tools = refreshed_tools
         except Exception as exc:
             mcp_logger.warning("Public workspace tool merge failed: %s", exc)
     from ..mcp.tool_registry_audit import advertised_toolset_descriptor
@@ -498,14 +523,14 @@ async def download_android_workspace_helper() -> Response:
     apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/workspace/triforce/releases/helper/AILinux-Helper-latest.apk")
     if not os.path.isfile(apk_path):
         return JSONResponse(
-            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.13"},
+            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.14"},
             status_code=404,
             headers={"Cache-Control": "no-store"},
         )
     return FileResponse(
         apk_path,
         media_type="application/vnd.android.package-archive",
-        filename="AILinux-Helper-2.90.13-android.apk",
+        filename="AILinux-Helper-2.90.14-android.apk",
         headers={"Cache-Control": "no-cache"},
     )
 
@@ -522,11 +547,11 @@ async def ailinux_helper_icon() -> Response:
 async def download_ailinux_helper(platform: str):
     release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
     artifacts = {
-        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.13-android.apk", "application/vnd.android.package-archive"),
+        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.14-android.apk", "application/vnd.android.package-archive"),
         "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.14-linux-x86_64.AppImage", "application/vnd.appimage"),
         "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.14-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.13-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.13-mac-arm64.dmg", "application/x-apple-diskimage"),
+        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.14-win-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.14-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
     spec = artifacts.get(platform)
     if not spec:
@@ -534,7 +559,7 @@ async def download_ailinux_helper(platform: str):
     source_name, download_name, media_type = spec
     artifact = release_root / source_name
     if not artifact.is_file():
-        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.13", "repository": "ailinux-helper"})
+        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.14", "repository": "ailinux-helper"})
     return FileResponse(artifact, filename=download_name, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
@@ -544,8 +569,8 @@ async def download_desktop_workspace_helper(platform: str) -> Response:
     artifacts = {
         "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.14-linux-x86_64.AppImage", "application/vnd.appimage"),
         "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.14-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.13-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.13-mac-arm64.dmg", "application/x-apple-diskimage"),
+        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.14-win-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.14-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
     item = artifacts.get(platform.lower())
     if not item:
@@ -553,7 +578,7 @@ async def download_desktop_workspace_helper(platform: str) -> Response:
     source, filename, media_type = item
     path = os.path.join(root, source)
     if not os.path.isfile(path):
-        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.90.13", "workflow": "ailinux-helper/build.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.90.14", "workflow": "ailinux-helper/build.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
     return FileResponse(path, media_type=media_type, filename=filename, headers={"Cache-Control": "no-cache"})
 
 
@@ -1958,19 +1983,28 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
     
     # Primary: unified inventory (Pre-Killer style, full toolbox with handlers)
     try:
-        from ..mcp.tool_registry_unified import get_canonical_all_tools, filter_tools_for_profile
-        tools = filter_tools_for_profile(get_canonical_all_tools(), inventory)
+        from ..mcp.tool_registry_unified import (
+            get_canonical_all_tools, filter_tools_for_profile, get_inventory_catalog,
+        )
+        canonical_tools = get_canonical_all_tools()
+        tools = filter_tools_for_profile(canonical_tools, inventory)
 
         for tool in tools:
             if isinstance(tool, dict) and "outputSchema" not in tool:
                 tool["outputSchema"] = {"type": "object", "additionalProperties": True}
 
-        return _finish_tools_list(
+        result = _finish_tools_list(
             tools,
             "unified",
             request,
             note=f"canonical MCP surface profile={inventory}",
+            discovery_profile=(None if inventory.strip().lower() in {"core", "minimal", "default"} else inventory),
         )
+        # Compact semantic index for clients that implement progressive disclosure.
+        # These are discovery labels only; RBAC and per-tool policy remain authoritative.
+        result["inventories"] = get_inventory_catalog(canonical_tools)
+        result["selected_inventory"] = inventory
+        return result
     except Exception as e:
         logger.warning(f"Unified tools failed, falling back to v4: {e}")
     

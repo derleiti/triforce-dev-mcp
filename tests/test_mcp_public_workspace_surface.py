@@ -370,3 +370,66 @@ def test_linux_helper_download_metadata_tracks_published_29014_build():
     for source in (public_source, desktop_source):
         assert "AILinux-Helper-2.90.14-linux-x86_64.AppImage" in source
         assert "AILinux-Helper-2.90.14-linux-amd64.deb" in source
+
+
+def test_public_tools_list_semantic_inventory_never_reexpands_to_full_catalog():
+    import asyncio
+    from types import SimpleNamespace
+    from app.routes.mcp import handle_tools_list
+
+    request = SimpleNamespace(
+        state=SimpleNamespace(mcp_auth_method="public_guest", mcp_auth_user=None),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={}, cookies={}, query_params={},
+    )
+    payload = asyncio.run(handle_tools_list({"inventory": "debug"}, request=request))
+    names = {tool["name"] for tool in payload["tools"]}
+    assert names == {"status", "debug", "log_viewer", "mcp_analytics"}
+    assert payload["selected_inventory"] == "debug"
+
+
+def test_public_semantic_inventory_hints_match_effective_read_policy():
+    import asyncio
+    from types import SimpleNamespace
+    from app.routes.mcp import handle_tools_list
+
+    request = SimpleNamespace(
+        state=SimpleNamespace(mcp_auth_method="public_guest", mcp_auth_user=None),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={}, cookies={}, query_params={},
+    )
+    payload = asyncio.run(handle_tools_list({"inventory": "debug"}, request=request))
+    by_name = {tool["name"]: tool for tool in payload["tools"]}
+    assert by_name["status"]["annotations"]["readOnlyHint"] is True
+    assert "read-only" in by_name["status"]["x_usage_hint"]
+    assert by_name["log_viewer"]["annotations"]["readOnlyHint"] is True
+
+
+def test_authenticated_bridge_discovers_workspace_schemas_before_pairing_without_granting_execution():
+    import asyncio
+    from types import SimpleNamespace
+    from app.routes.mcp import handle_tools_list
+    from app.services.mcp_workspace_bridge import call_public_local_tool
+
+    request = SimpleNamespace(
+        state=SimpleNamespace(
+            mcp_auth_method="bearer",
+            mcp_auth_user="nova-telegram-bridge",
+            mcp_auth_client_id="nova-telegram-bridge-mcp",
+            mcp_workspace_subject="telegram-bridge-subject-test",
+            mcp_session_id="transport-discovery-test",
+        ),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={}, cookies={}, query_params={},
+    )
+    payload = asyncio.run(handle_tools_list({}, request=request))
+    by_name = {tool["name"]: tool for tool in payload["tools"]}
+    for name in ("workspace_status", "file_read", "file_edit", "code_edit", "workspace_clear", "compute_execute", "computer_screenshot"):
+        assert name in by_name
+    assert by_name["file_edit"]["x_requires_workspace"] is True
+
+    denied = asyncio.run(call_public_local_tool(
+        request, "file_edit",
+        {"workspace_context": "unpaired-chat", "path": "probe.txt", "operation": "create", "content": "x"},
+    ))
+    assert denied["structuredContent"]["code"] == "WORKSPACE_REQUIRED"

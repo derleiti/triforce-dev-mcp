@@ -317,8 +317,63 @@ def _configure_idle_provider_test(monkeypatch, tmp_path: Path, *, profile_cursor
     monkeypatch.setattr(idle_worker, "prepare_instance_home", prepare_home)
     monkeypatch.setattr(idle_worker, "apply_profile_state", lambda home, profile: None)
     monkeypatch.setattr(idle_worker, "load_profile", lambda profile_id: {"id": profile_id, "model": models[profile_id]})
+    async def quota_available(provider, **kwargs):
+        return {"provider": provider, "quota_exhausted": False, "quota_retry_after_seconds": 0, "quota_reset_at": "", "supported": True}
+    monkeypatch.setattr(idle_worker, "query_account_provider_quota", quota_available)
     monkeypatch.setenv("TRISTAR_IDLE_COOLDOWN_SECONDS", "0")
     return idle_worker
+
+
+def test_idle_auto_rotation_skips_exhausted_gemini_without_launching_provider(tmp_path: Path, monkeypatch):
+    idle_worker = _configure_idle_provider_test(monkeypatch, tmp_path, profile_cursor=2)
+    calls = []
+
+    async def quota_exhausted(provider, **kwargs):
+        assert provider == "gemini"
+        return {
+            "provider": "gemini", "quota_exhausted": True,
+            "quota_retry_after_seconds": 3600,
+            "quota_reset_at": "2026-09-17T05:53:14+02:00", "supported": True,
+        }
+
+    class FakeRunner:
+        async def run(self, **kwargs):
+            calls.append(kwargs["model"])
+            return AICoderRunResult(
+                profile_id=kwargs["profile_id"], status="success", model=kwargs["model"],
+                response="STATUS: CLEAN\nNEXT_SAFE_WORK: NONE",
+            )
+
+    monkeypatch.setattr(idle_worker, "query_account_provider_quota", quota_exhausted)
+    monkeypatch.setattr(idle_worker, "AICoderRunner", FakeRunner)
+    outcome = asyncio.run(idle_worker.run_idle_once(workspace=tmp_path, timeout=5))
+
+    assert calls == ["mistral/codestral-latest"]
+    assert outcome["status"] == "success"
+    assert outcome["profile_id"] == "opencode-mcp"
+    assert outcome["attempted_profiles"] == ["gemini-mcp", "opencode-mcp"]
+
+
+def test_idle_explicit_gemini_quota_exhaustion_fails_fast(tmp_path: Path, monkeypatch):
+    idle_worker = _configure_idle_provider_test(monkeypatch, tmp_path, profile_cursor=0)
+    calls = []
+
+    async def quota_exhausted(provider, **kwargs):
+        return {"provider": provider, "quota_exhausted": True, "quota_retry_after_seconds": 120, "quota_reset_at": "", "supported": True}
+
+    class FakeRunner:
+        async def run(self, **kwargs):
+            calls.append(kwargs["model"])
+            raise AssertionError("exhausted provider must not be launched")
+
+    monkeypatch.setattr(idle_worker, "query_account_provider_quota", quota_exhausted)
+    monkeypatch.setattr(idle_worker, "AICoderRunner", FakeRunner)
+    outcome = asyncio.run(idle_worker.run_idle_once(workspace=tmp_path, profile_id="gemini-mcp", timeout=5))
+
+    assert calls == []
+    assert outcome["status"] == "error"
+    assert "quota exhausted" in outcome["error"].lower()
+    assert outcome["attempted_profiles"] == ["gemini-mcp"]
 
 
 def test_idle_auto_rotation_falls_back_after_linked_account_failure(tmp_path: Path, monkeypatch):

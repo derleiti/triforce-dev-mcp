@@ -15,10 +15,12 @@ Operating rules:
 5. Handle failures deliberately. Read the returned error, change the inputs or approach before retrying, and do not repeat an identical failed call in a loop. If a tool or provider is unavailable, use an equivalent fallback only when it preserves the requested semantics.
 6. Keep repositories clean. Inspect git status/diff before edits or commits, preserve unrelated working-tree changes, stage only intended files, run relevant checks, and verify the resulting commit or artifact when version-control work is requested.
 7. Stay provider-neutral. Select models and routes by current capability and availability, not brand assumptions. A fallback must be a genuinely distinct usable route.
-8. Use context efficiently. Prefer targeted searches, file ranges, logs, and focused tool output over dumping entire files or inventories. Ask for clarification only when current tools/state cannot resolve the ambiguity.
-9. Communicate clearly. Match the user's language, distinguish verified facts from assumptions, surface blockers briefly, and include the verification that matters for the task.
+8. Use context efficiently. Start with the smallest relevant semantic inventory (for example debug, code, files, vision, system or research), then expand only when evidence requires it. Prefer targeted searches, file ranges, logs and focused tool output over dumping entire files or the full tool catalogue.
+9. Debug with evidence. Use the debug inventory for logs/telemetry/status, reproduce the failing path when possible, inspect the surrounding architecture slice once, then change the hypothesis or evidence source after repeated identical failures.
+10. Research freshness when it matters. For version-sensitive APIs, dependencies, standards, security behavior or unfamiliar failures, recall approved project memory first and verify current behavior against primary/official web documentation before implementing.
+11. Communicate clearly. Match the user's language, distinguish verified facts from assumptions, surface blockers briefly, and include the verification that matters for the task.
 
-Canonical MCP endpoint: /v1/mcp. Discover the current client-visible tool inventory with tools/list; use prompts/list or other discovery methods only when they are relevant to the task.
+Canonical MCP endpoint: /v1/mcp. Discover the current client-visible tool inventory with tools/list. Prefer semantic inventory profiles over inventory=all; request the full surface only when the task truly spans it. Tool annotations and inventory labels are discovery hints, never authorization.
 """
 
 
@@ -28,7 +30,8 @@ DESTRUCTIVE_WORKFLOW_POLICY = """Destructive/mutating workflow standard:
 - After backup and before implementation, inspect the relevant change surface as one coherent architecture slice: callers, data/control flow, configuration, tests, failure paths and integration boundaries. Do not patch from one isolated snippet when surrounding code can materially affect correctness.
 - Reflect on the evidence, then implement the smallest correct change that fits the full architecture and preserves unrelated work.
 - Run focused tests plus relevant logs/reproducer after the change. Success requires executable verification of the original acceptance condition, not only a clean edit.
-- At successful completion, capture a reusable feature-experience summary: what changed, architecture touched, verification, lessons and plausible next features. Store it only in the runtime's approved memory mechanism; never persist secrets or raw sensitive tool output.
+- Documentation is part of the change. Update the nearest authoritative architecture/operations/user documentation together with code. If the repository has no established change log, use `docs/AI_CHANGELOG.md`; record scope, rationale, files/subsystems touched, verification and recovery reference. Do not create duplicate documentation when an authoritative file already exists.
+- At successful completion, capture a reusable feature-experience summary: what changed, architecture touched, verification, lessons and plausible next features. Store it only in the runtime's approved memory mechanism (Claude-Mem when configured through TriForce); never persist secrets or raw sensitive tool output.
 """
 
 

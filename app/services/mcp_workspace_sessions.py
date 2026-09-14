@@ -9,7 +9,7 @@ Two compatible pairing directions are supported:
 2. Legacy/session-first flow: ``workspace_status`` may create a code already
    tied to an MCP session and the helper can connect directly with it.
 
-All pairing codes are short-lived, single-use and kept only in memory.
+Pairing codes are short-lived and single-use. Web-first ticket metadata is persisted by hash so a backend restart or multi-worker handoff does not invalidate an otherwise live Android/Helper pairing code; raw codes are never persisted.
 """
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ REDIS_LEASE_PREFIX = "triforce:workspace:lease:"
 REDIS_RESUME_PREFIX = "triforce:workspace:resume:"
 REDIS_ALIAS_PREFIX = "triforce:workspace:alias:"
 REDIS_JOIN_PREFIX = "triforce:workspace:join:"
+REDIS_PAIR_PREFIX = "triforce:workspace:pair-ticket:"
 
 # Legacy/session-first pairing.
 _SESSION_PAIR: dict[str, dict[str, Any]] = {}
@@ -75,6 +76,71 @@ def _redis_client():
         return None
 
 
+def _persist_pair_ticket(item: dict[str, Any], pair_hash: str) -> None:
+    """Persist only restart-safe web-pair metadata keyed by SHA-256(code)."""
+    client = _redis_client()
+    if client is None or not pair_hash:
+        return
+    expires_at = float(item.get("pair_expires_at") or item.get("expires_at") or 0)
+    ttl = int(expires_at - time.time())
+    if ttl <= 0:
+        return
+    payload = {
+        "pair_hash": pair_hash,
+        "created_at": float(item.get("created_at") or time.time()),
+        "expires_at": expires_at,
+        "pair_expires_at": expires_at,
+        "mode": normalize_workspace_access_mode(item.get("mode")),
+        "task": str(item.get("task") or "")[:4000],
+        "capabilities": list(item.get("capabilities") or []),
+        "helper_connected_at": float(item.get("helper_connected_at") or 0),
+    }
+    try:
+        client.setex(REDIS_PAIR_PREFIX + pair_hash, max(1, ttl), json.dumps(payload, separators=(",", ":")))
+    except Exception:
+        pass
+
+
+def _load_pair_ticket(code: str) -> Optional[dict[str, Any]]:
+    """Rehydrate a pre-lease pair ticket after restart without storing its raw code."""
+    pair_hash = _pair_key(code)
+    client = _redis_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(REDIS_PAIR_PREFIX + pair_hash)
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if not secrets.compare_digest(str(data.get("pair_hash") or ""), pair_hash):
+            return None
+        expires_at = float(data.get("pair_expires_at") or data.get("expires_at") or 0)
+        if expires_at <= time.time():
+            client.delete(REDIS_PAIR_PREFIX + pair_hash)
+            return None
+        item = {
+            "code": str(code or "").strip().upper(),
+            "join_hash": pair_hash,
+            "created_at": float(data.get("created_at") or time.time()),
+            "expires_at": expires_at,
+            "pair_expires_at": expires_at,
+            "connection": None,
+            "connection_id": None,
+            "client_id": "",
+            "mode": normalize_workspace_access_mode(data.get("mode")),
+            "task": str(data.get("task") or ""),
+            "capabilities": list(data.get("capabilities") or []),
+            "paired_session_id": None,
+            "paired_session_ids": [],
+            "resume_hash": "",
+            "helper_connected_at": float(data.get("helper_connected_at") or 0),
+        }
+        _WEB_PAIR[pair_hash] = item
+        return item
+    except Exception:
+        return None
+
+
 def _persist_lease(item: dict[str, Any]) -> None:
     """Persist reconnect metadata, never raw pair/resume credentials."""
     lease_id = str(item.get("lease_id") or "")
@@ -102,6 +168,7 @@ def _persist_lease(item: dict[str, Any]) -> None:
         client.setex(REDIS_RESUME_PREFIX + resume_hash, ttl, lease_id)
         if payload["join_hash"]:
             client.setex(REDIS_JOIN_PREFIX + payload["join_hash"], ttl, lease_id)
+            client.delete(REDIS_PAIR_PREFIX + payload["join_hash"])
         for alias in payload["paired_session_ids"]:
             if alias:
                 client.setex(REDIS_ALIAS_PREFIX + hashlib.sha256(str(alias).encode("utf-8")).hexdigest(), ttl, lease_id)
@@ -368,8 +435,10 @@ def create_web_pair_code() -> str:
         _WEB_PAIR.pop(oldest, None)
     now = time.time()
     code = _new_code()
-    _WEB_PAIR[_pair_key(code)] = {
+    pair_hash = _pair_key(code)
+    _WEB_PAIR[pair_hash] = {
         "code": code,
+        "join_hash": pair_hash,
         "created_at": now,
         "expires_at": now + PAIR_TTL_SECONDS,
         "pair_expires_at": now + PAIR_TTL_SECONDS,
@@ -382,6 +451,7 @@ def create_web_pair_code() -> str:
         "paired_session_ids": [],
         "resume_hash": "",
     }
+    _persist_pair_ticket(_WEB_PAIR[pair_hash], pair_hash)
     return code
 
 
@@ -396,7 +466,7 @@ def _load_lease_by_join_code(code: str) -> Optional[dict[str, Any]]:
     try:
         lease_id = client.get(REDIS_JOIN_PREFIX + join_hash)
         if not lease_id:
-            return None
+            return _load_pair_ticket(code)
         raw = client.get(REDIS_LEASE_PREFIX + str(lease_id))
         if not raw:
             return None
@@ -449,7 +519,7 @@ def resolve_web_pair_code(code: str) -> Optional[dict[str, Any]]:
 def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None) -> dict[str, Any]:
     """Attach a local helper to a web-created code without binding an MCP session yet."""
     key = _pair_key(code)
-    item = _WEB_PAIR.get(key)
+    item = _WEB_PAIR.get(key) or _load_pair_ticket(code)
     if _expired(item):
         _WEB_PAIR.pop(key, None)
         raise ValueError("Invalid or expired workspace pairing code")
@@ -471,6 +541,7 @@ def register_waiting_workspace(code: str, connection: Any, *, mode: str, task: s
         "capabilities": sorted({str(x) for x in (capabilities or []) if str(x)}),
         "helper_connected_at": time.time(),
     })
+    _persist_pair_ticket(item, key)
     return {
         "connected": True,
         "waiting_for_session": True,
@@ -716,7 +787,7 @@ def reconnect_workspace_with_resume_token(token: str, connection: Any, *, mode: 
 def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str = "", capabilities: list[str] | None = None) -> dict[str, Any]:
     """Reconnect a browser helper and refresh every authorized MCP alias."""
     key = _pair_key(code)
-    item = _WEB_PAIR.get(key)
+    item = _load_lease_by_join_code(code) or _WEB_PAIR.get(key)
     if _expired(item):
         _WEB_PAIR.pop(key, None)
         raise ValueError("Invalid or expired workspace pairing code")

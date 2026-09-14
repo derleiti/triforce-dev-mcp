@@ -217,3 +217,38 @@ class TestCanonicalRegistryAudit(unittest.TestCase):
         changed = deepcopy(tools)
         changed[0]["description"] = "changed"
         self.assertNotEqual(original["hash"], advertised_toolset_descriptor(changed)["hash"])
+
+class TestSemanticInventoryProfiles(unittest.TestCase):
+    def test_code_files_and_system_profiles_are_distinct(self):
+        import asyncio
+        from app.routes.mcp import handle_tools_list
+
+        code = asyncio.run(handle_tools_list({"inventory": "code"}))
+        files = asyncio.run(handle_tools_list({"inventory": "files"}))
+        system = asyncio.run(handle_tools_list({"inventory": "system"}))
+        code_names = {tool["name"] for tool in code["tools"]}
+        file_names = {tool["name"] for tool in files["tools"]}
+        system_names = {tool["name"] for tool in system["tools"]}
+
+        self.assertIn("code_search", code_names)
+        self.assertIn("git", code_names)
+        self.assertNotIn("file_edit", code_names)
+        self.assertIn("file_edit", file_names)
+        self.assertNotIn("code_search", file_names)
+        self.assertIn("device_info", system_names)
+        self.assertIn("process_ops", system_names)
+
+    def test_debug_and_vision_profiles_include_compact_hints(self):
+        import asyncio
+        from app.routes.mcp import handle_tools_list
+
+        debug = asyncio.run(handle_tools_list({"inventory": "debug"}))
+        vision = asyncio.run(handle_tools_list({"inventory": "vision"}))
+        self.assertLessEqual(debug["count"], 8)
+        self.assertEqual({tool["name"] for tool in vision["tools"]}, {
+            "computer_observe", "computer_screenshot", "browser_screenshot",
+        })
+        status = next(tool for tool in debug["tools"] if tool["name"] == "status")
+        self.assertIn("read-only", status["x_usage_hint"])
+        self.assertIn("debug", debug["inventories"])
+        self.assertEqual(debug["selected_inventory"], "debug")

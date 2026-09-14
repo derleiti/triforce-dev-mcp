@@ -33,6 +33,7 @@ from .share_manifest import (
     WORKSPACE_WRITE_TOOLS,
     build_share_manifest,
     manifest_has_grant,
+    manifest_resource,
 )
 from .mcp_workspace_sessions import (
     claim_workspace_with_resume_token, get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
@@ -249,11 +250,20 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             for tool in tools
             if isinstance(tool, dict) and str(tool.get("name") or "")
         }
+    authenticated_bridge = bool(authenticated_workspace_subject(request))
     for cloned in canonical_workspace_tools():
         name = str(cloned.get("name") or "")
-        if not _local_tool_visible(name, binding):
+        visible_now = _local_tool_visible(name, binding)
+        # Authenticated service connectors such as Nova/Telegram perform MCP
+        # tool discovery before any individual chat has a bound workspace.
+        # Expose the canonical schemas so the model can learn the tools once;
+        # execution authority is still decided later from workspace_context,
+        # the resolved lease, advertised capabilities and share grants.
+        if not visible_now and not authenticated_bridge:
             continue
         cloned["x_execution"] = "local_workspace"
+        if authenticated_bridge and not visible_now:
+            cloned["x_requires_workspace"] = True
         merged[name] = cloned
     return list(merged.values())
 
@@ -729,6 +739,23 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         return _workspace_required(request)
     if "client_workspace_tool" not in set(getattr(connection, "supported_tools", []) or []):
         raise RuntimeError("Connected browser workspace does not provide client_workspace_tool")
+
+    if name in COMPUTE_TOOLS:
+        compute = manifest_resource(_binding_share_manifest(binding), RESOURCE_COMPUTE)
+        runtime = str(compute.get("runtime") or "").strip().lower().replace("-", "_")
+        if runtime == "triforce_docker":
+            from .workspace_compute_sandbox import execute_remote_compute
+            identity = affinity_sid or sid or str(binding.get("session_id") or binding.get("lease_id") or "workspace")
+            try:
+                return await execute_remote_compute(
+                    connection=connection, arguments=arguments, mode=mode,
+                    capabilities=capabilities, identity=identity,
+                )
+            except (ValueError, RuntimeError) as exc:
+                return _tool_error(
+                    "WORKSPACE_COMPUTE_SANDBOX_FAILED", str(exc),
+                    tool=name, retryable=False, sandboxed=True,
+                )
 
     try:
         result = await connection.send_tool_call(
