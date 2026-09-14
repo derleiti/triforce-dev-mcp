@@ -100,9 +100,11 @@ PORTABLE_DEVICE_TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["click", "double_click", "move", "scroll", "type", "key", "tap", "long_press", "swipe", "back", "home", "recents", "notifications", "invoke"]},
-                "x": {"type": "integer"},
-                "y": {"type": "integer"},
+                "action": {"type": "string", "enum": ["click", "double_click", "move", "scroll", "type", "key", "tap", "long_press", "swipe", "wake", "wake_screen", "back", "home", "recents", "notifications", "invoke"]},
+                "x": {"type": "integer", "description": "Primary pointer X or Android swipe start X."},
+                "y": {"type": "integer", "description": "Primary pointer Y or Android swipe start Y."},
+                "x1": {"type": "integer", "description": "Compatibility alias for Android swipe start X."},
+                "y1": {"type": "integer", "description": "Compatibility alias for Android swipe start Y."},
                 "x2": {"type": "integer", "description": "Android swipe destination X."},
                 "y2": {"type": "integer", "description": "Android swipe destination Y."},
                 "duration_ms": {"type": "integer", "minimum": 40, "maximum": 3000},
