@@ -78,9 +78,31 @@ def test_web_pair_codes_are_unique_and_authorize_multiple_aliases():
 async def test_workspace_status_tells_user_to_use_web_setup_page():
     req = DummyRequest('session-A')
     result = await call_public_local_tool(req, 'workspace_status', {})
-    assert result['structuredContent']['code'] == 'WORKSPACE_REQUIRED'
-    assert result['structuredContent']['setup_url'].startswith('https://api.ailinux.me/v1/mcp?pair_code=')
-    assert result['structuredContent']['pair_code']
+    structured = result['structuredContent']
+    assert structured['code'] == 'WORKSPACE_REQUIRED'
+    assert structured['setup_url'] == 'https://api.ailinux.me/v1/mcp'
+    assert structured['pair_code']
+
+
+@pytest.mark.asyncio
+async def test_workspace_status_setup_url_never_carries_the_pair_code():
+    """P0 regression: a pairing credential must never reach a URL.
+
+    A query parameter is copied into browser history, the Referer header and
+    every reverse-proxy/Cloudflare access log on the path. The pair code is a
+    bootstrap credential the user pastes into the page, never a URL component.
+    """
+    req = DummyRequest('session-url-leak')
+    result = await call_public_local_tool(req, 'workspace_status', {})
+    structured = result['structuredContent']
+    code = str(structured['pair_code'])
+    assert code, 'test needs a pair code to assert against'
+
+    setup_url = str(structured['setup_url'])
+    assert '?' not in setup_url and '#' not in setup_url
+    assert code not in setup_url
+    for key in ('pair_code', 'resume_token', 'workspace_token', 'handoff'):
+        assert key not in setup_url
 
 
 @pytest.mark.asyncio

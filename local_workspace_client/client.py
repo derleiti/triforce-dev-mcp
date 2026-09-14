@@ -19,7 +19,15 @@ from .runtime import READ_TOOLS, WRITE_TOOLS, WorkspaceRuntime
 from .shell_backends import shell_backend_status
 
 
-def node_url(base_url: str, pair_code: str) -> str:
+def node_url(base_url: str) -> str:
+    """Build the workspace transport URL. Deliberately credential-free.
+
+    P0: the pairing/resume credential must never appear in a request target.
+    A WebSocket upgrade is a normal HTTP request, so its query string is written
+    to the uvicorn access log, the Apache reverse-proxy log and the Cloudflare
+    edge log. The credential travels in a request header instead; the server
+    reads ``x-ailinux-pair-code`` (see app/routes/mcp_node.py).
+    """
     parsed = urlsplit(base_url.rstrip("/"))
     if parsed.scheme not in {"http", "https", "ws", "wss"}:
         raise ValueError("server URL must use http(s) or ws(s)")
@@ -27,11 +35,17 @@ def node_url(base_url: str, pair_code: str) -> str:
     path = parsed.path.rstrip("/") + "/v1/mcp/node/connect"
     query = urlencode({
         "mode": "workspace",
-        "pair_code": pair_code.strip().upper(),
-        "machine_id": socket.gethostname(),
         "client_version": "2.85-workspace",
     })
     return urlunsplit((scheme, parsed.netloc, path, query, ""))
+
+
+def node_headers(pair_code: str) -> dict[str, str]:
+    """Credential and machine identity for the workspace transport upgrade."""
+    return {
+        "X-AILinux-Pair-Code": str(pair_code or "").strip().upper(),
+        "X-AILinux-Machine-Id": socket.gethostname(),
+    }
 
 
 def mcp_url(base_url: str) -> str:
@@ -200,9 +214,18 @@ class WorkspaceNode:
             credential = self.pair_code
             if self.resume_token:
                 credential = await asyncio.to_thread(_resume_ticket, self.base_url, self.resume_token)
-            url = node_url(self.base_url, credential)
+            url = node_url(self.base_url)
+            headers = node_headers(credential)
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5, max_size=2 * 1024 * 1024) as websocket:
+                # websockets >= 14 renamed extra_headers to additional_headers.
+                # Both must work, and neither may silently fall back to a URL
+                # credential: without the header the server rejects the upgrade,
+                # which is the correct fail-closed behaviour.
+                try:
+                    connector = websockets.connect(url, additional_headers=headers, ping_interval=20, ping_timeout=20, close_timeout=5, max_size=2 * 1024 * 1024)
+                except TypeError:
+                    connector = websockets.connect(url, extra_headers=headers, ping_interval=20, ping_timeout=20, close_timeout=5, max_size=2 * 1024 * 1024)
+                async with connector as websocket:
                     delay = 1.0
                     print(json.dumps({
                         "event": "connected",

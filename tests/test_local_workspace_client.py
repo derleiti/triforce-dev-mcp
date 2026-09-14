@@ -43,12 +43,31 @@ def test_tool_sets_and_fixed_public_mcp_url():
     assert 'file_edit' not in READ_TOOLS
     assert {'shell', 'file_edit'} <= WRITE_TOOLS
     assert {'task_runner', 'binary_exec', 'lint', 'test'}.isdisjoint(WRITE_TOOLS)
-    url = node_url('https://api.ailinux.me', 'ABCD-1234-EF56')
+    url = node_url('https://api.ailinux.me')
     assert url.startswith('wss://api.ailinux.me/v1/mcp/node/connect?')
     assert 'mode=workspace' in url
-    assert 'pair_code=ABCD-1234-EF56' in url
     assert 'token=' not in url
     assert mcp_url('https://api.ailinux.me') == 'https://api.ailinux.me/v1/mcp'
+
+
+def test_transport_url_never_carries_a_workspace_credential():
+    """P0 regression: a WebSocket upgrade is a logged HTTP request.
+
+    Its query string reaches the uvicorn access log, the Apache reverse proxy
+    and the Cloudflare edge log. The pairing/resume credential therefore travels
+    in a header the server already understands (x-ailinux-pair-code).
+    """
+    from local_workspace_client.client import node_headers
+
+    code = 'ABCD-1234-EF56'
+    url = node_url('https://api.ailinux.me')
+    assert code not in url
+    for key in ('pair_code', 'resume_token', 'handoff_code', 'workspace_token', 'token', 'machine_id'):
+        assert key not in url
+
+    headers = node_headers(code)
+    assert headers['X-AILinux-Pair-Code'] == code
+    assert headers['X-AILinux-Machine-Id']
 
 
 def test_workspace_clear_preserves_root():

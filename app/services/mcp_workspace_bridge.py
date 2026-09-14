@@ -330,9 +330,17 @@ def public_instructions(request: Request) -> str:
             + f"User task: {status.get('task') or 'follow the current user request'}."
         )
     return (
-        "This is the public TriForce MCP. To work with local files, ask the user to open "
-        "https://api.ailinux.me/v1/mcp in a browser, choose a folder there, and then paste the one-time pairing ID into this chat. "
-        "When the user pastes that ID, call workspace_pair with it. No desktop helper or account login is required."
+        "This is the public TriForce MCP. Safe TriForce cloud tools execute on the server. "
+        "For local workspace/device work, first inspect workspace_status and treat the live capability list as authoritative. "
+        "connected=true alone is insufficient for local execution: require transport_state=online and executor_online=true. "
+        "Android computer_observe/computer_input/app_ops require the user's Computer Control grant plus a ready AccessibilityService; "
+        "if they disappear, re-check workspace status and Helper state rather than retrying a missing tool. "
+        "Pair codes are short-lived bootstrap credentials; after successful pairing the Helper must resume with its persisted server-issued credential, "
+        "so do not ask for a new pair code merely because the app was backgrounded or the backend restarted. "
+        "For Android UI control use observe -> semantic target/invoke -> observe and re-resolve targets after every UI transition. "
+        "Never expose workspace/resume tokens, lease IDs, pairing internals, or other credentials. "
+        "If no workspace is paired and local access is needed, ask the user to open https://api.ailinux.me/v1/mcp, choose the intended share/capabilities, "
+        "and paste the one-time pairing ID into this chat; then call workspace_pair."
     )
 
 
@@ -788,8 +796,12 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
                 "structuredContent": {
                     "ok": False, "code": "WORKSPACE_REQUIRED", "connected": False,
                     "pair_code": code,
-                    "setup_url": f"https://api.ailinux.me/v1/mcp?pair_code={code}",
-                    "procedure": "Open setup_url -> choose folder/mode -> connect. The page binds directly to this MCP session.",
+                    # P0: never place a pairing credential in a URL. A query
+                    # parameter leaks into browser history, Referer, reverse
+                    # proxy and Cloudflare access logs. The code is handed over
+                    # by the user typing/pasting it into the page instead.
+                    "setup_url": "https://api.ailinux.me/v1/mcp",
+                    "procedure": "Open setup_url -> choose folder/mode -> connect -> paste pair_code into the pairing field. Never append the pairing ID to the URL.",
                 },
                 "isError": False,
             }

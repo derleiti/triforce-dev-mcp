@@ -74,6 +74,33 @@ async def test_internal_admin_catalog_keeps_server_tools_but_local_overlay_defau
     assert {'shell', 'group_chat_create', 'mail_inbox', 'aihelper_pair'} <= full_names
 
 
+def test_browser_workspace_page_prefers_native_pair_handover_over_the_url():
+    """P0: the pair code must not depend on a URL query to reach the page.
+
+    A query parameter is already in the request target by the time the page
+    runs, so it has passed through Apache and Cloudflare access logs and sits in
+    the Referer of every subresource. Native Helpers therefore hand the code
+    over through the preload contract. The URL branch survives only as a
+    deprecated fallback for shipped Helper builds <= 2.90.29 and must keep
+    stripping itself from history.
+    """
+    from app.routes.mcp import _workspace_setup_html
+    html = _workspace_setup_html()
+
+    # Out-of-band handover exists, is awaited before the restore path runs, and
+    # is one-shot on the Electron side.
+    assert 'const nativePairReady=' in html
+    assert 'window.ailinuxHelper?.consumePairCode?.()' in html
+    assert 'async function restoreSavedWorkspace(){await nativePairReady;' in html
+
+    # The deprecated URL fallback must never be the only source, and must never
+    # be written back into a URL.
+    assert 'history.replaceState' in html
+    assert "location.pathname" in html
+    for leak in ("searchParams.set('pair_code'", "?pair_code='+", '?pair_code="+'):
+        assert leak not in html
+
+
 def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_uri():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
@@ -478,6 +505,17 @@ def test_linux_helper_download_metadata_uses_dynamic_release_catalog(tmp_path, m
     assert catalog["android"]["version"] == "2.90.24"
     assert catalog["latest_version"] == "2.90.25"
 
+
+
+def test_helper_download_routes_support_head_for_health_checks():
+    from app.routes.mcp import public_router
+
+    methods_by_path = {}
+    for route in public_router.routes:
+        methods_by_path.setdefault(route.path, set()).update(route.methods or set())
+
+    assert {"GET", "HEAD"} <= methods_by_path["/mcp/helper/{platform}"]
+    assert {"GET", "HEAD"} <= methods_by_path["/mcp/workspace/android.apk"]
 
 def test_public_tools_list_semantic_inventory_never_reexpands_to_full_catalog():
     import asyncio
