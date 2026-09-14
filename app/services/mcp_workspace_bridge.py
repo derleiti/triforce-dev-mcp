@@ -48,7 +48,7 @@ BROWSER_READ_TOOLS = {
 BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {
     "file_edit", "directory_create", "workspace_clear", "code_edit", "shell",
 }
-DEVICE_READ_TOOLS = {"computer_observe", "computer_screenshot", "clipboard_read", "device_info", "process_ops", "service_ops"}
+DEVICE_READ_TOOLS = {"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "clipboard_read", "device_info", "process_ops", "service_ops"}
 DEVICE_WRITE_TOOLS = {"clipboard_write", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input"}
 DEVICE_TOOLS = DEVICE_READ_TOOLS | DEVICE_WRITE_TOOLS
 READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS | DEVICE_TOOLS
@@ -62,7 +62,7 @@ LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
 # Static MCP clients may cache tools/list before the user pairs a native Helper.
 # Keep the AI-facing vision/input schemas discoverable, but mark them locked;
 # execution still requires a live lease, advertised capability and manifest grant.
-DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset({"computer_observe", "computer_screenshot", "computer_input"})
+DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset({"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "computer_input", "app_ops"})
 WORKSPACE_EXECUTOR_WAIT_SECONDS = 25.0
 WORKSPACE_EXECUTOR_POLL_SECONDS = 0.25
 
@@ -724,8 +724,13 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             "The paired helper has not granted device inspection for this workspace.",
             tool=name,
         )
-    if name in DEVICE_MUTATING_TOOLS and workspace_tool_requires_write(name, arguments) and not manifest_has_grant(
-        _binding_share_manifest(binding), RESOURCE_DEVICE, "control"
+    if (
+        (name in DEVICE_CONTROL_TOOLS or (
+            name in DEVICE_MUTATING_TOOLS
+            and name not in DISPLAY_CONTROL_TOOLS
+            and workspace_tool_requires_write(name, arguments)
+        ))
+        and not manifest_has_grant(_binding_share_manifest(binding), RESOURCE_DEVICE, "control")
     ):
         return _tool_error(
             "WORKSPACE_DEVICE_CONTROL_GRANT_REQUIRED",

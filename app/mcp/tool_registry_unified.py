@@ -138,6 +138,10 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "process_ops": "device",
     "device_info": "device",
     "computer_screenshot": "device",
+    "vision_start": "device",
+    "vision_status": "device",
+    "vision_observe": "device",
+    "vision_stop": "device",
     "clipboard_read": "device",
     "clipboard_write": "device",
     # Group Chat (Multi-AI Orchestration) — Added 2026-03-15
@@ -199,7 +203,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Workspace / device controls (one canonical pool; execution remains target-specific)
     "workspace_status", "workspace_pair", "workspace_info", "workspace_clear",
     "file_read", "file_tree", "code_read", "code_grep", "file_edit", "directory_create",
-    "computer_observe", "computer_screenshot", "clipboard_read", "clipboard_write", "compute_execute",
+    "computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "clipboard_read", "clipboard_write", "compute_execute",
     "device_info", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input",
     # Integrations
     "n8n_mcp_call",
@@ -213,7 +217,7 @@ CORE_TOOL_NAMES = frozenset({
     "file_ops", "code_search", "code_edit", "code_tree", "git",
     # Keep native vision/control discoverable even before pairing. Authority is
     # still enforced by the workspace lease, advertised capability and share grant.
-    "computer_observe", "computer_screenshot", "computer_input",
+    "computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "computer_input",
     "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast", "agent_start",
     "search", "crawl",
     "mesh_status", "mesh_task", "remote_hosts", "remote_task",
@@ -238,7 +242,7 @@ SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
     },
     "vision": {
         "description": "Screen/browser observation and screenshots; input control remains a separate device-control capability.",
-        "tools": {"computer_observe", "computer_screenshot", "browser_screenshot"},
+        "tools": {"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "browser_screenshot"},
     },
     "system": {
         "description": "Portable host/device state, processes, services, applications and container/system control.",

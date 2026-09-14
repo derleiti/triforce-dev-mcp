@@ -1056,3 +1056,87 @@ async def test_portable_device_mutation_blocked_in_read_only_binding():
     blocked_input = await call_public_local_tool(req, 'computer_input', {'action': 'click', 'x': 1, 'y': 1})
     assert blocked_input['structuredContent']['code'] == 'WORKSPACE_DISPLAY_CONTROL_GRANT_REQUIRED'
     assert conn.calls == []
+
+
+@pytest.mark.asyncio
+async def test_computer_input_uses_display_control_without_extra_device_control_grant():
+    conn = DummyConnection('android-control')
+    conn.share_manifest = {
+        'grants': [{'resource': 'display', 'action': 'control'}],
+        'resources': {'display': {'enabled': True, 'control': True}},
+    }
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['computer_input'])
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'computer_input', {'action': 'home'})
+    assert result['isError'] is False
+    assert conn.calls[-1][1]['tool'] == 'computer_input'
+
+
+@pytest.mark.asyncio
+async def test_app_ops_always_requires_device_control_grant():
+    conn = DummyConnection('android-apps')
+    conn.share_manifest = {
+        'grants': [],
+        'resources': {'device': {'enabled': False, 'control': False}},
+    }
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['app_ops'])
+    req = DummyRequest('session-A')
+    blocked = await call_public_local_tool(req, 'app_ops', {'action': 'list'})
+    assert blocked['structuredContent']['code'] == 'WORKSPACE_DEVICE_CONTROL_GRANT_REQUIRED'
+    assert conn.calls == []
+
+    conn.share_manifest = {
+        'grants': [{'resource': 'device', 'action': 'control'}],
+        'resources': {'device': {'enabled': True, 'control': True}},
+    }
+    allowed = await call_public_local_tool(req, 'app_ops', {'action': 'list'})
+    assert allowed['isError'] is False
+    assert conn.calls[-1][1]['tool'] == 'app_ops'
+
+
+def test_live_vision_tools_are_canonical_and_discoverable_when_unpaired():
+    from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES
+    from app.services.mcp_workspace_bridge import DISCOVERABLE_LOCKED_LOCAL_TOOLS
+
+    for name in ('vision_start', 'vision_status', 'vision_observe', 'vision_stop'):
+        assert name in WORKSPACE_TOOL_NAMES
+        assert name in DISCOVERABLE_LOCKED_LOCAL_TOOLS
+
+
+def test_live_vision_result_normalizes_cached_jpeg_to_native_image_content():
+    import base64
+    from app.services.mcp_workspace_bridge import _normalize_display_tool_result
+
+    encoded = base64.b64encode(b'\xff\xd8cached-live-frame\xff\xd9').decode('ascii')
+    result = _normalize_display_tool_result(
+        'vision_observe',
+        _image_result(
+            mime='image/jpeg', data=encoded, frame_id=42, scene_id=9,
+            frame_age_ms=17, width=432, height=960,
+        ),
+    )
+    assert result['content'][0] == {'type': 'image', 'data': encoded, 'mimeType': 'image/jpeg'}
+    assert result['structuredContent']['frame_id'] == 42
+    assert result['structuredContent']['scene_id'] == 9
+    assert result['structuredContent']['frame_age_ms'] == 17
+    assert 'data' not in result['structuredContent']
+
+
+@pytest.mark.asyncio
+async def test_live_vision_requires_active_display_grant():
+    from app.services import mcp_workspace_bridge as bridge
+
+    conn = DummyConnection('vision-no-grant')
+    conn.share_manifest = {
+        'version': 1,
+        'grants': {
+            'resource://workspace': {'read': True, 'write': True},
+            'resource://display': {'observe': False},
+        },
+    }
+    sessions.bind_workspace('session-vision', conn, mode='write', capabilities=['vision_observe'])
+    req = DummyRequest('session-vision')
+    result = await bridge.call_public_local_tool(req, 'vision_observe', {'visual': False})
+    assert result['isError'] is True
+    assert result['structuredContent']['code'] == 'WORKSPACE_DISPLAY_GRANT_REQUIRED'
+    assert conn.calls == []

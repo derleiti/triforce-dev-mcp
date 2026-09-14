@@ -82,7 +82,7 @@ WORKSPACE_READ_TOOLS = frozenset({
 WORKSPACE_WRITE_TOOLS = frozenset({
     "file_edit", "directory_create", "workspace_clear", "code_edit",
 })
-DISPLAY_OBSERVE_TOOLS = frozenset({"computer_observe", "computer_screenshot"})
+DISPLAY_OBSERVE_TOOLS = frozenset({"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop"})
 DISPLAY_CONTROL_TOOLS = frozenset({"computer_input", "window_ops"})
 DEVICE_READ_TOOLS = frozenset({"device_info", "process_ops", "service_ops"})
 DEVICE_CONTROL_TOOLS = frozenset({"app_ops"})

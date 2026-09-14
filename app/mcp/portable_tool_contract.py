@@ -65,12 +65,13 @@ PORTABLE_DEVICE_TOOLS = [
     },
     {
         "name": "app_ops",
-        "description": "Inspect, launch, focus or close a desktop application on the paired device. Launch/focus/close are capability-gated and may require local confirmation.",
+        "description": "Inspect, launch, focus or close an application on the paired device. Android also supports opening an explicit http/https URL and the fixed AILinux Helper update endpoint. Mutating actions are capability-gated and may require local confirmation.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["list", "launch", "focus", "close"]},
+                "action": {"type": "string", "enum": ["list", "launch", "focus", "close", "open_url", "update_helper"]},
                 "app": {"type": "string", "maxLength": 512},
+                "url": {"type": "string", "maxLength": 4096, "description": "Android open_url accepts only http/https URLs."},
                 "args": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
                 **_CTX,
             },
@@ -95,11 +96,11 @@ PORTABLE_DEVICE_TOOLS = [
     },
     {
         "name": "computer_input",
-        "description": "Send bounded keyboard, pointer, gesture or navigation input to the paired native device only when the user explicitly enabled computer control. Supports desktop mouse/keyboard adapters and Android Accessibility control. Use computer_observe/computer_screenshot before and after actions to verify state.",
+        "description": "Send bounded keyboard, pointer, gesture or navigation input to the paired native device only when the user explicitly enabled computer control. Supports desktop mouse/keyboard adapters and Android Accessibility control. Prefer target_id from vision_observe for semantic actions; coordinate input remains available as a fallback.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["click", "double_click", "move", "scroll", "type", "key", "tap", "long_press", "swipe", "back", "home", "recents", "notifications"]},
+                "action": {"type": "string", "enum": ["click", "double_click", "move", "scroll", "type", "key", "tap", "long_press", "swipe", "back", "home", "recents", "notifications", "invoke"]},
                 "x": {"type": "integer"},
                 "y": {"type": "integer"},
                 "x2": {"type": "integer", "description": "Android swipe destination X."},
@@ -110,6 +111,7 @@ PORTABLE_DEVICE_TOOLS = [
                 "delta_y": {"type": "integer", "minimum": -10000, "maximum": 10000, "default": 0},
                 "text": {"type": "string", "maxLength": 65536},
                 "keys": {"type": "array", "items": {"type": "string"}, "maxItems": 16},
+                "target_id": {"type": "string", "maxLength": 256, "description": "Stable target identifier from the latest native vision/accessibility scene."},
                 **_CTX,
             },
             "required": ["action"],

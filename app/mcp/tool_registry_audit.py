@@ -70,7 +70,7 @@ def _category(name: str, inventory: str) -> str:
         return "workspace.files"
     if name in {"clipboard_read", "clipboard_write"}:
         return "share.clipboard"
-    if name in {"computer_observe", "computer_screenshot"}:
+    if name in {"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop"}:
         return "display.capture"
     if name in {"shell", "compute_execute"}:
         return "compute.exec"
@@ -138,6 +138,10 @@ def _required_capabilities(name: str) -> List[str]:
         "code_edit": ["code_edit"],
         "computer_observe": ["computer_observe"],
         "computer_screenshot": ["computer_screenshot"],
+        "vision_start": ["vision_start"],
+        "vision_status": ["vision_status"],
+        "vision_observe": ["vision_observe"],
+        "vision_stop": ["vision_stop"],
         "clipboard_read": ["clipboard_read"],
         "clipboard_write": ["clipboard_write"],
         "compute_execute": ["compute_execute"],
