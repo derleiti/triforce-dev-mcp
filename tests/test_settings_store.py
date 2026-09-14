@@ -199,3 +199,8 @@ def test_runtime_categories_cover_control_center_services():
     assert classify_env_key("MAILSERVER_IMAGE") == "Mailserver"
     assert classify_env_key("REPO_IMAGE") == "Repository"
     assert classify_env_key("NOVA_LS_API_KEY") == "Lemon Squeezy"
+
+
+def test_n8n_runner_auth_token_is_explicit_secret():
+    from app.settings_store import SECRET_ENV_KEYS
+    assert "N8N_RUNNERS_AUTH_TOKEN" in SECRET_ENV_KEYS

@@ -25,6 +25,13 @@ services:
       - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
       - N8N_DIAGNOSTICS_ENABLED=${N8N_DIAGNOSTICS_ENABLED:-false}
       - N8N_RUNNERS_TASK_TIMEOUT=${N8N_RUNNERS_TASK_TIMEOUT:-300}
+      - N8N_RUNNERS_MODE=external
+      - N8N_RUNNERS_BROKER_LISTEN_ADDRESS=0.0.0.0
+      - N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+      - N8N_NATIVE_PYTHON_RUNNER=true
+      - N8N_UNVERIFIED_PACKAGES_ENABLED=${N8N_UNVERIFIED_PACKAGES_ENABLED:-false}
+      - N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES=${N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES:-268435456}
+      - N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES=${N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES:-1000}
       - N8N_EMAIL_MODE=smtp
       - N8N_SMTP_HOST=${MAIL_SMTP_HOST:-mail.ailinux.me}
       - N8N_SMTP_PORT=${MAIL_SMTP_PORT:-587}
@@ -33,7 +40,7 @@ services:
       - N8N_SMTP_USER=${MAIL_SMTP_USER}
       - N8N_SMTP_PASS=${MAIL_SMTP_PASS}
       - N8N_SMTP_SENDER=${MAIL_FROM_ADDR:-admin@ailinux.me}
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - GENERIC_TIMEZONE=${TZ:-Europe/Berlin}
       # AI Integration
       - N8N_AI_ENABLED=true
@@ -50,6 +57,28 @@ services:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:5678/healthz"]
       interval: 30s
       timeout: 10s
+      retries: 3
+
+
+  n8n-runners:
+    image: ${N8N_RUNNERS_IMAGE:-n8nio/runners:2.34.6}
+    container_name: n8n-runners
+    logging: *default_logging
+    restart: unless-stopped
+    environment:
+      - N8N_RUNNERS_TASK_BROKER_URI=http://n8n:5679
+      - N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+      - N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT=${N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT:-15}
+      - GENERIC_TIMEZONE=${TZ:-Europe/Berlin}
+    depends_on:
+      n8n:
+        condition: service_healthy
+    networks:
+      - triforce-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5680/healthz"]
+      interval: 30s
+      timeout: 5s
       retries: 3
 
 networks:

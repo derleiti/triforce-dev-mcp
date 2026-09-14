@@ -127,6 +127,14 @@ class Settings(BaseSettings):
     docker_n8n_host: str = Field(default="localhost", validation_alias="DOCKER_N8N_HOST")
     docker_n8n_protocol: str = Field(default="http", validation_alias="DOCKER_N8N_PROTOCOL")
 
+    # --- n8n production runtime / external task runners ---
+    n8n_runners_auth_token: Optional[str] = Field(default=None, validation_alias="N8N_RUNNERS_AUTH_TOKEN")
+    n8n_runners_image: str = Field(default="n8nio/runners:2.34.6", validation_alias="N8N_RUNNERS_IMAGE")
+    n8n_runners_auto_shutdown_timeout: int = Field(default=15, ge=1, le=3600, validation_alias="N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT")
+    n8n_unverified_packages_enabled: bool = Field(default=False, validation_alias="N8N_UNVERIFIED_PACKAGES_ENABLED")
+    n8n_compression_node_max_decompressed_size_bytes: int = Field(default=268435456, ge=1048576, validation_alias="N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES")
+    n8n_compression_node_max_zip_entries: int = Field(default=1000, ge=1, le=100000, validation_alias="N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES")
+
     docker_repository_image: str = Field(default="nginx:1.29-alpine", validation_alias="DOCKER_REPOSITORY_IMAGE")
     docker_repository_container: str = Field(default="triforce-repository", validation_alias="DOCKER_REPOSITORY_CONTAINER")
     docker_repository_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_REPOSITORY_BIND")
