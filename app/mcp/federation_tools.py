@@ -3,6 +3,7 @@ MCP Tools for Federation Vault Management
 """
 
 import logging
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
@@ -160,7 +161,7 @@ async def handle_node_update(args: Dict[str, Any]) -> Dict[str, Any]:
     import subprocess
     try:
         result = subprocess.run(
-            ["/home/zombie/workspace/triforce/scripts/update-nodes.sh"],
+            [str(Path(__file__).resolve().parents[2] / "scripts" / "update-nodes.sh")],
             capture_output=True,
             text=True,
             timeout=120

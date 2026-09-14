@@ -359,3 +359,14 @@ async def test_pair_ticket_returns_no_store_qr_for_exact_one_time_code():
     assert payload["qr_data_uri"].startswith("data:image/svg+xml;base64,")
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["pragma"] == "no-cache"
+
+
+def test_linux_helper_download_metadata_tracks_published_29014_build():
+    import inspect
+    from app.routes.mcp import download_ailinux_helper, download_desktop_workspace_helper
+
+    public_source = inspect.getsource(download_ailinux_helper)
+    desktop_source = inspect.getsource(download_desktop_workspace_helper)
+    for source in (public_source, desktop_source):
+        assert "AILinux-Helper-2.90.14-linux-x86_64.AppImage" in source
+        assert "AILinux-Helper-2.90.14-linux-amd64.deb" in source

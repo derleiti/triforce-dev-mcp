@@ -132,3 +132,12 @@ def test_package_mode_switch_is_explicit_only() -> None:
     assert 'MODE="source"' in installer
     assert 'rm -f "$MODE_MARKER"' in installer
     assert 'rm -f "$LOCAL_UNIT"' in installer
+
+
+def test_federation_node_update_uses_checkout_relative_script_path():
+    import inspect
+    from app.mcp import federation_tools
+
+    source = inspect.getsource(federation_tools.handle_node_update)
+    assert 'Path(__file__).resolve().parents[2] / "scripts" / "update-nodes.sh"' in source
+    assert "/home/zombie/workspace/triforce/scripts/update-nodes.sh" not in source

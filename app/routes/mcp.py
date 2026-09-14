@@ -523,8 +523,8 @@ async def download_ailinux_helper(platform: str):
     release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
     artifacts = {
         "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.13-android.apk", "application/vnd.android.package-archive"),
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.13-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.13-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.14-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.14-linux-amd64.deb", "application/vnd.debian.binary-package"),
         "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.13-win-x64.exe", "application/vnd.microsoft.portable-executable"),
         "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.13-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
@@ -542,8 +542,8 @@ async def download_ailinux_helper(platform: str):
 async def download_desktop_workspace_helper(platform: str) -> Response:
     root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/workspace/triforce/releases/helper")
     artifacts = {
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.13-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.13-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.14-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.14-linux-amd64.deb", "application/vnd.debian.binary-package"),
         "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.13-win-x64.exe", "application/vnd.microsoft.portable-executable"),
         "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.13-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
