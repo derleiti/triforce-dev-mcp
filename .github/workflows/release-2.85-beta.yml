@@ -104,7 +104,7 @@ jobs:
       - name: Require Python 3.14 ABI
         run: python -c "import sys; assert sys.version_info[:2] == (3,14), sys.version"
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: triforce-linux-2.85-beta2
           path: /tmp/linux-artifacts
@@ -254,7 +254,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
