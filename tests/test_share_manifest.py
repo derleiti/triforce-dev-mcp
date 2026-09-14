@@ -231,17 +231,17 @@ def test_compute_metadata_is_bounded_before_entering_manifest():
 
 
 def test_portable_device_read_and_control_are_separate_grants():
-    read_only = build_share_manifest({"capabilities": ["device_info", "process_ops", "service_ops"]})
+    read_only = build_share_manifest({"capabilities": ["device_info", "process_ops", "service_ops"], "resources": {"native": {"device": {"observe": True}}}})
     assert manifest_has_grant(read_only, RESOURCE_DEVICE, "read") is True
     assert manifest_has_grant(read_only, RESOURCE_DEVICE, "control") is False
 
-    controlled = build_share_manifest({"access_mode": "write", "capabilities": ["computer_input", "window_ops", "app_ops"]})
+    controlled = build_share_manifest({"access_mode": "off", "capabilities": ["computer_input", "window_ops", "app_ops"], "resources": {"native": {"device": {"control": True}, "display": {"control": True}}}})
     assert manifest_has_grant(controlled, RESOURCE_DISPLAY, "control") is True
     assert manifest_has_grant(controlled, RESOURCE_DEVICE, "control") is True
 
 
 def test_display_observe_and_control_are_independent():
-    control_only = build_share_manifest({"access_mode": "write", "capabilities": ["computer_input"]})
+    control_only = build_share_manifest({"access_mode": "off", "capabilities": ["computer_input"], "resources": {"native": {"display": {"control": True}}}})
     display = manifest_resource(control_only, RESOURCE_DISPLAY)
     assert display["enabled"] is True
     assert display["observe"] is False

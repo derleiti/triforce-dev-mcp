@@ -171,7 +171,7 @@ def _workspace_setup_html() -> str:
 const $=id=>document.getElementById(id);
 const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tree','code_search','code_grep','file_ops'];
 const WRITE_TOOLS=['file_edit','directory_create','workspace_clear','code_edit'];
-const HELPER_DEVICE_TOOLS=['computer_observe','computer_screenshot','clipboard_read','clipboard_write','device_info','process_ops','service_ops','app_ops','window_ops','computer_input','compute_execute'];
+const HELPER_DEVICE_TOOLS=['computer_observe','computer_screenshot','clipboard_read','clipboard_write','device_info','process_ops','service_ops','app_ops','window_ops','computer_input','device_control','compute_execute'];
 const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
 const MAX_TEXT=2*1024*1024;
 const EXECUTOR_VERSION='2.90.14-browser';

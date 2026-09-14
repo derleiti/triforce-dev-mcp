@@ -23,7 +23,7 @@ from .share_manifest import (
     CLIPBOARD_READ_TOOLS,
     CLIPBOARD_WRITE_TOOLS,
     COMPUTE_TOOLS,
-    DISPLAY_OBSERVE_TOOLS, DISPLAY_CONTROL_TOOLS, DEVICE_READ_TOOLS as SHARE_DEVICE_READ_TOOLS, DEVICE_CONTROL_TOOLS,
+    DISPLAY_OBSERVE_TOOLS, DISPLAY_CONTROL_TOOLS, DEVICE_READ_TOOLS as SHARE_DEVICE_READ_TOOLS, DEVICE_CONTROL_TOOLS, DEVICE_MUTATING_TOOLS,
     RESOURCE_CLIPBOARD,
     RESOURCE_COMPUTE,
     RESOURCE_DISPLAY,
@@ -315,11 +315,11 @@ def _workspace_required(request: Request) -> Dict[str, Any]:
 
 def workspace_tool_requires_write(name: str, arguments: Dict[str, Any] | None = None) -> bool:
     args = arguments or {}
-    if name in {"file_edit", "directory_create", "workspace_clear", "code_edit", "shell", "computer_input", "app_ops", "window_ops"}:
+    if name in {"file_edit", "directory_create", "workspace_clear", "code_edit", "shell", "computer_input"}:
         return True
     if name == "file_ops":
         return str(args.get("action") or "read").lower() in {"write", "append", "delete", "remove"}
-    if name in {"process_ops", "service_ops"}:
+    if name in {"process_ops", "service_ops", "app_ops", "window_ops"}:
         return str(args.get("action") or "list").lower() not in {"list", "get"}
     if name == "git":
         mode = str(args.get("mode") or args.get("action") or "status").lower()
@@ -707,7 +707,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             "The paired helper has not granted device inspection for this workspace.",
             tool=name,
         )
-    if name in DEVICE_CONTROL_TOOLS and workspace_tool_requires_write(name, arguments) and not manifest_has_grant(
+    if name in DEVICE_MUTATING_TOOLS and workspace_tool_requires_write(name, arguments) and not manifest_has_grant(
         _binding_share_manifest(binding), RESOURCE_DEVICE, "control"
     ):
         return _tool_error(
