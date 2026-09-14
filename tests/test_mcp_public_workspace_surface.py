@@ -329,3 +329,33 @@ async def test_write_workspace_discovery_exposes_only_announced_write_tools(monk
     names = {tool['name'] for tool in result['tools']}
     assert {'file_read', 'file_edit'} <= names
     assert {'directory_create', 'workspace_clear', 'clipboard_write'}.isdisjoint(names)
+
+
+@pytest.mark.asyncio
+async def test_pair_ticket_returns_no_store_qr_for_exact_one_time_code():
+    import json
+    from starlette.requests import Request
+    from app.routes.mcp import create_browser_workspace_pair_ticket
+    from app.services.mcp_workspace_sessions import resolve_web_pair_code
+
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "scheme": "https",
+        "server": ("api.ailinux.me", 443),
+        "path": "/v1/mcp/workspace/pair-ticket",
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(b"host", b"api.ailinux.me")],
+    })
+    response = await create_browser_workspace_pair_ticket(request)
+    payload = json.loads(response.body)
+    code = payload["pair_code"]
+
+    assert resolve_web_pair_code(code) is not None
+    assert payload["pair_uri"].startswith("ailinux-helper://pair?")
+    assert f"pair_code={code}" in payload["pair_uri"]
+    assert "url=https%3A%2F%2Fapi.ailinux.me%2Fv1%2Fmcp" in payload["pair_uri"]
+    assert payload["qr_data_uri"].startswith("data:image/svg+xml;base64,")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
