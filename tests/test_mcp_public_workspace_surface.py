@@ -76,7 +76,9 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     # Share fabric: a resume no longer requires a workspace. A native-only
     # capability share (clipboard/display/compute) must resume as well.
     assert 'manualDisconnect||(!resumeToken&&!pairCode)||!navigator.onLine' in html
-    assert 'if(!rootHandle&&!rootEntry&&!(await nativeHelperTools()).length)return;' in html
+    assert 'const nativeTools=await nativeHelperTools();' in html
+    assert 'if(!rootHandle&&!rootEntry&&!nativeTools.length)return;' in html
+    assert "capabilities=[...(rootHandle||rootEntry?READ_TOOLS:[]),...(workspaceMode==='write'&&rootHandle?WRITE_TOOLS:[]),...nativeTools];renderShareSummary();" in html
     assert "pairing code|workspace credential|resume token" in html
     assert "sessionStorage.removeItem('tf_pair_code')" in html
     assert 'Workspace pairing expired. Creating a fresh pairing ID' in html
