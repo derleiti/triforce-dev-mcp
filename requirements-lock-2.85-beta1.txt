@@ -62,7 +62,7 @@ linkify-it-py==2.2.0
 markdown-it-py==4.2.0
 mdit-py-plugins==0.6.1
 mdurl==0.1.2
-mistralai==2.9.3
+mistralai==2.10.0
 more-itertools==11.1.0
 multidict==6.7.1
 mypy==2.3.0
