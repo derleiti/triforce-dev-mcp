@@ -1491,7 +1491,17 @@ async def _start_pollers_with_lock():
 
 def _launch_pollers():
     global _poller_tasks
-    pollers = [("mail", _poll_mail), ("forum", _poll_forum), ("wordpress", _poll_wordpress)]
+    pollers = [("mail", _poll_mail), ("wordpress", _poll_wordpress)]
+    try:
+        from app.mcp.flarum_tools import is_flarum_configured
+        if is_flarum_configured():
+            pollers.append(("forum", _poll_forum))
+        else:
+            _poller_status["forum"] = "disabled:no-auth"
+            logger.info("Poller skipped: forum (Flarum auth not configured)")
+    except Exception as exc:
+        _poller_status["forum"] = "disabled:config-error"
+        logger.warning("Forum poller config check failed: %s", exc)
     try:
         from app.services.aicoder_agent_events import aicoder_failure_digest_loop
         pollers.append(("aicoder-failure-digest", aicoder_failure_digest_loop))

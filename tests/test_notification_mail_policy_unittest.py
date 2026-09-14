@@ -103,3 +103,40 @@ async def test_poller_leader_retries_after_stale_restart_lock(monkeypatch):
 
     assert fake_redis.set_calls >= 2
     assert launched == [True]
+
+
+def test_flarum_configured_checks_canonical_config(monkeypatch):
+    import app.mcp.flarum_tools as ft
+
+    monkeypatch.setattr(ft, "_env_value", lambda name: "token" if name == "FLARUM_TOKEN" else None)
+    assert ft.is_flarum_configured() is True
+
+    monkeypatch.setattr(ft, "_env_value", lambda _name: None)
+    assert ft.is_flarum_configured() is False
+
+
+def test_launch_pollers_skips_forum_without_auth(monkeypatch):
+    import app.mcp.flarum_tools as ft
+    import app.mcp.notification_manager as nm
+
+    launched = []
+
+    def fake_create_task(coro):
+        launched.append(coro.cr_code.co_name)
+        coro.close()
+
+        class DummyTask:
+            def set_name(self, _name):
+                pass
+
+        return DummyTask()
+
+    monkeypatch.setattr(ft, "is_flarum_configured", lambda: False)
+    monkeypatch.setattr(nm.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(nm, "_poller_tasks", [])
+    monkeypatch.setattr(nm, "_poller_status", {})
+
+    nm._launch_pollers()
+
+    assert "_poll_forum" not in launched
+    assert nm._poller_status["forum"] == "disabled:no-auth"

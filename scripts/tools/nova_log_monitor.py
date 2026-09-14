@@ -184,11 +184,36 @@ async def notify(title: str, body: str, source: str = "system",
 
 # ── Log Klassifikation ────────────────────────────────────────────────────────
 
+_STRUCTURED_LEVEL_RE = re.compile(
+    r"\|(?P<level>CRITICAL|FATAL|ERROR|WARNING|WARN|INFO|DEBUG)\s*\|",
+    re.IGNORECASE,
+)
+
+
 def classify_line(line: str) -> str | None:
-    """Gibt 'critical'|'error'|'warning'|'info'|None zurück."""
+    """Return an actionable severity without treating payload words as levels.
+
+    TriForce and Nova logs use pipe-delimited structured levels.  If such a
+    level is present it is authoritative; an INFO payload may legitimately
+    contain fields such as ``error=''`` or diagnostic text mentioning errors.
+    Generic pattern matching remains the fallback for unstructured sources.
+    """
     for pat in IGNORE_PATTERNS:
         if re.search(pat, line, re.IGNORECASE):
             return None
+
+    structured = _STRUCTURED_LEVEL_RE.search(line)
+    if structured:
+        level = structured.group("level").lower()
+        if level in {"critical", "fatal"}:
+            return "critical"
+        if level == "error":
+            return "error"
+        if level in {"warning", "warn"}:
+            return "warning"
+        # INFO/DEBUG are deliberately not alerted.  Their payload can contain
+        # words like "error", "failed", or "timeout" as data rather than level.
+        return None
 
     for level in ["critical", "error", "warning", "info"]:
         for pat in LEVEL_PATTERNS[level]:
