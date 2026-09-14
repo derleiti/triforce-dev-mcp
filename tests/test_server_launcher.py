@@ -60,13 +60,15 @@ def test_launcher_websocket_liveness_is_configurable(tmp_path: Path):
     assert float(argv[argv.index("--ws-ping-timeout") + 1]) == 180.0
 
 
-def test_launcher_bounds_graceful_shutdown_below_systemd_outer_timeout(tmp_path: Path):
+def test_launcher_bounds_graceful_shutdown_below_systemd_outer_timeout(tmp_path: Path, monkeypatch):
     cfg = tmp_path / "triforce.env"
     cfg.write_text("TRIFORCE_API_PORT=19121\n")
+    monkeypatch.delenv("TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT", raising=False)
     argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
     timeout = argv[argv.index("--timeout-graceful-shutdown") + 1]
-    assert timeout == "5"
-    assert int(timeout) < 30
+    assert timeout == "30"
+    # systemd TimeoutStopSec is 45s; Uvicorn must finish before the outer kill.
+    assert int(timeout) < 45
 
 
 def test_launcher_graceful_shutdown_is_configurable(tmp_path: Path):
@@ -102,3 +104,91 @@ def test_launcher_does_not_trust_arbitrary_forwarding_peers_by_default(tmp_path:
     monkeypatch.delenv("TRIFORCE_FORWARDED_ALLOW_IPS", raising=False)
     argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
     assert argv[argv.index("--forwarded-allow-ips") + 1] == "127.0.0.1"
+
+
+def test_log_collector_does_not_treat_uvicorn_error_logger_name_as_error(tmp_path: Path):
+    from logging.handlers import RotatingFileHandler
+    from app.utils.system_log_collector import SystemLogCollector
+
+    collector = SystemLogCollector()
+    target = tmp_path / "collector-error.log"
+    collector._error_handler = RotatingFileHandler(target, encoding="utf-8")
+    collector._extract_and_log_errors(
+        "triforce",
+        "2026-09-14 18:00:00 | INFO | uvicorn.error | Application startup complete.",
+    )
+    collector._error_handler.flush()
+    assert target.read_text() == ""
+
+
+def test_log_collector_keeps_explicit_error_levels(tmp_path: Path):
+    from logging.handlers import RotatingFileHandler
+    from app.utils.system_log_collector import SystemLogCollector
+
+    collector = SystemLogCollector()
+    target = tmp_path / "collector-error.log"
+    collector._error_handler = RotatingFileHandler(target, encoding="utf-8")
+    collector._extract_and_log_errors(
+        "triforce",
+        "2026-09-14 18:00:00 | ERROR | uvicorn.error | real failure",
+    )
+    collector._error_handler.flush()
+    assert "real failure" in target.read_text()
+
+
+def test_log_collector_understands_pretty_unicode_levels(tmp_path: Path):
+    from logging.handlers import RotatingFileHandler
+    from app.utils.system_log_collector import SystemLogCollector
+
+    collector = SystemLogCollector()
+    target = tmp_path / "collector-pretty.log"
+    collector._error_handler = RotatingFileHandler(target, encoding="utf-8")
+    collector._extract_and_log_errors(
+        "boot",
+        "2026-09-14 19:15:30.436 │ INF │ UVICORN │ uvicorn.error │ Started server process",
+    )
+    collector._extract_and_log_errors(
+        "boot",
+        "2026-09-14 19:15:31.436 │ ERR │ UVICORN │ uvicorn.error │ real failure",
+    )
+    collector._error_handler.flush()
+    content = target.read_text()
+    assert "Started server process" not in content
+    assert "real failure" in content
+
+
+def _load_nova_log_monitor_for_test():
+    import importlib.util
+    module_path = Path(__file__).parents[1] / "scripts" / "tools" / "nova_log_monitor.py"
+    spec = importlib.util.spec_from_file_location("nova_log_monitor_regression", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_nova_monitor_pretty_info_logger_name_does_not_trigger_error():
+    monitor = _load_nova_log_monitor_for_test()
+    line = "2026-09-14 19:15:30.436 │ INF │ UVICORN │ uvicorn.error │ Started server process"
+    assert monitor.classify_line(line) is None
+
+
+def test_nova_monitor_pretty_uvicorn_error_remains_actionable():
+    monitor = _load_nova_log_monitor_for_test()
+    line = "2026-09-14 19:15:30.436 │ ERR │ UVICORN │ uvicorn.error │ timeout graceful shutdown exceeded"
+    assert monitor.classify_line(line) == "error"
+
+
+def test_log_collector_does_not_infer_errors_from_unstructured_journal_payload(tmp_path: Path):
+    from logging.handlers import RotatingFileHandler
+    from app.utils.system_log_collector import SystemLogCollector
+
+    collector = SystemLogCollector()
+    target = tmp_path / "collector-journal.log"
+    collector._error_handler = RotatingFileHandler(target, encoding="utf-8")
+    collector._extract_and_log_errors(
+        "systemd",
+        "2026-09-14T19:19:02+02:00 sudo[1]: COMMAND=/usr/bin/systemctl reset-failed motd-news.service",
+    )
+    collector._error_handler.flush()
+    assert target.read_text() == ""

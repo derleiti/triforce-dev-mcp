@@ -106,7 +106,7 @@ class SystemLogCollector:
                 "filename": "ailinux-backend.log"
             },
             "syslog": {
-                "command": ["journalctl", "-p", "err..emerg", "-n", "100", "--no-pager", "-o", "short-iso"],
+                "command": ["journalctl", "-p", "err..emerg", "--since", "-30 seconds", "--no-pager", "-o", "short-iso"],
                 "output_dir": SYSTEM_LOG_DIR,
                 "filename": "syslog-errors.log"
             },
@@ -235,12 +235,19 @@ class SystemLogCollector:
             # Keyword matching alone misfires on the logger NAME: "uvicorn.error"
             # contains the word "error", so every startup line was stored as ERROR.
             level_match = re.search(
-                r"\|\s*(DEBUG|INFO|NOTICE|WARNING|WARN|ERROR|CRITICAL|FATAL)\s*\|",
+                r"(?:\||│)\s*(DEBUG|DBG|INFO|INF|NOTICE|WARNING|WARN|WRN|ERROR|ERR|CRITICAL|FATAL)\s*(?:\||│)",
                 line,
             )
             if level_match:
-                if level_match.group(1).upper() in ("ERROR", "CRITICAL", "FATAL"):
+                if level_match.group(1).upper() in ("ERROR", "ERR", "CRITICAL", "FATAL"):
                     error_logger.error(f"[{source}] {line.strip()}")
+                continue
+
+            # Generic journal/boot snapshots contain command names and payload
+            # text such as `reset-failed` at non-error priorities. Real system
+            # errors are collected separately by the priority-filtered syslog
+            # source, so never infer severity from words in these snapshots.
+            if source in {"systemd", "boot"}:
                 continue
 
             # No structured level present -> fall back to keyword heuristics.

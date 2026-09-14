@@ -117,7 +117,6 @@ IGNORE_PATTERNS = [
     r"Hardware.*Auto-Detection",     # Hardware-Detect beim Start
     r"TriForce Logging v",           # Startup-Logs
     # uvicorn komplett raus — nur echte HTTP-Errors sind relevant
-    r"uvicorn\.error",          # alles von uvicorn.error (Bootup, Shutdown, WS)
     r"uvicorn\.access",         # HTTP Access-Log
     r"Started server process",
     r"Waiting for application",
@@ -185,7 +184,7 @@ async def notify(title: str, body: str, source: str = "system",
 # ── Log Klassifikation ────────────────────────────────────────────────────────
 
 _STRUCTURED_LEVEL_RE = re.compile(
-    r"\|(?P<level>CRITICAL|FATAL|ERROR|WARNING|WARN|INFO|DEBUG)\s*\|",
+    r"(?:\||│)\s*(?P<level>CRITICAL|FATAL|ERROR|ERR|WARNING|WARN|WRN|INFO|INF|DEBUG|DBG)\s*(?:\||│)",
     re.IGNORECASE,
 )
 
@@ -207,9 +206,9 @@ def classify_line(line: str) -> str | None:
         level = structured.group("level").lower()
         if level in {"critical", "fatal"}:
             return "critical"
-        if level == "error":
+        if level in {"error", "err"}:
             return "error"
-        if level in {"warning", "warn"}:
+        if level in {"warning", "warn", "wrn"}:
             return "warning"
         # INFO/DEBUG are deliberately not alerted.  Their payload can contain
         # words like "error", "failed", or "timeout" as data rather than level.
