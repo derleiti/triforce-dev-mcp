@@ -1,5 +1,6 @@
 triforce-backend (1:2.86.6-1) noble; urgency=medium
 
+  * Add structured, color-organized Uvicorn/TriForce operator logging with subsystem badges, HTTP method/status highlighting and source context.
   * Consolidate MCP discovery into global, aihelper, authenticated and admin scopes.
   * Add canonical aihelper_* device tools with legacy Helper wire compatibility.
   * Add aihelper_pair lifecycle actions for status, pair, reconnect and disconnect.
