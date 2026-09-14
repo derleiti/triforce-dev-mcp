@@ -1049,7 +1049,7 @@ Format:
 
         parts.append(
             "## Regeln\n"
-            "- Arbeite im TriForce Backend: /home/zombie/triforce\n"
+            "- Arbeite im TriForce Backend: /home/zombie/workspace/triforce\n"
             "- Teste jede Änderung\n"
             "- Erstelle Backups vor destruktiven Ops\n"
             "- Poste das Ergebnis via group_chat_message wenn fertig\n"

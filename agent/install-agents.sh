@@ -4,7 +4,7 @@
 ################################################################################
 set -e
 
-BASE_DIR="/home/zombie/triforce"
+BASE_DIR="/home/zombie/workspace/triforce"
 AGENT_DIR="${BASE_DIR}/agent"
 
 echo "=== Codex MCP Agent Installation ==="

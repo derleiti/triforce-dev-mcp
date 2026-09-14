@@ -9,7 +9,7 @@ set -e
 # Configuration
 UPDATE_URL="https://update.ailinux.me/server"
 MANIFEST_URL="${UPDATE_URL}/manifest.json"
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 BACKUP_DIR="${TRIFORCE_DIR}/.backups/updates"
 LOG_FILE="${TRIFORCE_DIR}/logs/hub-sync.log"
 

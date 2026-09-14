@@ -48,7 +48,7 @@ Example request:
       "client_id": "openclaw",
       "tool": "client_file_list",
       "params": {
-        "path": "/home/zombie/triforce"
+        "path": "/home/zombie/workspace/triforce"
       }
     }
 
@@ -133,11 +133,11 @@ List tools:
 
 List a directory:
 
-    python3 ~/.openclaw/skills/ailinux-mcp-client/bin/ailinux_mcp.py call client_file_list '{"path":"/home/zombie/triforce"}'
+    python3 ~/.openclaw/skills/ailinux-mcp-client/bin/ailinux_mcp.py call client_file_list '{"path":"/home/zombie/workspace/triforce"}'
 
 Run a shell command:
 
-    python3 ~/.openclaw/skills/ailinux-mcp-client/bin/ailinux_mcp.py call client_shell_exec '{"command":"pwd && ls -la | head -40","cwd":"/home/zombie/triforce"}'
+    python3 ~/.openclaw/skills/ailinux-mcp-client/bin/ailinux_mcp.py call client_shell_exec '{"command":"pwd && ls -la | head -40","cwd":"/home/zombie/workspace/triforce"}'
 
 ## Notes
 

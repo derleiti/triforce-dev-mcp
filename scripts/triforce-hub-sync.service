@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=zombie
 Group=zombie
-Environment="TRIFORCE_DIR=/home/zombie/triforce"
+Environment="TRIFORCE_DIR=/home/zombie/workspace/triforce"
 ExecStart=/var/www/update.ailinux.me/server/scripts/hub-sync.sh
 StandardOutput=journal
 StandardError=journal

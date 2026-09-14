@@ -197,7 +197,7 @@ Antworte im JSON-Format:
         ("# type: ignore", "Type check bypasses"),
     ]
 
-    def __init__(self, backend_path: str = "/home/zombie/triforce"):
+    def __init__(self, backend_path: str = "/home/zombie/workspace/triforce"):
         self.backend_path = Path(backend_path)
         self.prompts_path = TRISTAR_DIR / "prompts"
         self.evolution_log = TRISTAR_DIR / "logs/evolution"

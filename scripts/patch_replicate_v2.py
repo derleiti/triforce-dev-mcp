@@ -10,7 +10,7 @@ import shutil, ast
 from datetime import datetime
 
 TS = datetime.now().strftime("%Y%m%d_%H%M%S")
-BASE = "/home/zombie/triforce"
+BASE = "/home/zombie/workspace/triforce"
 
 def safe_replace(filepath, old, new, label=""):
     with open(filepath, "r") as f:

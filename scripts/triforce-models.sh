@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-ROOT="${TRIFORCE_ROOT:-/home/zombie/triforce}"
+ROOT="${TRIFORCE_ROOT:-/home/zombie/workspace/triforce}"
 PY="${ROOT}/.venv/bin/python3"
 MODE="${1:-table}"
 

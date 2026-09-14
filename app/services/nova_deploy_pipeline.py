@@ -15,7 +15,7 @@ async def snapshot_production() -> bool:
             "SNAPSHOT PRODUCTION→BACKUP (10.10.0.3) via remote_task host=backup:\n"
             "1. mkdir -p /home/zombie/triforce-snapshots\n"
             "2. SNAP=snap_$(date +%Y%m%d_%H%M%S)\n"
-            "   cp -r /home/zombie/triforce /home/zombie/triforce-snapshots/$SNAP\n"
+            "   cp -r /home/zombie/workspace/triforce /home/zombie/triforce-snapshots/$SNAP\n"
             "3. ls -dt /home/zombie/triforce-snapshots/snap_* | tail -n +11 | xargs rm -rf 2>/dev/null\n"
             "4. notify_send '📸 Snapshot OK' priority=low auto_resolve=true\n5. TASK_COMPLETE"))
         logger.info("deploy_pipeline: Snapshot-Job → backup"); return True
@@ -30,13 +30,13 @@ async def deploy_to_production(commit_info: str = "") -> dict:
         result = await get_agent_spawner().spawn_for_issue(issue_type="ops_worker",
             source="deploy_pipeline:prod", context=(
             f"PRODUCTION DEPLOY zombie-pc→hetzner: {commit_info[:200]}\n\n"
-            "1. remote_task host=hetzner: cd /home/zombie/triforce && git pull origin master 2>&1|tail -5\n"
+            "1. remote_task host=hetzner: cd /home/zombie/workspace/triforce && git pull origin master 2>&1|tail -5\n"
             "2. remote_task host=hetzner: find app/ -name '*.py' -newer app/__init__.py|head -20|"
             "   xargs -I{} .venv/bin/python3 -m py_compile {} 2>&1 && echo SYNTAX_OK\n"
             "3. NUR bei SYNTAX_OK: remote_task host=hetzner: "
             "   sudo systemctl restart triforce && sleep 12 && curl -sf http://localhost:9000/health|grep -o '\"ok\"'\n"
             f"4a. Output 'ok': notify_send '✅ Deploy OK: {short}' priority=high tags=[deploy,production]\n"
-            f"4b. Sonst: git -C /home/zombie/triforce revert HEAD --no-edit && git push && "
+            f"4b. Sonst: git -C /home/zombie/workspace/triforce revert HEAD --no-edit && git push && "
             f"sudo systemctl restart triforce && "
             f"notify_send '🚨 Deploy FAILED+Rollback: {short}' priority=critical tags=[deploy,rollback]\n"
             "5. TASK_COMPLETE"))

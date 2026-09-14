@@ -2,7 +2,7 @@
 # Codex TriForce Wrapper
 set -euo pipefail
 
-BASE_DIR="/home/zombie/triforce"
+BASE_DIR="/home/zombie/workspace/triforce"
 AGENT_NAME="codex"
 LOG_FILE="${BASE_DIR}/logs/${AGENT_NAME}.log"
 

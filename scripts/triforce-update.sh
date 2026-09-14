@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-REPO_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+REPO_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 SERVICE_NAME="triforce"
 BRANCH="master"
 LOG_TAG="triforce-update"

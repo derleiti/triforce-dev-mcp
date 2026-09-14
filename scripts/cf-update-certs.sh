@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# systemd does not guarantee a login HOME; TriForce config paths belong to zombie.
+export HOME="${HOME:-/home/zombie}"
+
 # ================================================================
 # AILinux Cloudflare + Let's Encrypt Certificate Manager
 # - Ubuntu 26.04 / APT only -- NO SNAP

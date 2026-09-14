@@ -64,10 +64,10 @@ deploy_node() {
 }
 
 # Deploy auf zombie-pc
-deploy_node "10.10.0.2" "zombie"     "/home/zombie/triforce"     "zombie-pc"
+deploy_node "10.10.0.2" "zombie"     "/home/zombie/workspace/triforce"     "zombie-pc"
 
 # Deploy auf backup
-deploy_node "10.10.0.3" "zombie" "/home/zombie/triforce" "backup"
+deploy_node "10.10.0.3" "zombie" "/home/zombie/workspace/triforce" "backup"
 
 log ""
 log "=== Deploy abgeschlossen ==="

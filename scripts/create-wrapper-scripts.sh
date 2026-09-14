@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 BIN_DIR="${TRIFORCE_BIN_DIR:-$TRIFORCE_DIR/bin}"
 TARGET_USER="${TRIFORCE_USER:-zombie}"
 TARGET_HOME="${TRIFORCE_USER_HOME:-$(getent passwd "$TARGET_USER" | cut -d: -f6)}"

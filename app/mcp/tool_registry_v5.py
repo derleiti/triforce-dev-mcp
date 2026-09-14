@@ -274,7 +274,7 @@ V5_TOOLS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "File path (absolute or relative to project root)"},
-                "root": {"type": "string", "description": "Project root directory (default: /home/zombie/triforce). Set to work on other projects e.g. /home/zombie/ai-coder"},
+                "root": {"type": "string", "description": "Project root directory (default: /home/zombie/workspace/triforce). Set to work on other projects e.g. /home/zombie/workspace/ai-coder"},
                 "start_line": {"type": "integer", "description": "First line to read (optional)"},
                 "end_line": {"type": "integer", "description": "Last line to read (optional)"},
             },
@@ -288,7 +288,7 @@ V5_TOOLS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Root path to scan (default: project root)"},
-                "root": {"type": "string", "description": "Project root directory (default: /home/zombie/triforce). Set to work on other projects e.g. /home/zombie/ai-coder"},
+                "root": {"type": "string", "description": "Project root directory (default: /home/zombie/workspace/triforce). Set to work on other projects e.g. /home/zombie/workspace/ai-coder"},
                 "depth": {"type": "integer", "description": "Max depth (default: 3)"},
                 "ignore": {
                     "type": "array",
@@ -306,7 +306,7 @@ V5_TOOLS: List[Dict[str, Any]] = [
             "properties": {
                 "query": {"type": "string", "description": "Search text or regex pattern"},
                 "path": {"type": "string", "description": "Search scope path (default: project root)"},
-                "root": {"type": "string", "description": "Project root directory (default: /home/zombie/triforce). Set to work on other projects e.g. /home/zombie/ai-coder"},
+                "root": {"type": "string", "description": "Project root directory (default: /home/zombie/workspace/triforce). Set to work on other projects e.g. /home/zombie/workspace/ai-coder"},
                 "file_pattern": {"type": "string", "description": "File filter (e.g. '*.py', '*.ts')"},
                 "case_sensitive": {"type": "boolean", "description": "Case-sensitive search (default: false)"},
                 "max_results": {"type": "integer", "description": "Max results (default: 50)"},

@@ -20,7 +20,7 @@ set -euo pipefail
 readonly SCRIPT_VERSION="1.0.0"
 SCRIPT_NAME=$(basename "$0")
 readonly SCRIPT_NAME
-readonly BASE_DIR="/home/zombie/triforce"
+readonly BASE_DIR="/home/zombie/workspace/triforce"
 readonly NPM_GLOBAL_DIR="/root/.npm-global"
 readonly MCP_URL="http://localhost:9100/mcp"
 
@@ -483,7 +483,7 @@ create_wrappers() {
 # Claude Code TriForce Wrapper
 set -euo pipefail
 
-BASE_DIR="/home/zombie/triforce"
+BASE_DIR="/home/zombie/workspace/triforce"
 AGENT_NAME="claude"
 LOG_FILE="${BASE_DIR}/logs/${AGENT_NAME}.log"
 
@@ -525,7 +525,7 @@ EOFWRAPPER
 # Codex TriForce Wrapper
 set -euo pipefail
 
-BASE_DIR="/home/zombie/triforce"
+BASE_DIR="/home/zombie/workspace/triforce"
 AGENT_NAME="codex"
 LOG_FILE="${BASE_DIR}/logs/${AGENT_NAME}.log"
 
@@ -565,7 +565,7 @@ EOFWRAPPER
 # Gemini CLI TriForce Wrapper
 set -euo pipefail
 
-BASE_DIR="/home/zombie/triforce"
+BASE_DIR="/home/zombie/workspace/triforce"
 AGENT_NAME="gemini"
 LOG_FILE="${BASE_DIR}/logs/${AGENT_NAME}.log"
 
@@ -605,7 +605,7 @@ EOFWRAPPER
 # OpenCode TriForce Wrapper
 set -euo pipefail
 
-BASE_DIR="/home/zombie/triforce"
+BASE_DIR="/home/zombie/workspace/triforce"
 AGENT_NAME="opencode"
 LOG_FILE="${BASE_DIR}/logs/${AGENT_NAME}.log"
 

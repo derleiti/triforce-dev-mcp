@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "Usage: sudo $0" >&2; exit 1; }
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 UNIT_DIR=/etc/systemd/system
 CONFIG_DIR=/etc/triforce
 TOKEN_FILE="$CONFIG_DIR/recovery-token"

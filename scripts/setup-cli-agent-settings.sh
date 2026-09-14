@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # Compatibility helper for the current TriForce CLI-agent layout.
 # Legacy versions of this script wrote stale root-only configs and obsolete
 # model names. Current TriForce owns agent configuration under config/agents.
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 AGENT_DIR="$TRIFORCE_DIR/config/agents"
 
 [[ -d "$TRIFORCE_DIR" ]] || { echo "TriForce directory not found: $TRIFORCE_DIR" >&2; exit 1; }

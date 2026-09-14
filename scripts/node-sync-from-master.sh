@@ -6,7 +6,7 @@ set -euo pipefail
 
 MASTER_HOST="10.10.0.1"
 MASTER_USER="zombie"
-MASTER_DIR="/home/zombie/triforce"
+MASTER_DIR="/home/zombie/workspace/triforce"
 MASTER_SSH="${MASTER_USER}@${MASTER_HOST}"
 SERVICE_NAME="triforce"
 

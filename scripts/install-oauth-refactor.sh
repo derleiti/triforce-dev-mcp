@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-ROOT="${TRIFORCE_DIR:-/home/zombie/triforce}"
+ROOT="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 required=(
   "$ROOT/app/routes/oauth_service.py"
   "$ROOT/app/utils/auth_middleware.py"

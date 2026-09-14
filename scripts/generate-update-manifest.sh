@@ -6,7 +6,7 @@
 
 set -e
 
-TRIFORCE_DIR="/home/zombie/triforce"
+TRIFORCE_DIR="/home/zombie/workspace/triforce"
 UPDATE_DIR="/var/www/update.ailinux.me"
 VERSION_FILE="$TRIFORCE_DIR/VERSION"
 MANIFEST_FILE="$UPDATE_DIR/manifest.json"

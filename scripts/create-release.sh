@@ -6,7 +6,7 @@
 
 set -e
 
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 UPDATE_DIR="/var/www/update.ailinux.me/server"
 
 # Get version from config or argument

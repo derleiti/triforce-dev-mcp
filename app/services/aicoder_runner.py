@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 DEFAULT_AICODER = "/usr/bin/aicoder"
-DEFAULT_AICODER_SOURCE_ROOT = Path("/home/zombie/ai-coder")
+DEFAULT_AICODER_SOURCE_ROOT = Path("/home/zombie/workspace/ai-coder")
 DEFAULT_AICODER_RUNNER_MODE = "installed"
 DEFAULT_INSTANCE_ROOT = Path("/var/tristar/agents/instances")
 PROVIDER_HOME_DIRS = (".codex", ".claude", ".vibe", ".gemini", ".antigravity")
@@ -589,7 +589,7 @@ async def run_profile(
     profile = load_profile(profile_id, profile_root)
     home = prepare_instance_home(profile_id, source_home=source_home, instance_root=instance_root)
     apply_profile_state(home, profile)
-    workspace = Path(str(profile.get("workspace") or "/home/zombie/triforce")).resolve()
+    workspace = Path(str(profile.get("workspace") or "/home/zombie/workspace/triforce")).resolve()
     effective_timeout = int(timeout_override or profile.get("timeout") or 120)
     return await (runner or AICoderRunner()).run(
         profile_id=profile_id,

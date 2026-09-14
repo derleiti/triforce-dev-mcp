@@ -135,6 +135,6 @@ Optimized directives for coding agents (defined in `TSP_PROTOCOL.md`).
 
 ## Local Project Hygiene Context
 
-When assisting in this repository, distinguish source changes from runtime cleanup. The live project checkout is `/home/zombie/triforce`; the local review checkout may be `/home/zombie/triforce-review`. Always verify the root and branch before writing files.
+When assisting in this repository, distinguish source changes from runtime cleanup. The live project checkout is `/home/zombie/workspace/triforce`; the local review checkout may be `/home/zombie/workspace/triforce-review`. Always verify the root and branch before writing files.
 
 Generated or host-local assets such as `.venv/`, `__pycache__/`, Docker repository mirror data, generated Debian package staging, and backup/patch directories should be ignored or backed up outside Git rather than committed. Route cleanup must preserve active compatibility modules referenced by `app/main.py`, especially `app/routes_sd3.py` and `app/routes_vision.py`.

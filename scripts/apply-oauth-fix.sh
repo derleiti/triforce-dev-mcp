@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 # Legacy compatibility check. The OAuth implementation now lives directly in
 # TriForce app/routes/oauth_service.py and app/utils/auth_middleware.py.
-TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/triforce}"
+TRIFORCE_DIR="${TRIFORCE_DIR:-/home/zombie/workspace/triforce}"
 
 required=(
   "$TRIFORCE_DIR/app/routes/oauth_service.py"

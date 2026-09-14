@@ -25,7 +25,7 @@ python3 - <<'PY'
 import re, shutil
 from pathlib import Path
 
-ROOT = Path("/home/zombie/triforce")
+ROOT = Path("/home/zombie/workspace/triforce")
 BAKDIR = Path((ROOT / ".patch-bak").glob("*").__iter__().__next__().as_posix())  # fallback safety (unused)
 # better: read from env? not needed here because we already created BAKDIR in bash
 # We'll detect the newest backup dir (the one created just now) robustly:

@@ -501,7 +501,7 @@ class TaskScheduler:
                         f"2. code_edit/code_patch → implementieren\n"
                         f"3. dev_lint → Syntax prüfen\n"
                         f"4. Shadow-Test auf zombie-pc (10.10.0.2) via remote_task\n"
-                        f"   Befehl: cd /home/zombie/triforce && .venv/bin/python3 -m pytest tests/ -x -q 2>&1 | tail -20\n"
+                        f"   Befehl: cd /home/zombie/workspace/triforce && .venv/bin/python3 -m pytest tests/ -x -q 2>&1 | tail -20\n"
                         f"5. Nur bei grünen Tests: git_ops commit + push\n"
                         f"   Commit-Format: fix(<modul>): <beschreibung> — research-approved by zombie\n"
                         f"6. notify_send → Ergebnis melden"
