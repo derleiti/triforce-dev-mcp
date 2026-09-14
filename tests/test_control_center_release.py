@@ -6,7 +6,7 @@ SCRIPT = Path('scripts/release/build-control-center-2.86.sh')
 def test_control_center_release_targets_286_and_current_backend_floor():
     text = SCRIPT.read_text()
     assert 'CONTROL_REVISION="${CONTROL_REVISION:-2}"' in text
-    assert 'BACKEND_MIN="${BACKEND_MIN:-1:${VERSION}-9}"' in text
+    assert 'BACKEND_MIN="${BACKEND_MIN:-$(dpkg-parsechangelog -l \"$ROOT/debian/changelog\" -S Version)}"' in text
     assert 'triforce-backend (>= $BACKEND_MIN)' in text
     assert 'triforce-backend (<< 1:3.0)' in text
 
