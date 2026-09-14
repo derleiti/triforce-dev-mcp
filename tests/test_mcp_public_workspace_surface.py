@@ -79,9 +79,20 @@ async def test_internal_admin_catalog_keeps_server_tools_and_explicit_core_stays
     assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'group_chat_create', 'mail_inbox', 'aihelper_pair'} <= full_names
 
 
-def test_browser_workspace_socket_credential_uses_subprotocol_not_query():
+
+
+def test_webmcp_live_document_contains_only_external_script_and_stylesheet():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
+    assert '<style' not in html.lower()
+    assert ' style=' not in html.lower()
+    assert '/v1/mcp/web/styles.css' in html
+    assert '/v1/mcp/web/app.js' in html
+    assert 'cdn.jsdelivr.net' not in html
+
+def test_browser_workspace_socket_credential_uses_subprotocol_not_query():
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert "/v1/mcp/workspace/socket-ticket" in html
     assert "ailinux-workspace-v1" in html
     assert "ailinux-ticket." in html
@@ -99,8 +110,8 @@ def test_browser_workspace_page_prefers_native_pair_handover_over_the_url():
     deprecated fallback for shipped Helper builds <= 2.90.29 and must keep
     stripping itself from history.
     """
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
 
     # Out-of-band handover exists, is awaited before the restore path runs, and
     # is one-shot on the Electron side.
@@ -117,8 +128,8 @@ def test_browser_workspace_page_prefers_native_pair_handover_over_the_url():
 
 
 def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_uri():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert 'showDirectoryPicker' in html
     assert 'heartbeatTimer=null' in html
     assert "new URLSearchParams(location.search).get('pair_code')" in html
@@ -292,8 +303,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
 
 
 def test_browser_helper_uses_runtime_capabilities_when_the_browser_exposes_them():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert "navigator.mediaDevices.getDisplayMedia" in html
     assert "browserHelperTools()" in html
     assert "function browserHelperTools(){if(nativeHelper)return []" in html
@@ -311,12 +322,13 @@ def test_browser_helper_uses_runtime_capabilities_when_the_browser_exposes_them(
 
 
 def test_browser_python_runtime_is_isolated_and_does_not_impersonate_docker_compute():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert 'id="webRuntimePanel"' in html
     assert 'Pyodide 314.0.6' in html
-    assert "new Worker(url)" in html
-    assert "cdn.jsdelivr.net/pyodide/v314.0.6/full/" in html
+    assert "new Worker('/v1/mcp/web/pyodide-worker.js')" in html
+    assert "/v1/mcp/pyodide/v314.0.6/" in html
+    assert "cdn.jsdelivr.net" not in html
     assert "runPythonAsync" in html
     assert "TriForce remote compute must be intercepted server-side" in html
     assert "runtime:'triforce_docker'" in html
@@ -324,8 +336,8 @@ def test_browser_python_runtime_is_isolated_and_does_not_impersonate_docker_comp
 
 
 def test_browser_remote_compute_and_opfs_workspace_are_explicit_capabilities():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert 'TriForce cloud sandbox · internet + shell + ~/workspace' in html
     assert "if(webShareProfile.remoteCompute&&s.remoteCompute)out.push('compute_execute')" in html
     assert "remote_requested:remote" in html
@@ -339,8 +351,8 @@ def test_browser_remote_compute_and_opfs_workspace_are_explicit_capabilities():
 
 
 def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert "removeEntry(name,{recursive:true})" in html
     assert "NotSupportedError" in html
     assert "workspace_clear" in html
@@ -351,8 +363,8 @@ def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
 
 
 def test_mobile_workspace_install_surface_and_pwa_contract():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert 'id="helperPanel"' in html
     assert '/v1/mcp/workspace/android.apk' in html
     assert 'package=me.ailinux.workspace' in html
@@ -382,31 +394,43 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
 
 
 def test_helper_surface_is_unified_and_branded():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert '<h1>AILinux Helper</h1>' in html
     assert 'id="helperTitle"' in html
     assert 'Mobile Workspace' not in html
     assert '/v1/mcp/helper/icon.png' in html
 
 
-def test_helper_release_catalog_selects_newest_per_platform(tmp_path, monkeypatch):
+def test_helper_release_catalog_ignores_stray_artifacts_and_checks_manifest_size(tmp_path, monkeypatch):
+    import json
     from app.routes.mcp import _helper_release_catalog
 
-    for name in [
-        "AILinux-Helper-2.90.24-android.apk",
-        "AILinux-Helper-2.90.25-linux-amd64.deb",
-        "AILinux-Helper-2.90.25-linux-x86_64.AppImage",
-        "AILinux-Helper-2.90.25-win-x64.exe",
-        "AILinux-Helper-2.90.25-mac-arm64.dmg",
-    ]:
-        (tmp_path / name).write_bytes(b"artifact")
+    expected = tmp_path / "AILinux-Helper-2.90.29-linux-amd64.deb"
+    expected.write_bytes(b"artifact")
+    # A newer-looking file must not silently replace the manifest-selected release.
+    (tmp_path / "AILinux-Helper-9.99.99-linux-amd64.deb").write_bytes(b"stray")
+    manifest = tmp_path / "release.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "helper_version": "2.90.29",
+        "artifacts": {
+            "linux-deb": {
+                "filename": expected.name, "size": len(b"artifact"),
+                "media_type": "application/vnd.debian.binary-package", "sha256": "b" * 64,
+            }
+        },
+        "aliases": {},
+    }))
     monkeypatch.setenv("AILINUX_HELPER_RELEASES", str(tmp_path))
+    monkeypatch.setenv("AILINUX_HELPER_RELEASE_MANIFEST", str(manifest))
     catalog = _helper_release_catalog()
-    assert catalog["latest_version"] == "2.90.25"
-    assert catalog["android"]["version"] == "2.90.24"
-    assert catalog["linux-deb"]["version"] == "2.90.25"
-    assert catalog["windows"]["filename"].endswith("win-x64.exe")
+    assert catalog["latest_version"] == "2.90.29"
+    assert catalog["linux-deb"]["filename"] == expected.name
+    assert catalog["linux-deb"]["available"] is True
+
+    expected.write_bytes(b"wrong-size")
+    assert _helper_release_catalog()["linux-deb"]["available"] is False
 
 
 
@@ -502,23 +526,32 @@ async def test_pair_ticket_returns_no_store_qr_for_exact_one_time_code():
     assert response.headers["pragma"] == "no-cache"
 
 
-def test_linux_helper_download_metadata_uses_dynamic_release_catalog(tmp_path, monkeypatch):
+def test_helper_release_catalog_is_manifest_driven_with_hashes_and_linux_alias(tmp_path, monkeypatch):
+    import json
     from app.routes.mcp import _helper_release_catalog
 
-    for name in [
-        "AILinux-Helper-2.90.24-android.apk",
-        "AILinux-Helper-2.90.25-linux-x86_64.AppImage",
-        "AILinux-Helper-2.90.25-linux-amd64.deb",
-        "AILinux-Helper-2.90.25-win-x64.exe",
-        "AILinux-Helper-2.90.25-mac-arm64.dmg",
-    ]:
-        (tmp_path / name).write_bytes(b"x")
+    artifact = tmp_path / "AILinux-Helper-2.90.29-linux-x86_64.AppImage"
+    artifact.write_bytes(b"x")
+    manifest = tmp_path / "release.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "helper_version": "2.90.29",
+        "artifacts": {
+            "linux-appimage": {
+                "filename": artifact.name, "size": 1,
+                "media_type": "application/vnd.appimage", "sha256": "a" * 64,
+            }
+        },
+        "aliases": {"linux": "linux-appimage"},
+    }))
     monkeypatch.setenv("AILINUX_HELPER_RELEASES", str(tmp_path))
+    monkeypatch.setenv("AILINUX_HELPER_RELEASE_MANIFEST", str(manifest))
     catalog = _helper_release_catalog()
-    assert catalog["linux-appimage"]["filename"] == "AILinux-Helper-2.90.25-linux-x86_64.AppImage"
-    assert catalog["linux-deb"]["filename"] == "AILinux-Helper-2.90.25-linux-amd64.deb"
-    assert catalog["android"]["version"] == "2.90.24"
-    assert catalog["latest_version"] == "2.90.25"
+    assert catalog["linux-appimage"]["filename"] == artifact.name
+    assert catalog["linux-appimage"]["sha256"] == "a" * 64
+    assert catalog["linux"]["alias_for"] == "linux-appimage"
+    assert catalog["linux"]["available"] is True
+    assert catalog["latest_version"] == "2.90.29"
 
 
 
