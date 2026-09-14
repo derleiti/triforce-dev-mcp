@@ -16,6 +16,7 @@ services:
     image: ${WP_APACHE_IMAGE:-httpd:2.4-alpine}
     container_name: ${WP_APACHE_CONTAINER_NAME:-wordpress_apache}
     logging: *default_logging
+    pids_limit: ${WP_APACHE_PIDS_LIMIT:-512}
     depends_on:
       wordpress_fpm:
         condition: service_healthy
@@ -52,6 +53,7 @@ services:
     image: ${WP_FPM_IMAGE:-wordpress:7.1-php8.3-fpm-alpine}
     container_name: ${WP_FPM_CONTAINER_NAME:-wordpress_fpm}
     logging: *default_logging
+    pids_limit: ${WP_FPM_PIDS_LIMIT:-256}
     depends_on:
       wordpress_db:
         condition: service_healthy
@@ -104,6 +106,7 @@ services:
   wordpress_db:
     image: ${WP_DB_IMAGE:-mariadb:11.8}
     container_name: ${WP_DB_CONTAINER_NAME:-wordpress_db}
+    pids_limit: ${WP_DB_PIDS_LIMIT:-256}
     environment:
       TZ: ${TZ:-Europe/Berlin}
       MYSQL_DATABASE: ${WORDPRESS_DB_NAME:-wordpress}
@@ -128,6 +131,7 @@ services:
   wordpress_redis:
     image: ${WP_REDIS_IMAGE:-redis:8.10-alpine}
     container_name: ${WP_REDIS_CONTAINER_NAME:-wordpress_redis}
+    pids_limit: ${WP_REDIS_PIDS_LIMIT:-128}
     environment:
       REDIS_PASSWORD: ${WP_REDIS_PASSWORD:-}
     command: >

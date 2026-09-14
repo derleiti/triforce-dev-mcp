@@ -12,6 +12,7 @@ services:
     image: ${SEARXNG_IMAGE:-searxng/searxng:latest}
     container_name: ${SEARXNG_CONTAINER_NAME:-ailinux-searxng}
     logging: *default_logging
+    pids_limit: ${SEARXNG_PIDS_LIMIT:-256}
     restart: ${SEARXNG_RESTART_POLICY:-unless-stopped}
     ports:
       - "${SEARXNG_PORT:-8089}:8080"

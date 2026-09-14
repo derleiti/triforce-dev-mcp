@@ -12,6 +12,7 @@ services:
     image: ${REPO_IMAGE:-nginx:1.29-alpine}
     container_name: ${REPO_CONTAINER_NAME:-ailinux-repository}
     logging: *default_logging
+    pids_limit: ${REPO_PIDS_LIMIT:-128}
     restart: ${REPO_RESTART_POLICY:-unless-stopped}
     # External ports removed - Apache proxies via internal network
     # Uncomment for local debugging:

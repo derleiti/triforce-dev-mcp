@@ -241,7 +241,18 @@ async def _post(
         current = dict(payload)
         tools_requested = bool(current.get("tools"))
         tools_dropped = False
-        response = await client.post(url, headers=headers, json=current)
+        try:
+            response = await client.post(url, headers=headers, json=current)
+        except httpx.TimeoutException as exc:
+            raise HTTPException(status_code=504, detail={
+                "error": "provider_timeout", "provider": provider,
+                "timeout_seconds": float(timeout), "retryable": True, "retry_after": 5,
+            }) from exc
+        except httpx.ConnectError as exc:
+            raise HTTPException(status_code=503, detail={
+                "error": "provider_unreachable", "provider": provider,
+                "retryable": True, "retry_after": 5,
+            }) from exc
         if _sampling_parameters_rejected(response):
             current = dict(current)
             for key in ("temperature", "top_p", "top_k"):
@@ -578,7 +589,10 @@ async def _compatible(
 ) -> dict[str, Any]:
     settings = get_settings()
     configs = {
-        "mistral": ("https://api.mistral.ai/v1", "mistral_api_key", ("MISTRAL_API_KEY",), 120.0),
+        "mistral": (
+            "https://api.mistral.ai/v1", "mistral_api_key", ("MISTRAL_API_KEY",),
+            max(180.0, float(os.getenv("MISTRAL_CHAT_TIMEOUT", "180"))),
+        ),
         "groq": (str(getattr(settings, "groq_base_url", "https://api.groq.com/openai/v1")), "groq_api_key", ("GROQ_API_KEY",), 30.0),
         "cerebras": (str(getattr(settings, "cerebras_base_url", "https://api.cerebras.ai/v1")), "cerebras_api_key", ("CEREBRAS_API_KEY",), 30.0),
         "nvidia": (str(getattr(settings, "nvidia_base_url", "https://integrate.api.nvidia.com/v1")), "nvidia_api_key", ("NVIDIA_API_KEY",), 120.0),
@@ -680,3 +694,213 @@ async def chat_completion(
             provider, model, messages, schemas, tool_choice, temperature, max_tokens
         )
     raise HTTPException(400, f"Provider not supported by ai-coder chat: {provider}")
+
+
+async def _stream_sse_request(
+    provider: str,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    timeout: float,
+    event_text,
+):
+    """Yield genuine provider text deltas from an SSE HTTP response."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                if response.status_code >= 400:
+                    raw = await response.aread()
+                    shadow = httpx.Response(response.status_code, headers=response.headers, content=raw, request=response.request)
+                    raise HTTPException(response.status_code, _detail(provider, shadow))
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line.split("data:", 1)[1].strip()
+                    if not raw or raw == "[DONE]":
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    text = event_text(data)
+                    if text:
+                        yield str(text)
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail={
+            "error": "provider_timeout", "provider": provider,
+            "timeout_seconds": float(timeout), "retryable": True, "retry_after": 5,
+        }) from exc
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail={
+            "error": "provider_unreachable", "provider": provider,
+            "retryable": True, "retry_after": 5,
+        }) from exc
+
+
+def _openai_stream_text(data: dict[str, Any]) -> str:
+    if data.get("type") == "response.output_text.delta":
+        return str(data.get("delta") or "")
+    return ""
+
+
+def _anthropic_stream_text(data: dict[str, Any]) -> str:
+    if data.get("type") == "content_block_delta":
+        delta = data.get("delta") or {}
+        if isinstance(delta, dict) and delta.get("type") == "text_delta":
+            return str(delta.get("text") or "")
+    return ""
+
+
+def _compatible_stream_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return ""
+    delta = choices[0].get("delta") or {}
+    return str(delta.get("content") or "") if isinstance(delta, dict) else ""
+
+
+def _cohere_stream_text(data: dict[str, Any]) -> str:
+    if data.get("type") != "content-delta":
+        return ""
+    delta = data.get("delta") or {}
+    message = delta.get("message") or {} if isinstance(delta, dict) else {}
+    content = message.get("content") or {} if isinstance(message, dict) else {}
+    return str(content.get("text") or "") if isinstance(content, dict) else ""
+
+
+def _gemini_stream_text(data: dict[str, Any]) -> str:
+    candidates = data.get("candidates") or []
+    if not candidates or not isinstance(candidates[0], dict):
+        return ""
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or [] if isinstance(content, dict) else []
+    return "".join(str(p.get("text") or "") for p in parts if isinstance(p, dict) and "text" in p)
+
+
+async def stream_completion(
+    model_info: ModelInfo,
+    request_model: str,
+    messages: list[dict[str, Any]],
+    *,
+    temperature: float | None = 0.3,
+    max_tokens: int = 4096,
+):
+    """Yield real text deltas for client chat without native tool calls.
+
+    Tool-call streaming intentionally remains on the non-streaming continuation
+    path so partial function arguments can never bypass Loom's lease/approval loop.
+    """
+    provider = model_info.provider
+    model = _model(request_model, provider)
+    settings = get_settings()
+
+    if provider == "openai":
+        api_key = _key(settings, "openai_api_key", "OPENAI_API_KEY")
+        if not api_key:
+            raise HTTPException(503, "OpenAI support is not configured")
+        base = str(getattr(settings, "openai_base_url", None) or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        payload: dict[str, Any] = {
+            "model": model, "input": _openai_response_messages(messages),
+            "max_output_tokens": max(16, max_tokens), "store": False, "stream": True,
+        }
+        if temperature is not None and not model.startswith(("o1", "o3", "o4")):
+            payload["temperature"] = temperature
+        async for text in _stream_sse_request(
+            "openai", base + "/responses",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            payload, float(getattr(settings, "openai_timeout_ms", 120000)) / 1000.0,
+            _openai_stream_text,
+        ):
+            yield text
+        return
+
+    if provider == "anthropic":
+        api_key = _key(settings, "anthropic_api_key", "ANTHROPIC_API_KEY")
+        if not api_key:
+            raise HTTPException(503, "Anthropic support is not configured")
+        system, provider_messages = _anthropic_messages(messages)
+        payload = {"model": model, "messages": provider_messages, "max_tokens": max_tokens, "stream": True}
+        if system:
+            payload["system"] = system
+        if temperature is not None and _anthropic_supports_temperature(model):
+            payload["temperature"] = temperature
+        async for text in _stream_sse_request(
+            "anthropic", "https://api.anthropic.com/v1/messages",
+            {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+            payload, float(getattr(settings, "anthropic_timeout_ms", 120000)) / 1000.0,
+            _anthropic_stream_text,
+        ):
+            yield text
+        return
+
+    if provider == "gemini":
+        from .google_genai import resolve_api_key
+        api_key = resolve_api_key()
+        if not api_key:
+            raise HTTPException(503, "Gemini support is not configured")
+        system, contents = _gemini_contents(messages)
+        payload = {"contents": contents, "generationConfig": {"maxOutputTokens": max_tokens}}
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+        if temperature is not None:
+            payload["generationConfig"]["temperature"] = temperature
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
+        async for text in _stream_sse_request(
+            "gemini", url, {"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            payload, 120.0, _gemini_stream_text,
+        ):
+            yield text
+        return
+
+    if provider == "cohere":
+        api_key = _key(settings, "cohere_api_key", "COHERE_API_KEY")
+        if not api_key:
+            raise HTTPException(503, "Cohere support is not configured")
+        payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": True}
+        if temperature is not None:
+            payload["temperature"] = temperature
+        async for text in _stream_sse_request(
+            "cohere", "https://api.cohere.com/v2/chat",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            payload, 120.0, _cohere_stream_text,
+        ):
+            yield text
+        return
+
+    configs = {
+        "mistral": ("https://api.mistral.ai/v1", "mistral_api_key", ("MISTRAL_API_KEY",), max(180.0, float(os.getenv("MISTRAL_CHAT_TIMEOUT", "180")))),
+        "groq": (str(getattr(settings, "groq_base_url", "https://api.groq.com/openai/v1")), "groq_api_key", ("GROQ_API_KEY",), 30.0),
+        "cerebras": (str(getattr(settings, "cerebras_base_url", "https://api.cerebras.ai/v1")), "cerebras_api_key", ("CEREBRAS_API_KEY",), 30.0),
+        "nvidia": (str(getattr(settings, "nvidia_base_url", "https://integrate.api.nvidia.com/v1")), "nvidia_api_key", ("NVIDIA_API_KEY",), 120.0),
+        "openrouter": (str(getattr(settings, "openrouter_base_url", "https://openrouter.ai/api/v1")), "openrouter_api_key", ("OPENROUTER_API_KEY",), max(120.0, float(os.getenv("OPENROUTER_CHAT_TIMEOUT", "600")))),
+        "kimi": (str(getattr(settings, "kimi_base_url", "https://api.moonshot.ai/v1")), "kimi_api_key", ("KIMI_API_KEY",), 120.0),
+        "together": (str(getattr(settings, "together_base_url", "https://api.together.xyz/v1")), "together_api_key", ("TOGETHER_API_KEY",), 120.0),
+        "fireworks": (str(getattr(settings, "fireworks_base_url", "https://api.fireworks.ai/inference/v1")), "fireworks_api_key", ("FIREWORKS_API_KEY",), 60.0),
+        "huggingface": ("https://router.huggingface.co/v1", "huggingface_api_key", ("HUGGINGFACE_API_KEY", "HF_TOKEN"), 120.0),
+        "github": (str(getattr(settings, "github_models_base_url", "https://models.github.ai/inference")), "github_token", ("GITHUB_TOKEN",), 60.0),
+    }
+    if provider == "cloudflare":
+        account = _key(settings, "cloudflare_account_id", "CLOUDFLARE_ACCOUNT_ID")
+        api_key = _key(settings, "cloudflare_api_token", "CLOUDFLARE_API_TOKEN")
+        if not account or not api_key:
+            raise HTTPException(503, "Cloudflare support is not configured")
+        base = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1"
+        attr, env_names, timeout = "cloudflare_api_token", ("CLOUDFLARE_API_TOKEN",), 60.0
+    elif provider in configs:
+        base, attr, env_names, timeout = configs[provider]
+        api_key = _key(settings, attr, *env_names)
+    else:
+        raise HTTPException(400, f"Streaming not supported for provider: {provider}")
+    if not api_key:
+        raise HTTPException(503, f"{provider.title()} support is not configured")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers.update({"HTTP-Referer": "https://ailinux.me", "X-Title": "AILinux Loom"})
+    payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": True}
+    if temperature is not None:
+        payload["temperature"] = temperature
+    async for text in _stream_sse_request(
+        provider, base.rstrip("/") + "/chat/completions", headers, payload, timeout,
+        _compatible_stream_text,
+    ):
+        yield text

@@ -9,6 +9,7 @@ services:
     image: ${N8N_IMAGE:-n8nio/n8n:2.34.6}
     container_name: n8n
     logging: *default_logging
+    pids_limit: ${N8N_PIDS_LIMIT:-512}
     restart: unless-stopped
     ports:
       - "${N8N_PORT:-5678}:5678"
@@ -64,6 +65,7 @@ services:
     image: ${N8N_RUNNERS_IMAGE:-n8nio/runners:2.34.6}
     container_name: n8n-runners
     logging: *default_logging
+    pids_limit: ${N8N_RUNNERS_PIDS_LIMIT:-256}
     restart: unless-stopped
     environment:
       - N8N_RUNNERS_TASK_BROKER_URI=http://n8n:5679

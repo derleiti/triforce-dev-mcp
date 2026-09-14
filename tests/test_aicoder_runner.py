@@ -402,6 +402,32 @@ def test_idle_auto_rotation_falls_back_after_linked_account_failure(tmp_path: Pa
     assert outcome["attempted_profiles"] == ["claude-mcp", "gemini-mcp"]
 
 
+def test_idle_auto_rotation_falls_back_after_oauth_expired(tmp_path: Path, monkeypatch):
+    idle_worker = _configure_idle_provider_test(monkeypatch, tmp_path, profile_cursor=1)
+    calls = []
+
+    class FakeRunner:
+        async def run(self, **kwargs):
+            calls.append(kwargs["model"])
+            if kwargs["model"].startswith("account:claude/"):
+                return AICoderRunResult(
+                    profile_id=kwargs["profile_id"], status="error", model=kwargs["model"],
+                    error="Claude OAuth login expired; reconnect the Claude account",
+                )
+            return AICoderRunResult(
+                profile_id=kwargs["profile_id"], status="success", model=kwargs["model"],
+                response="STATUS: CLEAN\nNEXT_SAFE_WORK: NONE",
+            )
+
+    monkeypatch.setattr(idle_worker, "AICoderRunner", FakeRunner)
+    outcome = asyncio.run(idle_worker.run_idle_once(workspace=tmp_path, timeout=5))
+
+    assert calls == ["account:claude/sonnet", "account:gemini/gemini-3.8-flash-high"]
+    assert outcome["status"] == "success"
+    assert outcome["profile_id"] == "gemini-mcp"
+    assert outcome["attempted_profiles"] == ["claude-mcp", "gemini-mcp"]
+
+
 def test_idle_explicit_profile_does_not_fallback(tmp_path: Path, monkeypatch):
     idle_worker = _configure_idle_provider_test(monkeypatch, tmp_path, profile_cursor=0)
     calls = []

@@ -752,6 +752,7 @@ _BROWSER_APP_IDS = {
     "ailinux-copa",
     "ailinux-control-center",
     "ailinux-client",
+    "ailinux-loom",
 }
 _browser_redis = None
 
@@ -1461,20 +1462,56 @@ async def get_current_client(authorization: str = Header(None)) -> dict:
     token = authorization.replace("Bearer ", "")
     payload = decode_jwt_token(token)
     
-    client_id = payload.get("client_id")
+    client_id = str(payload.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(401, "Token has no client identity")
     client = CLIENT_REGISTRY.get(client_id)
-    
+
+    # User login clients are intentionally reconstructible from a still-valid,
+    # server-signed JWT plus the current server-side user registry. CLIENT_REGISTRY
+    # is process-local, so requiring it unconditionally invalidated every desktop
+    # session on a normal TriForce restart. Machine/client-secret identities stay
+    # fail-closed and are never reconstructed from an anonymous token.
+    email = str(payload.get("email") or payload.get("sub") or "").lower().strip()
+    user = USER_REGISTRY.get(email) if email else None
+    if not client and isinstance(user, dict):
+        tier = normalize_tier(user.get("tier") or payload.get("tier") or payload.get("role"))
+        role, allowed, blocked = permissions_for_tier(tier)
+        client = {
+            "secret_hash": "",
+            "name": f"{user.get('name') or email}'s Client",
+            "role": role,
+            "created_at": datetime.now().isoformat(),
+            "email": email,
+            "allowed_tools": allowed,
+            "blocked_tools": blocked,
+            "restored_from_signed_session": True,
+        }
+        CLIENT_REGISTRY[client_id] = client
+        logger.info("Restored user client from signed session after restart: %s", client_id)
     if not client:
         raise HTTPException(401, "Client not found")
-    
-    # Last seen aktualisieren
-    if client_id in ACTIVE_SESSIONS:
-        ACTIVE_SESSIONS[client_id]["last_seen"] = datetime.now().isoformat()
-    
+
+    ACTIVE_SESSIONS.setdefault(client_id, {
+        "email": email or client.get("email"),
+        "connected_at": datetime.now().isoformat(),
+    })["last_seen"] = datetime.now().isoformat()
+
+    user_for_authority = user if isinstance(user, dict) else {}
+    authority_role, authority_level_value, authority_source = resolve_user_authority(
+        email, user_for_authority, payload_role=str(payload.get("authority_role") or "")
+    )
+    role = client.get("role")
+    role_value = role.value if isinstance(role, ClientRole) else str(role or payload.get("role") or "")
     return {
         "client_id": client_id,
-        "role": payload.get("role"),
-        "client": client
+        "role": role_value,
+        "tier": normalize_tier(user_for_authority.get("tier") or payload.get("tier") or payload.get("role")),
+        "email": email,
+        "authority_role": authority_role.value,
+        "authority_level": authority_level_value,
+        "authority_source": authority_source,
+        "client": client,
     }
 
 
@@ -1484,7 +1521,7 @@ async def require_admin(authorization: str = Header(None)) -> dict:
     """
     client = await get_current_client(authorization)
     
-    if client.get("role") != "admin":
+    if client.get("authority_role") not in {AuthorityRole.HUMAN_OWNER.value, AuthorityRole.HUMAN_ADMIN.value}:
         raise HTTPException(403, "Admin access required")
     
     return client

@@ -37,6 +37,8 @@ _PROVIDER_FALLBACK_MARKERS = (
     "verify the linked account",
     "not logged in",
     "login required",
+    "login expired",
+    "oauth expired",
     "authentication failed",
     "unauthorized",
     "unauthorised",

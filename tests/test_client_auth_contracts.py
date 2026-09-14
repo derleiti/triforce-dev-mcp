@@ -166,3 +166,32 @@ async def test_google_login_existing_user_does_not_require_password_or_wordpress
     assert login.email == email
     assert login.token
     assert client_auth.USER_REGISTRY[email]["google_sub"] == "google-sub-123"
+
+@pytest.mark.asyncio
+async def test_signed_user_session_restores_client_after_process_restart(monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "owner@example.test")
+    client_auth.USER_REGISTRY["owner@example.test"] = {"tier": "enterprise", "name": "Owner"}
+    login = client_auth.issue_user_login_response("owner@example.test", client_auth.USER_REGISTRY["owner@example.test"])
+    # Simulate the process-local registries being lost on service restart.
+    client_auth.CLIENT_REGISTRY.clear()
+    client_auth.ACTIVE_SESSIONS.clear()
+
+    current = await client_auth.get_current_client(f"Bearer {login.token}")
+
+    assert current["client_id"] == login.client_id
+    assert current["role"] == "admin"
+    assert current["authority_role"] == "human_owner"
+    assert current["client"]["restored_from_signed_session"] is True
+
+
+@pytest.mark.asyncio
+async def test_require_admin_uses_organizational_authority_not_enterprise_tier(monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    email = "enterprise-member@example.test"
+    client_auth.USER_REGISTRY[email] = {"tier": "enterprise", "name": "Member"}
+    login = client_auth.issue_user_login_response(email, client_auth.USER_REGISTRY[email])
+
+    with pytest.raises(client_auth.HTTPException) as exc:
+        await client_auth.require_admin(f"Bearer {login.token}")
+
+    assert exc.value.status_code == 403

@@ -21,7 +21,7 @@ from ..services.user_tiers import (
     tier_service, UserTier, FREE_MODELS_OLLAMA, LOCAL_FALLBACK_MODEL
 )
 from ..services.model_registry import OPENROUTER_FREE_ROUTER, registry
-from ..services.provider_chat import chat_completion, normalize_tools
+from ..services.provider_chat import chat_completion, normalize_tools, stream_completion
 from ..services.model_availability import availability_service
 from ..mcp.agent_instructions import merge_system_policy
 
@@ -974,6 +974,159 @@ async def client_chat(
         tool_transport=result.get("tool_transport", "native" if request.tools else "none"),
         finish_reason=((result.get("choices") or [{}])[0].get("finish_reason") if isinstance((result.get("choices") or [{}])[0], dict) else None),
         provider_diagnostics=(result.get("provider_diagnostics") if isinstance(result.get("provider_diagnostics"), dict) else {}),
+    )
+
+
+async def _stream_ollama_text(
+    model: str,
+    messages: List[dict],
+    *,
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+):
+    """Yield genuine Ollama response deltas for the client stream endpoint."""
+    model_name = normalize_ollama_model(model)
+    payload = {
+        "model": model_name,
+        "messages": _ollama_multimodal_messages(messages),
+        "stream": True,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as response:
+                if response.status_code != 200:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    raise HTTPException(response.status_code, f"Ollama Error: {raw[:1000]}")
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    message = data.get("message") or {}
+                    text = message.get("content") if isinstance(message, dict) else ""
+                    if text:
+                        yield str(text)
+    except httpx.ConnectError as exc:
+        raise HTTPException(503, "Ollama Backend nicht erreichbar") from exc
+    except httpx.TimeoutException as exc:
+        raise HTTPException(504, "Ollama Timeout") from exc
+
+
+@router.post("/chat/stream")
+async def client_chat_stream(
+    request: ChatRequest,
+    authorization: str = Header(None, alias="Authorization"),
+    x_user_id: str = Header(None, alias="X-User-ID"),
+):
+    """NDJSON token stream for text chat without native tool-call deltas.
+
+    Tool-enabled conversations deliberately stay on /client/chat so function
+    arguments are complete before Loom's lease and one-shot approval policy sees
+    them. This endpoint never simulates streaming from a completed response.
+    """
+    if request.tools:
+        raise HTTPException(400, "Tool-enabled chat must use /v1/client/chat")
+
+    user_id, tier = get_user_and_tier_from_headers(authorization, x_user_id)
+    if request.messages:
+        messages = [m.model_dump(exclude_none=True) for m in request.messages]
+    elif request.message:
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        messages.append({"role": "user", "content": request.message})
+    else:
+        raise HTTPException(400, "Either 'message' or 'messages' is required")
+
+    caller_system = "\n\n".join(
+        str(item.get("content") or "")
+        for item in messages
+        if item.get("role") == "system" and isinstance(item.get("content"), str)
+    ).strip()
+    messages = [item for item in messages if item.get("role") != "system"]
+    messages.insert(0, {"role": "system", "content": merge_system_policy(caller_system, mode="client")})
+    for item in messages:
+        _validate_chat_content(item.get("content"))
+
+    model = request.model or get_default_model(tier)
+    if tier == UserTier.GUEST and not is_guest_free_model(model):
+        model = LOCAL_FALLBACK_MODEL
+    elif tier == UserTier.REGISTERED and not is_registered_free_model(model):
+        model = LOCAL_FALLBACK_MODEL
+
+    is_ollama = model.startswith("ollama/") or tier_service.is_ollama_model(model)
+    if is_ollama and not model.startswith("ollama/"):
+        model = f"ollama/{model}"
+
+    if tier != UserTier.ENTERPRISE:
+        limit_check = tier_service.check_token_limit(user_id, model)
+        if not limit_check["allowed"]:
+            raise HTTPException(429, f"Token-Limit erreicht ({limit_check['limit']}/Tag)")
+
+    model_info = None
+    if not is_ollama:
+        model_info = await registry.get_model(model)
+        if not model_info or "chat" not in model_info.capabilities:
+            raise HTTPException(404, f"Chat model not available: {model}")
+        if _messages_have_images(messages) and "vision" not in model_info.capabilities:
+            raise HTTPException(400, f"Selected model does not support vision: {model}")
+
+    backend = "ollama" if is_ollama else str(model_info.provider)
+
+    async def ndjson_stream():
+        started = time.monotonic()
+        full: list[str] = []
+        yield json.dumps({"type": "start", "model": model, "backend": backend}, ensure_ascii=False) + "\n"
+        try:
+            source = (
+                _stream_ollama_text(
+                    model, messages,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                )
+                if is_ollama else
+                stream_completion(
+                    model_info, model, messages,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                )
+            )
+            async for text in source:
+                full.append(text)
+                yield json.dumps({"type": "delta", "text": text}, ensure_ascii=False) + "\n"
+            combined = "".join(full)
+            if not combined.strip():
+                raise HTTPException(502, {"error": "empty_stream_response", "model": model})
+            approx_tokens = max(1, len(combined.split()) + sum(len(str(m.get("content", "")).split()) for m in messages))
+            unlimited = tier == UserTier.ENTERPRISE or (tier == UserTier.PRO and is_ollama)
+            if user_id != "anonymous" and not unlimited:
+                tier_service.track_tokens(user_id, approx_tokens, model)
+            if model_info is not None:
+                availability_service.mark_success(model)
+            yield json.dumps({
+                "type": "done", "model": model, "backend": backend,
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "tokens_used": None if unlimited else approx_tokens,
+                "tokens_unlimited": unlimited,
+            }, ensure_ascii=False) + "\n"
+        except HTTPException as exc:
+            if model_info is not None:
+                availability_service.mark_error(model, exc.status_code, str(exc.detail))
+            yield json.dumps({
+                "type": "error", "status": exc.status_code, "detail": exc.detail,
+            }, ensure_ascii=False, default=str) + "\n"
+        except Exception as exc:
+            logger.exception("client chat streaming failed model=%s", model)
+            if model_info is not None:
+                availability_service.mark_error(model, 502, str(exc))
+            yield json.dumps({"type": "error", "status": 502, "detail": str(exc)[:1000]}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        ndjson_stream(), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 
