@@ -31,6 +31,21 @@ jobs:
         run: python -m compileall -q app tests
       - name: Critical Ruff checks
         run: ruff check app tests --select E9,F63,F7,F82
-      - name: Tests
+      - name: Contract and security tests
         run: |
           python -m pytest -q tests/test_aicoder_mcp_contract.py tests/test_security_findings.py
+
+      # The workspace/MCP suite carries the pairing, capability and credential
+      # regressions. It used to run only on developer machines, so CI stayed
+      # green while these paths were unverified. Failures here are real.
+      - name: Workspace, MCP and credential regressions
+        run: |
+          python -m pytest -q \
+            tests/test_mcp_workspace_capability.py \
+            tests/test_mcp_public_workspace_surface.py \
+            tests/test_mcp_workspace_schema_contract.py \
+            tests/test_local_workspace_client.py \
+            tests/test_log_formatters.py \
+            tests/test_server_launcher.py \
+            tests/test_workspace_compute_sandbox.py \
+            tests/test_android_workspace_contract.py
