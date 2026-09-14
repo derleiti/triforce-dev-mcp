@@ -164,6 +164,7 @@ tests/*
 !tests/test_mcp_session_timezones.py
 !tests/test_android_workspace_contract.py
 !tests/test_mcp_workspace_schema_contract.py
+!tests/test_workspace_compute_sandbox.py
 # DKIM-Keys — private keys, never commit
 docker/mailserver/config/opendkim/
 # Temp/debug files
