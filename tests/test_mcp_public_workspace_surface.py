@@ -123,10 +123,10 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'async function codeEdit(args)' in html
     assert "'file_ops'" in html
     assert "'code_edit'" in html
-    assert 'Selecting a folder does not enumerate or analyze it' in html
+    assert 'Your local workspace stays on this device' in html
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
-    assert 'AILinux Helper 2.90.24' in html
+    assert 'id="helperTitle"' in html
     assert 'id="terminalBackend"' in html
     assert 'native.setShellBackend' in html
     assert "$('terminalBackend').onchange" in html
@@ -176,19 +176,23 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
     assert '/v1/mcp/helper/android' in html
-    assert '/v1/mcp/helper/icon.png?v=29024' in html
+    assert '/v1/mcp/helper/icon.png' in html
     assert '/v1/mcp/helper/linux-appimage' in html
     assert '/v1/mcp/helper/linux-deb' in html
     assert '/v1/mcp/helper/windows' in html
     assert '/v1/mcp/helper/macos' in html
+    assert '/v1/mcp/helper/releases' in html
+    assert 'id="advancedToggle"' in html
+    assert 'advanced-hidden' in html
+    assert 'Latest desktop v' in html
     assert "function detectedHelperOs()" in html
     assert "return 'unknown'" in html
     assert "unknown:HELPER_DOWNLOAD_IDS" in html
-    assert "showHelperDownloads(downloads[os]||HELPER_DOWNLOAD_IDS)" in html
-    assert "Operating system not recognized reliably" in html
-    assert "Android APK, Linux AppImage/.deb, Windows and macOS downloads are all available" in html
+    assert "showHelperDownloads(HELPER_DOWNLOAD_IDS)" in html
+    assert "System could not be identified reliably" in html
+    assert "Available packages shown for all supported desktop/mobile systems" in html
     assert "mode:workspaceMode==='write'?'readwrite':'read'" in html
-    assert 'Selecting a folder does not enumerate or analyze it' in html
+    assert 'Your local workspace stays on this device' in html
     assert 'legacyEntries' in html
     assert 'stays on this device' in html
     assert 'folderListPicker' not in html
@@ -225,7 +229,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.24-browser'" in html
+    assert "EXECUTOR_VERSION='2.90.25-browser'" in html
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -310,11 +314,11 @@ def test_mobile_workspace_install_surface_and_pwa_contract():
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=29024' in html
-    assert "/v1/mcp/sw.js?v=29024" in html
+    assert '/v1/mcp/manifest.webmanifest?v=29025' in html
+    assert "/v1/mcp/sw.js?v=29025" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
-    assert 'native foreground executor' in html
+    assert 'native APK selected for foreground workspace' in html
 
 
 @pytest.mark.asyncio
@@ -326,9 +330,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     assert manifest['start_url'] == '/v1/mcp'
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v29024" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.24')" in worker.body
-    assert b'ailinux-helper-v29024' in worker.body
+    assert b"ailinux-helper-v29025" in worker.body
+    assert b"caches.match('/v1/mcp?app=2.90.25')" in worker.body
+    assert b'ailinux-helper-v29025' in worker.body
     assert b'caches.delete' in worker.body
 
 
@@ -337,9 +341,29 @@ def test_helper_surface_is_unified_and_branded():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
     assert '<h1>AILinux Helper</h1>' in html
-    assert 'AILinux Helper 2.90.24' in html
+    assert 'id="helperTitle"' in html
     assert 'Mobile Workspace' not in html
-    assert '/v1/mcp/helper/icon.png?v=29024' in html
+    assert '/v1/mcp/helper/icon.png' in html
+
+
+def test_helper_release_catalog_selects_newest_per_platform(tmp_path, monkeypatch):
+    from app.routes.mcp import _helper_release_catalog
+
+    for name in [
+        "AILinux-Helper-2.90.24-android.apk",
+        "AILinux-Helper-2.90.25-linux-amd64.deb",
+        "AILinux-Helper-2.90.25-linux-x86_64.AppImage",
+        "AILinux-Helper-2.90.25-win-x64.exe",
+        "AILinux-Helper-2.90.25-mac-arm64.dmg",
+    ]:
+        (tmp_path / name).write_bytes(b"artifact")
+    monkeypatch.setenv("AILINUX_HELPER_RELEASES", str(tmp_path))
+    catalog = _helper_release_catalog()
+    assert catalog["latest_version"] == "2.90.25"
+    assert catalog["android"]["version"] == "2.90.24"
+    assert catalog["linux-deb"]["version"] == "2.90.25"
+    assert catalog["windows"]["filename"].endswith("win-x64.exe")
+
 
 
 @pytest.mark.asyncio
@@ -434,15 +458,23 @@ async def test_pair_ticket_returns_no_store_qr_for_exact_one_time_code():
     assert response.headers["pragma"] == "no-cache"
 
 
-def test_linux_helper_download_metadata_tracks_published_29024_build():
-    import inspect
-    from app.routes.mcp import download_ailinux_helper, download_desktop_workspace_helper
+def test_linux_helper_download_metadata_uses_dynamic_release_catalog(tmp_path, monkeypatch):
+    from app.routes.mcp import _helper_release_catalog
 
-    public_source = inspect.getsource(download_ailinux_helper)
-    desktop_source = inspect.getsource(download_desktop_workspace_helper)
-    for source in (public_source, desktop_source):
-        assert "AILinux-Helper-2.90.24-linux-x86_64.AppImage" in source
-        assert "AILinux-Helper-2.90.24-linux-amd64.deb" in source
+    for name in [
+        "AILinux-Helper-2.90.24-android.apk",
+        "AILinux-Helper-2.90.25-linux-x86_64.AppImage",
+        "AILinux-Helper-2.90.25-linux-amd64.deb",
+        "AILinux-Helper-2.90.25-win-x64.exe",
+        "AILinux-Helper-2.90.25-mac-arm64.dmg",
+    ]:
+        (tmp_path / name).write_bytes(b"x")
+    monkeypatch.setenv("AILINUX_HELPER_RELEASES", str(tmp_path))
+    catalog = _helper_release_catalog()
+    assert catalog["linux-appimage"]["filename"] == "AILinux-Helper-2.90.25-linux-x86_64.AppImage"
+    assert catalog["linux-deb"]["filename"] == "AILinux-Helper-2.90.25-linux-amd64.deb"
+    assert catalog["android"]["version"] == "2.90.24"
+    assert catalog["latest_version"] == "2.90.25"
 
 
 def test_public_tools_list_semantic_inventory_never_reexpands_to_full_catalog():

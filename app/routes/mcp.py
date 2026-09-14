@@ -5,6 +5,7 @@ import base64
 import inspect
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 # Logger für MCP Routes
@@ -139,25 +140,64 @@ def _helper_design_css() -> str:
     return f":root{{color-scheme:dark light;{variables(dark)}}}@media(prefers-color-scheme:light){{:root{{{variables(light)}}}}}"
 
 
+
+def _helper_release_catalog() -> dict:
+    """Return the newest locally mirrored Helper artifact for each platform."""
+    root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
+    patterns = {
+        "android": ("AILinux-Helper-*-android.apk", "application/vnd.android.package-archive"),
+        "linux-appimage": ("AILinux-Helper-*-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-*-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "windows": ("AILinux-Helper-*-win-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-*-mac-arm64.dmg", "application/x-apple-diskimage"),
+    }
+
+    def version_key(path: Path) -> tuple[int, ...]:
+        match = re.search(r"AILinux-Helper-(\d+(?:\.\d+)+)", path.name)
+        if not match:
+            return (0,)
+        return tuple(int(part) for part in match.group(1).split("."))
+
+    catalog: dict[str, dict] = {}
+    for platform, (pattern, media_type) in patterns.items():
+        candidates = sorted(root.glob(pattern), key=version_key, reverse=True)
+        if not candidates:
+            catalog[platform] = {"available": False, "platform": platform}
+            continue
+        artifact = candidates[0]
+        version_match = re.search(r"AILinux-Helper-(\d+(?:\.\d+)+)", artifact.name)
+        version = version_match.group(1) if version_match else "unknown"
+        catalog[platform] = {
+            "available": True,
+            "platform": platform,
+            "version": version,
+            "filename": artifact.name,
+            "size": artifact.stat().st_size,
+            "media_type": media_type,
+            "url": f"/v1/mcp/helper/{platform}",
+        }
+    versions = [entry.get("version") for entry in catalog.values() if entry.get("available")]
+    catalog["latest_version"] = max(versions, key=lambda v: tuple(int(x) for x in v.split("."))) if versions else "unknown"
+    return catalog
+
 def _workspace_setup_html() -> str:
     return r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AILinux Helper · TriForce MCP</title><link rel="icon" type="image/png" href="/v1/mcp/helper/icon.png?v=29024"><link rel="apple-touch-icon" href="/v1/mcp/helper/icon.png?v=29024"><link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=29024"><meta name="theme-color" content="#0d1117"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="AILinux Helper">
+<title>AILinux Helper · TriForce MCP</title><link rel="icon" type="image/png" href="/v1/mcp/helper/icon.png?v=29025"><link rel="apple-touch-icon" href="/v1/mcp/helper/icon.png?v=29025"><link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=29025"><meta name="theme-color" content="#0d1117"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="AILinux Helper">
 <style>
 /*AILINUX_DESIGN_TOKENS*/
-*{box-sizing:border-box}body{font-family:var(--ailinux-typography),system-ui,sans-serif;background:var(--ailinux-background);color:var(--ailinux-text);margin:0}main{max-width:860px;margin:5vh auto;padding:24px}section{background:var(--ailinux-glass);border:1px solid var(--ailinux-glass-border);border-radius:var(--ailinux-radius);box-shadow:var(--ailinux-shadow);padding:22px;margin:16px 0}h1{font-size:2rem;margin:.25rem 0}h2{margin-top:0}p{line-height:1.5;color:var(--ailinux-text-muted)}.muted{color:var(--ailinux-text-muted)}.ok{color:var(--ailinux-success)}.warn{color:var(--ailinux-warning)}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{background:var(--ailinux-accent);color:var(--ailinux-background);border:1px solid var(--ailinux-accent);border-radius:8px;padding:11px 16px;font-weight:650;cursor:pointer}button:hover{background:var(--ailinux-accent-hover);border-color:var(--ailinux-accent-hover)}button.secondary{background:var(--ailinux-surface);color:var(--ailinux-text);border-color:var(--ailinux-glass-border)}button:disabled{opacity:.45;cursor:not-allowed}input[type=text],textarea{width:100%;background:var(--ailinux-surface);border:1px solid var(--ailinux-glass-border);color:var(--ailinux-text);padding:11px;border-radius:8px}textarea{min-height:76px;resize:vertical}code,.mono{font-family:ui-monospace,SFMono-Regular,monospace}.pair{font-size:1.05rem;letter-spacing:.04em}.pill{display:inline-block;border:1px solid var(--ailinux-accent);background:var(--ailinux-glass);color:var(--ailinux-accent);padding:5px 10px;border-radius:999px}.hidden{display:none}.status{font-weight:650}.choice{padding:9px 12px;border:1px solid var(--ailinux-glass-border);border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.drop{margin-top:10px;border-style:dashed;text-align:center}@media(max-width:650px){.grid{grid-template-columns:1fr}}
+*{box-sizing:border-box}body{font-family:var(--ailinux-typography),system-ui,sans-serif;background:var(--ailinux-background);color:var(--ailinux-text);margin:0}main{max-width:980px;margin:2vh auto;padding:14px}section{background:var(--ailinux-glass);border:1px solid var(--ailinux-glass-border);border-radius:var(--ailinux-radius);box-shadow:var(--ailinux-shadow);padding:14px 16px;margin:10px 0}h1{font-size:1.65rem;margin:.2rem 0}h2{font-size:1.08rem;margin:0 0 8px}p{line-height:1.38;color:var(--ailinux-text-muted);margin:7px 0}.advanced-hidden{display:none!important}.download-meta{font-size:.82rem}.topline{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.muted{color:var(--ailinux-text-muted)}.ok{color:var(--ailinux-success)}.warn{color:var(--ailinux-warning)}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{background:var(--ailinux-accent);color:var(--ailinux-background);border:1px solid var(--ailinux-accent);border-radius:8px;padding:11px 16px;font-weight:650;cursor:pointer}button:hover{background:var(--ailinux-accent-hover);border-color:var(--ailinux-accent-hover)}button.secondary{background:var(--ailinux-surface);color:var(--ailinux-text);border-color:var(--ailinux-glass-border)}button:disabled{opacity:.45;cursor:not-allowed}input[type=text],textarea{width:100%;background:var(--ailinux-surface);border:1px solid var(--ailinux-glass-border);color:var(--ailinux-text);padding:11px;border-radius:8px}textarea{min-height:76px;resize:vertical}code,.mono{font-family:ui-monospace,SFMono-Regular,monospace}.pair{font-size:1.05rem;letter-spacing:.04em}.pill{display:inline-block;border:1px solid var(--ailinux-accent);background:var(--ailinux-glass);color:var(--ailinux-accent);padding:5px 10px;border-radius:999px}.hidden{display:none}.status{font-weight:650}.choice{padding:9px 12px;border:1px solid var(--ailinux-glass-border);border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.drop{margin-top:10px;border-style:dashed;text-align:center}@media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head><body><main>
-<span class="pill">AILinux · TriForce MCP</span><h1>AILinux Helper</h1>
-<p>The selected folder stays on this device. Selecting a folder does not enumerate or analyze it. Use the native Android helper for a persistent foreground executor, or install this page as a web app on Android/iOS for automatic resume when the OS suspends it.</p>
-<section id="helperPanel"><div class="row"><img src="/v1/mcp/helper/icon.png?v=29024" width="64" height="64" alt="AILinux Helper icon" style="border-radius:14px"><div><h2 style="margin-bottom:4px">AILinux Helper 2.90.24</h2><span class="pill">AILinux Share & Compute node</span></div></div><p id="helperText" class="muted">Nothing is shared automatically. Choose exactly which local capabilities this device contributes to the AI network; every grant can be revoked again.</p><div id="helperActions" class="row"><button id="openAppBtn" class="hidden">Open AILinux Helper</button><a id="androidDownload" class="hidden" href="/v1/mcp/helper/android"><button>Android APK</button></a><button id="installPwaBtn" class="secondary hidden">Install web app</button><a id="linuxAppImage" href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a id="linuxDeb" href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a id="windowsDownload" href="/v1/mcp/helper/windows"><button class="secondary">Windows</button></a><a id="macDownload" href="/v1/mcp/helper/macos"><button class="secondary">macOS</button></a></div><p id="helperNote" class="muted">The browser/PWA remains the zero-install fallback. Legacy Workspace URLs stay compatible.</p></section>
+<div class="topline"><div><span class="pill">AILinux · TriForce MCP</span><h1>AILinux Helper</h1></div><button id="advancedToggle" class="secondary">Advanced</button></div><p>Share only what you choose. Your local workspace stays on this device; TriForce routes approved capabilities to the paired AI session.</p>
+<section id="helperPanel"><div class="row"><img src="/v1/mcp/helper/icon.png" width="48" height="48" alt="AILinux Helper icon" style="border-radius:12px"><div><h2 id="helperTitle" style="margin-bottom:3px">AILinux Helper</h2><span id="detectedOs" class="pill">Detecting system…</span></div></div><p id="helperText" class="muted">Detecting the best Helper package for this device…</p><div id="helperActions" class="row"><button id="openAppBtn" class="hidden">Open Helper</button><a id="androidDownload" class="hidden" href="/v1/mcp/helper/android"><button>Android APK</button></a><button id="installPwaBtn" class="secondary hidden">Install web app</button><a id="linuxAppImage" class="hidden" href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a id="linuxDeb" class="hidden" href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a id="windowsDownload" class="hidden" href="/v1/mcp/helper/windows"><button>Windows .exe</button></a><a id="macDownload" class="hidden" href="/v1/mcp/helper/macos"><button>macOS .dmg</button></a><button id="showAllDownloads" class="secondary">All downloads</button></div><p id="helperNote" class="muted download-meta"></p></section>
 <section id="nativeSharePanel"><h2>1 · Choose capabilities</h2><p class="muted">The browser exposes capabilities it can really provide and can additionally route an explicitly granted remote compute shell through TriForce. Native-only OS controls appear only inside the Helper.</p><div class="grid"><label class="choice"><input id="shareClipboardRead" type="checkbox"> Clipboard read</label><label class="choice"><input id="shareClipboardWrite" type="checkbox"> Clipboard write</label><label class="choice"><input id="shareDisplay" type="checkbox"> Display / vision observe</label><label id="shareSystemObserveChoice" class="choice"><input id="shareSystemObserve" type="checkbox"> System / process observe</label><label id="shareSystemControlChoice" class="choice"><input id="shareSystemControl" type="checkbox"> System / app / service control</label><label id="shareComputerControlChoice" class="choice"><input id="shareComputerControl" type="checkbox"> Mouse / keyboard control</label><label id="shareResourcesChoice" class="choice"><input id="shareResources" type="checkbox"> Device resource metadata</label><label id="shareComputeChoice" class="choice"><input id="shareCompute" type="checkbox"> <span id="shareComputeLabel">Compute sandbox</span></label><label id="shareMcpChoice" class="choice"><input id="shareMcp" type="checkbox"> Local MCP bridge</label></div><div class="row" style="margin-top:12px"><button id="saveNativeShares" class="secondary">Apply capability grants</button><button id="refreshResources" class="secondary">Refresh resource inventory</button></div><pre id="resourceInventory" class="muted"></pre></section>
-<section id="webRuntimePanel"><h2>2 · Browser Python + JavaScript runtime</h2><p class="muted">The web Helper now has an optional Python 3.14 runtime in an isolated Web Worker, backed by Pyodide 314.0.6. JavaScript remains the host capability broker. This browser runtime is local to the page and deliberately does not impersonate TriForce <code>compute_execute</code>, which remains the hardened Docker contract.</p><div class="row"><span id="webRuntimeState" class="pill">Not loaded</span><button id="webRuntimeLoadBtn" class="secondary">Load Python</button><button id="webRuntimeStopBtn" class="secondary" disabled>Stop Python</button></div><textarea id="webPythonCode" spellcheck="false" class="mono">import platform
+<section id="webRuntimePanel" class="advanced-hidden"><h2>2 · Browser Python + JavaScript runtime</h2><p class="muted">The web Helper now has an optional Python 3.14 runtime in an isolated Web Worker, backed by Pyodide 314.0.6. JavaScript remains the host capability broker. This browser runtime is local to the page and deliberately does not impersonate TriForce <code>compute_execute</code>, which remains the hardened Docker contract.</p><div class="row"><span id="webRuntimeState" class="pill">Not loaded</span><button id="webRuntimeLoadBtn" class="secondary">Load Python</button><button id="webRuntimeStopBtn" class="secondary" disabled>Stop Python</button></div><textarea id="webPythonCode" spellcheck="false" class="mono">import platform
 print(platform.python_version())
 print("AILinux Helper browser Python ready")</textarea><div class="row" style="margin-top:12px"><button id="webPythonRunBtn" class="secondary" disabled>Run Python</button></div><pre id="webPythonOutput" class="muted"></pre></section>
-<section id="dockerPanel"><h2>3 · Compute sandbox</h2><p class="muted">In a normal browser, compute runs remotely in a disposable TriForce Docker sandbox with public-internet egress and an optional mirrored <code>~/workspace</code>. Inside the native Helper, this panel can additionally manage explicitly released local Docker compute. The browser never receives docker.sock.</p><div class="row"><span id="dockerState" class="pill">Checking</span><span id="dockerVersion" class="muted"></span></div><p id="dockerDetail" class="muted">Compute is opt-in and never becomes a host shell.</p><div class="row"><button id="dockerInstallBtn" class="hidden">Install Docker</button><button id="dockerStartBtn" class="secondary hidden">Start</button><button id="dockerStopBtn" class="secondary hidden">Stop</button><button id="dockerRestartBtn" class="secondary hidden">Restart</button><button id="dockerTestBtn" class="secondary hidden">Test disposable container</button><button id="dockerRefreshBtn" class="secondary">Refresh status</button></div><pre id="dockerResult" class="muted"></pre></section>
-<section id="serviceControlPanel"><h2>4 · Local service control</h2><p class="muted">Only fixed, typed Helper operations are exposed. There is no free-form root shell. System services still require the native local confirmation/PolicyKit path.</p><div id="serviceList" class="grid"><div class="choice muted">Open this page inside AILinux Helper to inspect local services.</div></div><div class="row" style="margin-top:12px"><button id="serviceRefreshBtn" class="secondary">Refresh services</button></div><pre id="serviceResult" class="muted"></pre></section>
-<section id="terminalPanel" class="hidden"><h2>AI shell / terminal</h2><p id="terminalText" class="muted"></p><div class="row"><label>Backend <select id="terminalBackend"></select></label><button id="releaseTermBtn" class="hidden">Release terminal to the AI</button><button id="revokeTermBtn" class="secondary hidden">Revoke terminal</button></div><p id="terminalHint" class="muted"></p></section>
-<section id="shareBuilderPanel"><h2>5 · Build share</h2><p class="muted">Workspace is optional. Browser shares can combine local files, vision/clipboard and an isolated TriForce cloud sandbox; native Helpers can additionally expose approved OS capabilities.</p><div class="grid"><label class="choice">Visibility <select id="shareVisibility"><option value="private" selected>Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label><div class="choice"><strong>Active grants</strong><div id="activeGrants" class="muted">None</div></div></div><div class="row" style="margin-top:12px"><button id="revokeShareBtn" class="secondary">Revoke all grants</button></div></section>
+<section id="dockerPanel" class="advanced-hidden"><h2>3 · Compute sandbox</h2><p class="muted">In a normal browser, compute runs remotely in a disposable TriForce Docker sandbox with public-internet egress and an optional mirrored <code>~/workspace</code>. Inside the native Helper, this panel can additionally manage explicitly released local Docker compute. The browser never receives docker.sock.</p><div class="row"><span id="dockerState" class="pill">Checking</span><span id="dockerVersion" class="muted"></span></div><p id="dockerDetail" class="muted">Compute is opt-in and never becomes a host shell.</p><div class="row"><button id="dockerInstallBtn" class="hidden">Install Docker</button><button id="dockerStartBtn" class="secondary hidden">Start</button><button id="dockerStopBtn" class="secondary hidden">Stop</button><button id="dockerRestartBtn" class="secondary hidden">Restart</button><button id="dockerTestBtn" class="secondary hidden">Test disposable container</button><button id="dockerRefreshBtn" class="secondary">Refresh status</button></div><pre id="dockerResult" class="muted"></pre></section>
+<section id="serviceControlPanel" class="advanced-hidden"><h2>4 · Local service control</h2><p class="muted">Only fixed, typed Helper operations are exposed. There is no free-form root shell. System services still require the native local confirmation/PolicyKit path.</p><div id="serviceList" class="grid"><div class="choice muted">Open this page inside AILinux Helper to inspect local services.</div></div><div class="row" style="margin-top:12px"><button id="serviceRefreshBtn" class="secondary">Refresh services</button></div><pre id="serviceResult" class="muted"></pre></section>
+<section id="terminalPanel" class="hidden advanced-hidden"><h2>AI shell / terminal</h2><p id="terminalText" class="muted"></p><div class="row"><label>Backend <select id="terminalBackend"></select></label><button id="releaseTermBtn" class="hidden">Release terminal to the AI</button><button id="revokeTermBtn" class="secondary hidden">Revoke terminal</button></div><p id="terminalHint" class="muted"></p></section>
+<section id="shareBuilderPanel" class="advanced-hidden"><h2>5 · Build share</h2><p class="muted">Workspace is optional. Browser shares can combine local files, vision/clipboard and an isolated TriForce cloud sandbox; native Helpers can additionally expose approved OS capabilities.</p><div class="grid"><label class="choice">Visibility <select id="shareVisibility"><option value="private" selected>Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label><div class="choice"><strong>Active grants</strong><div id="activeGrants" class="muted">None</div></div></div><div class="row" style="margin-top:12px"><button id="revokeShareBtn" class="secondary">Revoke all grants</button></div></section>
 <section><h2>6 · Share workspace (optional)</h2>
 <div class="grid"><label class="choice"><input type="radio" name="mode" value="read_only" checked> Read only</label><label class="choice"><input id="writeMode" type="radio" name="mode" value="write"> Write</label></div>
 <div class="row" style="margin-top:14px"><button id="chooseBtn">Choose local folder</button><button id="opfsBtn" class="secondary">Use browser scratch workspace</button><button id="openChromeBtn" class="secondary hidden">Open in Chrome</button><span id="folderName" class="muted">No folder shared</span></div>
@@ -177,7 +217,7 @@ const WRITE_TOOLS=['file_edit','directory_create','workspace_clear','code_edit']
 const HELPER_DEVICE_TOOLS=['computer_observe','computer_screenshot','vision_start','vision_status','vision_observe','vision_stop','clipboard_read','clipboard_write','device_info','process_ops','service_ops','app_ops','window_ops','computer_input','device_control','compute_execute'];
 const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
 const MAX_TEXT=2*1024*1024;
-const EXECUTOR_VERSION='2.90.24-browser';
+const EXECUTOR_VERSION='2.90.25-browser';
 const urlPair=(new URLSearchParams(location.search).get('pair_code')||'').trim().toUpperCase();let pairCode=urlPair||sessionStorage.getItem('tf_pair_code')||'',rootHandle=null,rootEntry=null,workspaceBackend='none',ws=null,workspaceMode=sessionStorage.getItem('tf_workspace_mode')||'read_only',capabilities=[],heartbeatTimer=null,watchdogTimer=null,reconnectTimer=null,reconnectAttempt=0,manualDisconnect=false,lastPongAt=0,workspaceAttached=false,resumeToken='',toolQueue=Promise.resolve(),wakeLockSentinel=null,wakeLockWanted=localStorage.getItem('tf_workspace_wake_lock')==='1',connectPromise=null;if(urlPair){sessionStorage.setItem('tf_pair_code',urlPair);try{history.replaceState({},document.title,location.pathname)}catch{}}
 const directPicker=typeof window.showDirectoryPicker==='function';
 const android=/Android/i.test(navigator.userAgent),ios=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1),firefox=/Firefox\//i.test(navigator.userAgent);let deferredInstallPrompt=null;
@@ -233,9 +273,15 @@ function shareDescriptor(){return {task:$('task').value.trim(),visibility:$('sha
 if(!directPicker){$('writeMode').disabled=!webSupport().opfs;if(android)$('openChromeBtn').classList.remove('hidden');$('browserNote').textContent=(android?'Android: ':'')+(firefox?'Firefox: ':'')+'this browser does not expose showDirectoryPicker(), so full lazy Read/Write workspace selection is unavailable. '+(android?'Open this page in Chrome/Chromium to share a folder lazily with Read/Write access. ':'Use a Chromium browser for a real local folder, or use the persistent browser scratch workspace (OPFS). Desktop drag-and-drop may still provide lazy read-only access.');}else{$('browserNote').textContent='Direct directory handles are available. Choose Read only or Write, then choose the folder. No file list is built during selection.';}
 $('opfsBtn').classList.toggle('hidden',!webSupport().opfs);{const w=webSupport();$('browserCaps').textContent='Origin: '+location.origin+' · secure='+(window.isSecureContext?'yes':'no')+' · directory-picker='+(directPicker?'yes':'no')+' · persistent-handle='+(persistentHandleStore?'yes':'no')+' · display-capture='+(w.display?'yes':'no')+' · opfs='+(w.opfs?'yes':'no')+' · remote-sandbox='+(w.remoteCompute?'yes':'no')+' · clipboard-read='+(w.clipboardRead?'yes':'no')+' · clipboard-write='+(w.clipboardWrite?'yes':'no')+' · webgpu='+(w.webgpu?'yes':'no')+' · python-wasm='+(w.python?'yes':'no')+' · wake-lock='+(('wakeLock' in navigator)?'yes':'no')+' · os='+detectedHelperOs();}$('wakeLockToggle').checked=wakeLockWanted;
 const HELPER_DOWNLOAD_IDS=['androidDownload','linuxAppImage','linuxDeb','windowsDownload','macDownload'];
+let helperCatalog=null;
 function detectedHelperOs(){const ua=String(navigator.userAgent||''),platform=String((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||'');if(/Android/i.test(ua))return 'android';if(ios)return 'ios';if(/Windows|Win32|Win64/i.test(platform)||/Windows/i.test(ua))return 'windows';if(/Mac/i.test(platform)||/Macintosh|Mac OS X/i.test(ua))return 'macos';if(/Linux/i.test(platform)||/Linux/i.test(ua))return 'linux';return 'unknown';}
 function showHelperDownloads(ids){const visible=new Set(ids);for(const id of HELPER_DOWNLOAD_IDS)$(id).classList.toggle('hidden',!visible.has(id));}
-function setupMobileUi(){const os=detectedHelperOs(),downloads={android:['androidDownload'],linux:['linuxAppImage','linuxDeb'],windows:['windowsDownload'],macos:['macDownload'],ios:[],unknown:HELPER_DOWNLOAD_IDS};showHelperDownloads(downloads[os]||HELPER_DOWNLOAD_IDS);$('openAppBtn').classList.toggle('hidden',os!=='android');if(os==='android'){$('helperText').textContent='Android detected · use the native APK with the native foreground executor. The workspace can remain active after the UI is closed and connection controls stay in the system notification.';}else if(os==='ios'){$('helperText').textContent='iPhone/iPad detected · install this page as the AILinux Helper web app. The durable lease survives transport suspension and reconnects when iOS allows the app to resume.';$('helperNote').textContent='Detected OS: iOS · no native iOS package is available. iOS may suspend background networking and cannot guarantee an arbitrary WebSocket after force-quit.';}else if(os==='linux'){$('helperText').textContent='Linux detected · choose AppImage for a portable launch or the .deb package for Debian/Ubuntu/AILinux integration.';}else if(os==='windows'){$('helperText').textContent='Windows detected · the Windows Helper package is selected for this system.';}else if(os==='macos'){$('helperText').textContent='macOS detected · the macOS Helper disk image is selected for this system.';}else{$('helperText').textContent='Operating system not recognized reliably · all AILinux Helper packages are shown so you can choose the correct one.';$('helperNote').textContent='Detected OS: unknown · Android APK, Linux AppImage/.deb, Windows and macOS downloads are all available.';}if(os!=='ios'&&os!=='unknown')$('helperNote').textContent='Detected OS: '+os+' · showing the recommended Helper package'+(os==='linux'?'s':'')+'. The browser/PWA remains the zero-install fallback.';if('serviceWorker' in navigator)navigator.serviceWorker.register('/v1/mcp/sw.js?v=29024',{scope:'/v1/mcp',updateViaCache:'none'}).catch(()=>{});}
+function prettyBytes(value){const n=Number(value||0);if(!n)return '';const units=['B','KB','MB','GB'];let v=n,u=0;while(v>=1024&&u<units.length-1){v/=1024;u++}return v.toFixed(v>=100||u===0?0:1)+' '+units[u];}
+async function loadHelperCatalog(){try{const r=await fetch('/v1/mcp/helper/releases',{headers:{Accept:'application/json'},cache:'no-store'});if(!r.ok)throw new Error('release catalog '+r.status);helperCatalog=await r.json();return helperCatalog}catch(e){helperCatalog=null;return null}}
+function recommendedIds(os){return {android:['androidDownload'],linux:['linuxAppImage','linuxDeb'],windows:['windowsDownload'],macos:['macDownload'],ios:[],unknown:HELPER_DOWNLOAD_IDS}[os]||HELPER_DOWNLOAD_IDS}
+async function setupMobileUi(){const os=detectedHelperOs(),catalog=await loadHelperCatalog();$('detectedOs').textContent=os==='unknown'?'System unknown':os.toUpperCase()+' detected';$('openAppBtn').classList.toggle('hidden',os!=='android');const ids=recommendedIds(os).filter(id=>{const map={androidDownload:'android',linuxAppImage:'linux-appimage',linuxDeb:'linux-deb',windowsDownload:'windows',macDownload:'macos'};return !catalog||catalog[map[id]]?.available!==false});showHelperDownloads(ids);const selectedMap={android:'android',linux:'linux-appimage',windows:'windows',macos:'macos'},selected=catalog&&catalog[selectedMap[os]],latest=catalog&&catalog.latest_version;$('helperTitle').textContent='AILinux Helper'+(latest&&latest!=='unknown'?' '+latest:'');if(os==='ios'){$('helperText').textContent='iPhone/iPad detected · use the installable web Helper (PWA). Native iOS Helper packaging is not released yet.';$('installPwaBtn').classList.remove('hidden');}else if(os==='linux'){$('helperText').textContent='Linux detected · AppImage is recommended; Debian/Ubuntu/AILinux can use the .deb package.';}else if(os==='android'){$('helperText').textContent='Android detected · native APK selected for foreground workspace, vision and device capabilities.';}else if(os==='windows'){$('helperText').textContent='Windows detected · native Helper executable selected.';}else if(os==='macos'){$('helperText').textContent='macOS detected · native Apple Silicon disk image selected.';}else{$('helperText').textContent='System could not be identified reliably. Choose a package manually.';showHelperDownloads(HELPER_DOWNLOAD_IDS)}const meta=[];if(selected?.available)meta.push('Recommended: v'+selected.version+(selected.size?' · '+prettyBytes(selected.size):''));if(catalog?.android?.available&&catalog.android.version!==latest)meta.push('Android currently v'+catalog.android.version);if(latest)meta.push('Latest desktop v'+latest);$('helperNote').textContent=meta.join(' · ')||'Browser/PWA remains available without installation.';if('serviceWorker' in navigator)navigator.serviceWorker.register('/v1/mcp/sw.js?v=29025',{scope:'/v1/mcp',updateViaCache:'none'}).catch(()=>{});}
+$('showAllDownloads').onclick=()=>{showHelperDownloads(HELPER_DOWNLOAD_IDS);$('helperNote').textContent=(helperCatalog?'Available packages shown for all supported desktop/mobile systems.':'All package links shown.');};
+$('advancedToggle').onclick=()=>{const panels=['webRuntimePanel','dockerPanel','serviceControlPanel','terminalPanel','shareBuilderPanel'];const show=panels.some(id=>$(id)?.classList.contains('advanced-hidden'));for(const id of panels)$(id)?.classList.toggle('advanced-hidden',!show);$('advancedToggle').textContent=show?'Less':'Advanced';};
 setupMobileUi();
 refreshNativeHelperStatus().then(()=>{renderShareSummary();refreshDockerStatus().catch(()=>{});refreshServiceList().catch(()=>{});refreshResourceInventory().catch(()=>{})}).catch(()=>{});
 const native=(typeof window!=='undefined'&&window.ailinuxNative)||null;let nativeShell=null;
@@ -552,19 +598,7 @@ async def browser_workspace_handoff_landing() -> HTMLResponse:
 
 @public_router.get("/mcp/workspace/android.apk", tags=["MCP"], summary="Download AILinux Android workspace helper")
 async def download_android_workspace_helper() -> Response:
-    apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/workspace/triforce/releases/helper/AILinux-Helper-latest.apk")
-    if not os.path.isfile(apk_path):
-        return JSONResponse(
-            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.24"},
-            status_code=404,
-            headers={"Cache-Control": "no-store"},
-        )
-    return FileResponse(
-        apk_path,
-        media_type="application/vnd.android.package-archive",
-        filename="AILinux-Helper-2.90.24-android.apk",
-        headers={"Cache-Control": "no-cache"},
-    )
+    return await download_ailinux_helper("android")
 
 
 @public_router.get("/mcp/helper/icon.png", tags=["MCP"], summary="AILinux Helper app icon")
@@ -575,43 +609,30 @@ async def ailinux_helper_icon() -> Response:
     return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=86400, immutable"})
 
 
+@public_router.get("/mcp/helper/releases", tags=["MCP"], summary="Current AILinux Helper release catalog")
+async def ailinux_helper_release_catalog() -> JSONResponse:
+    return JSONResponse(_helper_release_catalog(), headers={"Cache-Control": "no-store"})
+
+
 @public_router.get("/mcp/helper/{platform}", tags=["MCP"], summary="Download current AILinux Helper")
 async def download_ailinux_helper(platform: str):
+    catalog = _helper_release_catalog()
+    spec = catalog.get(platform.lower())
+    if not spec or not spec.get("available"):
+        raise HTTPException(status_code=404, detail="AILinux Helper build unavailable for this platform")
     release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
-    artifacts = {
-        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.24-android.apk", "application/vnd.android.package-archive"),
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.24-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.24-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.24-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.24-mac-arm64.dmg", "application/x-apple-diskimage"),
-    }
-    spec = artifacts.get(platform)
-    if not spec:
-        raise HTTPException(status_code=404, detail="Unknown AILinux Helper platform")
-    source_name, download_name, media_type = spec
-    artifact = release_root / source_name
-    if not artifact.is_file():
-        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.24", "repository": "ailinux-helper"})
-    return FileResponse(artifact, filename=download_name, media_type=media_type, headers={"Cache-Control": "no-store"})
+    artifact = release_root / spec["filename"]
+    return FileResponse(
+        artifact,
+        filename=spec["filename"],
+        media_type=spec["media_type"],
+        headers={"Cache-Control": "no-store", "X-AILinux-Helper-Version": spec["version"]},
+    )
 
 
 @public_router.get("/mcp/workspace/desktop/{platform}", tags=["MCP"], summary="Download AILinux desktop workspace helper")
 async def download_desktop_workspace_helper(platform: str) -> Response:
-    root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/workspace/triforce/releases/helper")
-    artifacts = {
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.24-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.24-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.24-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.24-mac-arm64.dmg", "application/x-apple-diskimage"),
-    }
-    item = artifacts.get(platform.lower())
-    if not item:
-        return JSONResponse({"error": "Unknown desktop platform", "platform": platform}, status_code=404)
-    source, filename, media_type = item
-    path = os.path.join(root, source)
-    if not os.path.isfile(path):
-        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.90.24", "workflow": "ailinux-helper/build.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
-    return FileResponse(path, media_type=media_type, filename=filename, headers={"Cache-Control": "no-cache"})
+    return await download_ailinux_helper(platform)
 
 
 @public_router.get("/mcp/manifest.webmanifest", tags=["MCP"], summary="AILinux workspace PWA manifest")
@@ -626,13 +647,13 @@ async def workspace_pwa_manifest() -> JSONResponse:
         "background_color": "#0d1117",
         "theme_color": "#0d1117",
         "description": "AILinux cross-platform local MCP companion and workspace executor",
-        "icons": [{"src": "/v1/mcp/helper/icon.png?v=29024", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+        "icons": [{"src": "/v1/mcp/helper/icon.png?v=29025", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
     }, media_type="application/manifest+json", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store"})
 
 
 @public_router.get("/mcp/sw.js", tags=["MCP"], summary="AILinux workspace PWA service worker")
 async def workspace_pwa_service_worker() -> Response:
-    script = """'use strict';const CACHE='ailinux-helper-v29024';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.24')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.24'))))});"""
+    script = """'use strict';const CACHE='ailinux-helper-v29025';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.25')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.25'))))});"""
     return Response(script, media_type="application/javascript", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store", "Service-Worker-Allowed": "/v1/mcp"})
 
 
