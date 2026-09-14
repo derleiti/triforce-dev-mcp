@@ -103,3 +103,79 @@ def test_plain_file_formatter_redacts_secrets():
     text = formatter.format(record)
     assert 'dont-log-me' not in text
     assert '[REDACTED]' in text
+
+
+def test_structured_log_sanitizer_recurses_and_hides_workspace_context():
+    from app.utils.log_formatters import sanitize_log_data
+
+    source = {
+        "path": "README.md",
+        "workspace_token": "workspace-token-must-not-leak",
+        "workspace_context": "private-chat-affinity",
+        "nested": {
+            "Authorization": "Bearer nested-secret",
+            "items": [{"api_key": "nested-api-secret", "keep": "visible"}],
+        },
+    }
+    safe = sanitize_log_data(source)
+
+    assert safe["path"] == "README.md"
+    assert safe["workspace_token"] == "[REDACTED]"
+    assert safe["workspace_context"] == "[REDACTED]"
+    assert safe["nested"]["Authorization"] == "[REDACTED]"
+    assert safe["nested"]["items"][0]["api_key"] == "[REDACTED]"
+    assert safe["nested"]["items"][0]["keep"] == "visible"
+    assert source["workspace_token"] == "workspace-token-must-not-leak"
+
+
+def test_multifile_mcp_log_never_persists_workspace_credentials(tmp_path):
+    import asyncio
+    import json
+
+    from app.utils.triforce_logging import MultiFileLogger
+
+    logger = MultiFileLogger(log_dir=str(tmp_path))
+    asyncio.run(
+        logger.log_mcp(
+            "tools/call:workspace_status",
+            {
+                "workspace_token": "SENTINEL_TOKEN_DO_NOT_LOG",
+                "workspace_context": "SENTINEL_CONTEXT_DO_NOT_LOG",
+                "path": "README.md",
+            },
+            {"ok": True},
+            1.25,
+        )
+    )
+    log_path = logger._get_dated_path("mcp", "mcpserver")
+    raw = log_path.read_text(encoding="utf-8")
+    record = json.loads(raw.strip())
+
+    assert "SENTINEL_TOKEN_DO_NOT_LOG" not in raw
+    assert "SENTINEL_CONTEXT_DO_NOT_LOG" not in raw
+    assert record["params"]["workspace_token"] == "[REDACTED]"
+    assert record["params"]["workspace_context"] == "[REDACTED]"
+    assert record["params"]["path"] == "README.md"
+
+
+def test_multifile_writer_redacts_result_preview_and_error_text(tmp_path):
+    import asyncio
+
+    from app.utils.triforce_logging import MultiFileLogger
+
+    logger = MultiFileLogger(log_dir=str(tmp_path))
+    asyncio.run(
+        logger.log_mcp_tool_call(
+            tool_name="workspace_pair",
+            params={"action": "claim"},
+            result_status="success",
+            latency_ms=2.0,
+            result_preview="{'workspace_token': 'RESULT_SECRET_SENTINEL', 'ok': True}",
+            error="workspace_context=CONTEXT_SECRET_SENTINEL",
+        )
+    )
+    raw = logger._get_dated_path("mcp", "mcp_calls").read_text(encoding="utf-8")
+
+    assert "RESULT_SECRET_SENTINEL" not in raw
+    assert "CONTEXT_SECRET_SENTINEL" not in raw
+    assert "[REDACTED]" in raw

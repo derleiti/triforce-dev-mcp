@@ -10,7 +10,10 @@ import logging
 import os
 import re
 from datetime import datetime
+from collections.abc import Mapping
 from typing import Any
+
+from app.utils.redaction import is_secret_key
 
 _RESET = "\033[0m"
 _DIM = "\033[2m"
@@ -73,7 +76,7 @@ def _paint(text: str, style: str, enabled: bool) -> str:
 def redact_sensitive(value: Any) -> str:
     """Redact credentials from arbitrary log text without mutating application data."""
     text = str(value)
-    key = r"(?:pair_code|handoff_code|resume_token|access_token|refresh_token|api_key|apikey)"
+    key = r"(?:pair_code|handoff_code|resume_token|workspace_token|workspace_context|access_token|refresh_token|session_token|api_key|apikey|password|passwd|secret|credential|token)"
     # Authorization schemes need to be handled before generic key/value masking.
     text = re.sub(r"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+", r"\1[REDACTED]", text)
     # URL query strings.
@@ -91,6 +94,33 @@ def redact_sensitive(value: Any) -> str:
         text,
     )
     return text
+
+
+_PRIVATE_LOG_KEYS = {
+    "workspace_context",
+}
+
+
+def sanitize_log_data(value: Any, *, key: str | None = None) -> Any:
+    """Return a recursively sanitized copy suitable for persistent logs.
+
+    Credential-shaped keys use the shared default-deny secret classifier.
+    ``workspace_context`` is additionally treated as private correlation data: it
+    may be non-secret by protocol, but persisting it can disclose user/workspace
+    identity or routing context.
+    """
+    if key is not None and (is_secret_key(key) or key.lower() in _PRIVATE_LOG_KEYS):
+        return "[REDACTED]"
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): sanitize_log_data(child_value, key=str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [sanitize_log_data(item) for item in value]
+    if isinstance(value, str):
+        return redact_sensitive(value)
+    return value
 
 
 class RedactingFormatter(logging.Formatter):

@@ -25,7 +25,7 @@ from enum import Enum
 from pathlib import Path
 
 from app.paths import LOG_DIR
-from app.utils.log_formatters import redact_sensitive
+from app.utils.log_formatters import redact_sensitive, sanitize_log_data
 from typing import Any, Dict, List, Optional, Set
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -514,24 +514,9 @@ class TriForceCentralLogger:
         )
 
     def _sanitize_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove sensitive data from params"""
-        if not params:
-            return {}
-
-        sensitive_keys = {"password", "api_key", "secret", "token", "credential", "auth"}
-        safe = {}
-
-        for key, value in params.items():
-            if any(s in key.lower() for s in sensitive_keys):
-                safe[key] = "[REDACTED]"
-            elif isinstance(value, str) and len(value) > 500:
-                safe[key] = value[:500] + "...[truncated]"
-            elif isinstance(value, dict):
-                safe[key] = self._sanitize_params(value)
-            else:
-                safe[key] = value
-
-        return safe
+        """Return a recursive, non-mutating, log-safe parameter copy."""
+        safe = sanitize_log_data(params or {})
+        return safe if isinstance(safe, dict) else {}
 
     async def _periodic_flush(self):
         """Periodically flush logs to disk"""
@@ -807,7 +792,7 @@ class MultiFileLogger:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "mcp",
             "method": method,
-            "params": str(params)[:500] if params else None,
+            "params": sanitize_log_data(params) if params else None,
             "result_size": len(str(result)) if result else 0,
             "latency_ms": round(latency_ms, 2),
             "error": error,
@@ -837,16 +822,8 @@ class MultiFileLogger:
             result_preview: Optional truncated result preview
             error: Error message if failed
         """
-        # Sanitize sensitive params
-        safe_params = {}
-        sensitive_keys = {"password", "api_key", "secret", "token", "credential", "auth"}
-        for k, v in (params or {}).items():
-            if any(s in k.lower() for s in sensitive_keys):
-                safe_params[k] = "[REDACTED]"
-            elif isinstance(v, str) and len(v) > 200:
-                safe_params[k] = v[:200] + "..."
-            else:
-                safe_params[k] = v
+        # Keep protocol/tool audit logs structured and recursively credential-safe.
+        safe_params = sanitize_log_data(params or {})
         
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -926,8 +903,9 @@ class MultiFileLogger:
         async with self._lock:
             try:
                 path = self._get_dated_path(subdir, name)
+                safe_entry = sanitize_log_data(entry)
                 with open(path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+                    f.write(json.dumps(safe_entry, ensure_ascii=False, default=str) + "\n")
             except Exception as e:
                 logger.error(f"Failed to write to {name} log: {e}")
 
