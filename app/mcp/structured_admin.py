@@ -360,6 +360,24 @@ REMOTE_COMMANDS = {
 }
 
 
+def _remote_command_for_action(command: str) -> list[str]:
+    """Return the bounded argv for one predefined remote operation.
+
+    Operations which intentionally terminate the transport that carries this
+    tool call are scheduled through systemd-run. The scheduler exits first, so
+    MCP can report whether the operation was accepted instead of misreporting
+    an SSH disconnect as an execution failure. No free-form shell is involved.
+    """
+    if command not in {"restart_triforce", "reboot"}:
+        return list(REMOTE_COMMANDS[command])
+    target = ["/bin/systemctl", "restart", "triforce"] if command == "restart_triforce" else ["/bin/systemctl", "reboot"]
+    unit = f"ailinux-mcp-{command.replace('_', '-')}-{os.getpid()}-{int(time.time() * 1000)}"
+    return [
+        "sudo", "systemd-run", "--quiet", "--collect", "--on-active=2s",
+        f"--unit={unit}", *target,
+    ]
+
+
 async def handle_remote_exec(a):
     """Execute predefined commands on federation nodes via SSH."""
     node = a.get("node", "")
@@ -371,7 +389,7 @@ async def handle_remote_exec(a):
         return {"error": f"Unknown command: {command}. Available: {list(REMOTE_COMMANDS.keys())}"}
 
     n = FEDERATION_NODES[node]
-    remote_cmd = REMOTE_COMMANDS[command]
+    remote_cmd = _remote_command_for_action(command)
 
     # Build SSH command (key-based auth, no password in parameters)
     ssh_cmd = [
