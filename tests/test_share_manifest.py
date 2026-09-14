@@ -228,3 +228,21 @@ def test_compute_metadata_is_bounded_before_entering_manifest():
     assert compute["load"] == 1.0
     assert len(compute["models"]) <= 32
     assert all(len(item) <= 128 for item in compute["models"])
+
+
+def test_portable_device_read_and_control_are_separate_grants():
+    read_only = build_share_manifest({"capabilities": ["device_info", "process_ops", "service_ops"]})
+    assert manifest_has_grant(read_only, RESOURCE_DEVICE, "read") is True
+    assert manifest_has_grant(read_only, RESOURCE_DEVICE, "control") is False
+
+    controlled = build_share_manifest({"access_mode": "write", "capabilities": ["computer_input", "window_ops", "app_ops"]})
+    assert manifest_has_grant(controlled, RESOURCE_DISPLAY, "control") is True
+    assert manifest_has_grant(controlled, RESOURCE_DEVICE, "control") is True
+
+
+def test_display_observe_and_control_are_independent():
+    control_only = build_share_manifest({"access_mode": "write", "capabilities": ["computer_input"]})
+    display = manifest_resource(control_only, RESOURCE_DISPLAY)
+    assert display["enabled"] is True
+    assert display["observe"] is False
+    assert display["control"] is True

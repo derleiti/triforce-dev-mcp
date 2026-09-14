@@ -83,6 +83,10 @@ WORKSPACE_WRITE_TOOLS = frozenset({
     "file_edit", "directory_create", "workspace_clear", "code_edit",
 })
 DISPLAY_OBSERVE_TOOLS = frozenset({"computer_observe", "computer_screenshot"})
+DISPLAY_CONTROL_TOOLS = frozenset({"computer_input", "window_ops"})
+DEVICE_READ_TOOLS = frozenset({"device_info", "process_ops", "service_ops"})
+DEVICE_CONTROL_TOOLS = frozenset({"app_ops"})
+DEVICE_MUTATING_TOOLS = frozenset({"process_ops", "service_ops", "app_ops", "window_ops", "computer_input"})
 CLIPBOARD_READ_TOOLS = frozenset({"clipboard_read"})
 CLIPBOARD_WRITE_TOOLS = frozenset({"clipboard_write"})
 COMPUTE_TOOLS = frozenset({"compute_execute"})
@@ -188,6 +192,16 @@ def build_share_manifest(
     clipboard_read = "clipboard_read" in capability_set
     clipboard_write = "clipboard_write" in capability_set
     display_observe = bool(capability_set & DISPLAY_OBSERVE_TOOLS)
+    # Native device control is independent from workspace file write mode. The
+    # helper's own opt-in profile is authoritative, so a native-only share can
+    # expose desktop/system control without silently granting file mutation.
+    native_device = _as_dict(native.get("device"))
+    native_display = _as_dict(native.get("display"))
+    display_control = bool(capability_set & DISPLAY_CONTROL_TOOLS) and native_display.get("control") is True
+    device_read = bool(capability_set & DEVICE_READ_TOOLS) and (
+        native_device.get("observe") is True or _as_dict(native.get("resources")).get("advertise") is True
+    )
+    device_control = bool(capability_set & DEVICE_MUTATING_TOOLS) and native_device.get("control") is True
     compute_enabled = bool(capability_set & COMPUTE_TOOLS)
     compute_native = _as_dict(native.get("compute"))
     compute_detail: Dict[str, Any] = {
@@ -209,7 +223,7 @@ def build_share_manifest(
             "load": _bounded_number(compute_native.get("load"), 0.0, 0.0, 1.0),
             "healthy": compute_native.get("healthy") is True,
         })
-    device_shared = _as_dict(native.get("resources")).get("advertise") is True
+    device_shared = device_read or _as_dict(native.get("resources")).get("advertise") is True
     mcp_shared = _as_dict(native.get("mcp")).get("advertise") is True
 
     resources = [
@@ -226,10 +240,10 @@ def build_share_manifest(
             write=clipboard_write,
         ),
         # Control is never derived; observing must not imply driving the host.
-        _resource(RESOURCE_DISPLAY, display_observe, observe=display_observe, control=False),
+        _resource(RESOURCE_DISPLAY, display_observe or display_control, observe=display_observe, control=display_control),
         _resource(RESOURCE_COMPUTE, compute_enabled, **compute_detail),
         _resource(RESOURCE_MCP, mcp_shared, discover=mcp_shared, invoke=False),
-        _resource(RESOURCE_DEVICE, device_shared, advertise=device_shared),
+        _resource(RESOURCE_DEVICE, device_shared or device_control, advertise=device_shared, control=device_control),
     ]
 
     grants: List[Dict[str, str]] = []
@@ -243,12 +257,16 @@ def build_share_manifest(
         grants.append({"resource": RESOURCE_CLIPBOARD, "action": "write"})
     if display_observe:
         grants.append({"resource": RESOURCE_DISPLAY, "action": "observe"})
+    if display_control:
+        grants.append({"resource": RESOURCE_DISPLAY, "action": "control"})
     if compute_enabled:
         grants.append({"resource": RESOURCE_COMPUTE, "action": "execute"})
     if mcp_shared:
         grants.append({"resource": RESOURCE_MCP, "action": "discover"})
     if device_shared:
         grants.append({"resource": RESOURCE_DEVICE, "action": "read"})
+    if device_control:
+        grants.append({"resource": RESOURCE_DEVICE, "action": "control"})
 
     return {
         "share_id": str(share_id or uuid.uuid4().hex),

@@ -1030,3 +1030,27 @@ async def test_compute_execution_requires_explicit_compute_grant():
     assert result['isError'] is True
     assert result['structuredContent']['code'] == 'WORKSPACE_COMPUTE_GRANT_REQUIRED'
     assert conn.calls == []
+
+
+@pytest.mark.asyncio
+async def test_portable_device_read_operation_allowed_in_read_only_binding():
+    conn = DummyConnection()
+    sessions.bind_workspace('session-A', conn, mode='read_only', capabilities=['process_ops'])
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'process_ops', {'action': 'list'})
+    assert result['isError'] is False
+    assert conn.calls[-1][1]['tool'] == 'process_ops'
+
+
+@pytest.mark.asyncio
+async def test_portable_device_mutation_blocked_in_read_only_binding():
+    conn = DummyConnection()
+    sessions.bind_workspace('session-A', conn, mode='read_only', capabilities=['process_ops', 'service_ops', 'computer_input'])
+    req = DummyRequest('session-A')
+    blocked_process = await call_public_local_tool(req, 'process_ops', {'action': 'signal', 'pid': 123, 'signal': 'terminate'})
+    assert blocked_process['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
+    blocked_service = await call_public_local_tool(req, 'service_ops', {'action': 'restart', 'service': 'example'})
+    assert blocked_service['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
+    blocked_input = await call_public_local_tool(req, 'computer_input', {'action': 'click', 'x': 1, 'y': 1})
+    assert blocked_input['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
+    assert conn.calls == []
