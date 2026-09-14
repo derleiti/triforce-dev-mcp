@@ -64,14 +64,19 @@ async def test_public_guest_defaults_local_capabilities_off_until_share_exists()
 
 
 @pytest.mark.asyncio
-async def test_internal_admin_catalog_keeps_server_tools_but_local_overlay_defaults_off():
-    core = await handle_tools_list({}, request=FakeRequest('bearer', True))
+async def test_internal_admin_catalog_keeps_server_tools_and_explicit_core_stays_minimal():
+    default_full = await handle_tools_list({}, request=FakeRequest('bearer', True))
+    default_names = {tool['name'] for tool in default_full['tools']}
+    assert {'chat', 'aihelper_pair', 'git', 'code_edit', 'shell', 'binary_exec', 'task_runner', 'remote_exec'} <= default_names
+
+    core = await handle_tools_list({'inventory': 'core'}, request=FakeRequest('bearer', True))
     core_names = {tool['name'] for tool in core['tools']}
     assert {'chat', 'aihelper_pair', 'git', 'code_edit'} <= core_names
-    assert 'shell' not in core_names
+    assert {'shell', 'binary_exec', 'task_runner', 'remote_exec'}.isdisjoint(core_names)
+
     full = await handle_tools_list({'inventory': 'all'}, request=FakeRequest('bearer', True))
     full_names = {tool['name'] for tool in full['tools']}
-    assert {'shell', 'group_chat_create', 'mail_inbox', 'aihelper_pair'} <= full_names
+    assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'group_chat_create', 'mail_inbox', 'aihelper_pair'} <= full_names
 
 
 def test_browser_workspace_page_prefers_native_pair_handover_over_the_url():
@@ -636,3 +641,42 @@ async def test_legacy_triforce_init_inherits_shared_reflection_protocol():
     payload = await triforce_init(InitRequest(request='systemprompt', llm_id='prompt-audit'))
     assert 'PASS 1 — GROUND + REALITY CHECK' in payload['systemprompt']
     assert 'PASS 2 — DIVERGE + CHALLENGE' in payload['systemprompt']
+
+
+@pytest.mark.asyncio
+async def test_full_access_client_discovers_execution_and_federation_tools():
+    """Regression: execution/federation tools kept vanishing from discovery.
+
+    shell, binary_exec, task_runner, remote_exec and remote_admin are
+    implemented and registered (structured_admin / handlers_v4), but they are
+    not in CORE_TOOL_NAMES. A client that calls tools/list without an
+    `inventory` parameter used to get `core` regardless of its privileges, so
+    a fully authenticated operator could not see or call them and reported
+    them as deleted.
+
+    Discovery default now follows proven access. This is visibility only -
+    RBAC in runtime_registry/mcp_security still gates every call.
+    """
+    result = await handle_tools_list({}, request=FakeRequest('bearer', True))
+    names = {tool['name'] for tool in result['tools']}
+    assert {'shell', 'binary_exec', 'task_runner', 'remote_exec'} <= names, (
+        'full-access discovery must expose the execution/federation surface'
+    )
+
+
+@pytest.mark.asyncio
+async def test_guest_discovery_stays_minimal_without_full_access():
+    """The counterpart: an unprivileged client must not gain execution tools."""
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
+    names = {tool['name'] for tool in result['tools']}
+    assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'remote_admin'}.isdisjoint(names)
+
+
+def test_federation_reaches_every_mesh_node_with_output():
+    """remote_exec must keep covering all three nodes, zombie-pc included."""
+    from app.mcp.structured_admin import FEDERATION_NODES, REMOTE_COMMANDS
+
+    assert {'hetzner', 'backup', 'zombie-pc'} <= set(FEDERATION_NODES)
+    assert FEDERATION_NODES['zombie-pc']['host'] == '10.10.0.2'
+    # Evidence-gathering commands must stay available on every node.
+    assert {'status', 'uptime', 'journal', 'hostname'} <= set(REMOTE_COMMANDS)

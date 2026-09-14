@@ -2038,13 +2038,40 @@ async def handle_initialize(params: Dict[str, Any], request: Optional[Request] =
     }
 
 
+def _request_has_full_access(request: Optional[Request]) -> bool:
+    """True only for a client that already authenticated with full access.
+
+    Used to pick the tools/list discovery default. This is a *visibility*
+    decision, never an authorization one - every privileged tool is still
+    checked against RBAC at call time.
+    """
+    if request is None:
+        return False
+    try:
+        return bool(getattr(request.state, "mcp_auth_full_access", False))
+    except Exception:
+        return False
+
+
 async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] = None) -> Dict[str, Any]:
     """MCP tools/list with a minimal default and canonical inventory profiles.
 
     Legacy handlers remain callable for compatibility, but duplicate/dead tools
     are intentionally not advertised to models.
     """
-    inventory = str(params.get("inventory", "core"))
+    inventory = str(params.get("inventory", "")).strip()
+    if not inventory:
+        # Discovery default. "core" keeps an unauthenticated or narrow client's
+        # context small, but for a client that already proved full access it is
+        # only context thrift, not a security boundary: RBAC in
+        # runtime_registry/mcp_security still gates every privileged call.
+        #
+        # Hiding the surface from a full-access client is actively harmful: the
+        # execution and federation tools (shell, binary_exec, task_runner,
+        # remote_exec, remote_admin) exist and are registered, but a client that
+        # sends tools/list without an inventory parameter never learns they are
+        # callable, and reports them as "deleted".
+        inventory = "all" if _request_has_full_access(request) else "core"
     # Check if client wants legacy (v3) tools
     use_legacy = inventory in {"legacy", "v3"} or params.get("legacy", False) or params.get("v3", False)
     

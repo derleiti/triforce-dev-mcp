@@ -192,7 +192,7 @@ TRIFORCE_ADMIN_TOOLS = frozenset({
     "shell", "service_control", "container_control", "docker_stack", "hot_reload",
     "config", "config_set", "debug", "evolve", "prompt_set",
     "ollama_status", "ollama_pull", "ollama_delete",
-    "mesh_status", "mesh_task", "remote_hosts", "remote_task",
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin",
     "vault_status", "vault_keys", "vault_add",
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_close",
     "memory_clear", "memory_history",
@@ -222,7 +222,7 @@ def tool_scope(name: str, inventory: str = "") -> str:
 # for compatibility, but are intentionally hidden from model discovery.
 CANONICAL_TOOL_NAMES = frozenset({
     # Core operations
-    "shell", "status", "service_control", "container_control", "docker_stack", "hot_reload",
+    "shell", "binary_exec", "task_runner", "status", "service_control", "container_control", "docker_stack", "hot_reload",
     "log_viewer", "mcp_analytics", "config", "config_set",
     # Files/code
     "file_ops", "code_search", "code_edit", "code_tree", "git",
@@ -235,7 +235,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Ollama/model operations
     "ollama_status", "ollama_pull", "ollama_delete",
     # Mesh/remote
-    "mesh_status", "mesh_task", "remote_hosts", "remote_task",
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin",
     # Vault
     "vault_status", "vault_keys", "vault_add",
     # Memory
