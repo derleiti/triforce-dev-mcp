@@ -1,7 +1,14 @@
+x-logging: &default_logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   n8n:
-    image: n8nio/n8n:latest
+    image: ${N8N_IMAGE:-n8nio/n8n:2.34.6}
     container_name: n8n
+    logging: *default_logging
     restart: unless-stopped
     ports:
       - "${N8N_PORT:-5678}:5678"
@@ -14,16 +21,24 @@ services:
       - N8N_ENDPOINT_REST=${N8N_ENDPOINT_REST:-/rest}
       - N8N_ENDPOINT_WEBHOOK=${N8N_ENDPOINT_WEBHOOK:-/webhook}
       - NODE_ENV=production
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
+      - N8N_DIAGNOSTICS_ENABLED=${N8N_DIAGNOSTICS_ENABLED:-false}
+      - N8N_RUNNERS_TASK_TIMEOUT=${N8N_RUNNERS_TASK_TIMEOUT:-300}
+      - N8N_EMAIL_MODE=smtp
+      - N8N_SMTP_HOST=${MAIL_SMTP_HOST:-mail.ailinux.me}
+      - N8N_SMTP_PORT=${MAIL_SMTP_PORT:-587}
+      - N8N_SMTP_SSL=${N8N_SMTP_SSL:-false}
+      - N8N_SMTP_STARTTLS=${N8N_SMTP_STARTTLS:-true}
+      - N8N_SMTP_USER=${MAIL_SMTP_USER}
+      - N8N_SMTP_PASS=${MAIL_SMTP_PASS}
+      - N8N_SMTP_SENDER=${MAIL_FROM_ADDR:-admin@ailinux.me}
       - WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - GENERIC_TIMEZONE=${TZ:-Europe/Berlin}
-      # Auth
-      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-false}
-      - N8N_BASIC_AUTH_USER=${TRIFORCE_ADMIN_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${TRIFORCE_ADMIN_PASSWORD}
       # AI Integration
       - N8N_AI_ENABLED=true
       # MCP Integration
-      - MCP_API_URL=${MCP_API_URL}
+      - MCP_API_URL=${N8N_MCP_URL}
       - OLLAMA_HOST=${OLLAMA_HOST}
     volumes:
       - ${TRIFORCE_DATA_DIR:-/home/zombie/workspace/triforce/data}/n8n:/home/node/.n8n

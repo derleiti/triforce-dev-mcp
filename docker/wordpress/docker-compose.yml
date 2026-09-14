@@ -15,6 +15,7 @@ services:
   apache:
     image: ${WP_APACHE_IMAGE:-httpd:2.4-alpine}
     container_name: ${WP_APACHE_CONTAINER_NAME:-wordpress_apache}
+    logging: *default_logging
     depends_on:
       wordpress_fpm:
         condition: service_healthy
@@ -48,8 +49,9 @@ services:
         ipv4_address: ${WP_APACHE_STATIC_IP:-172.18.0.10}
 
   wordpress_fpm:
-    image: ${WP_FPM_IMAGE:-wordpress:6.8.1-php8.3-fpm-alpine}
+    image: ${WP_FPM_IMAGE:-wordpress:7.1-php8.3-fpm-alpine}
     container_name: ${WP_FPM_CONTAINER_NAME:-wordpress_fpm}
+    logging: *default_logging
     depends_on:
       wordpress_db:
         condition: service_healthy
@@ -86,8 +88,8 @@ services:
       # WP-CLI dauerhaft verfuegbar (read-only, ausserhalb Webroot) - 2026-07-11
       - ./bin/wp-cli.phar:/usr/local/bin/wp-cli.phar:ro
       - ./bin/wp:/usr/local/bin/wp:ro
-      - ./php/opcache-boost.ini:/usr/local/etc/php/conf.d/98-opcache.ini:ro
-      - ./php/zz-ailinux-opcache.ini:/usr/local/etc/php/conf.d/zz-ailinux-opcache.ini:ro
+      - ./ensure-redis-config.php:/usr/local/share/ailinux/ensure-redis-config.php:ro
+      - ./php/opcache-boost.ini:/usr/local/etc/php/conf.d/zz-ailinux-opcache.ini:ro
       - ${WP_PHP_WWW_CONF:-./php/www.conf}:/usr/local/etc/php-fpm.d/www.conf
     healthcheck:
       test: ["CMD-SHELL", "php-fpm --test 2>&1 | grep -q test"]
@@ -100,7 +102,7 @@ services:
     restart: ${WP_RESTART_POLICY:-unless-stopped}
 
   wordpress_db:
-    image: ${WP_DB_IMAGE:-mariadb:11}
+    image: ${WP_DB_IMAGE:-mariadb:11.8}
     container_name: ${WP_DB_CONTAINER_NAME:-wordpress_db}
     environment:
       TZ: ${TZ:-Europe/Berlin}
@@ -124,7 +126,7 @@ services:
     logging: *default_logging
 
   wordpress_redis:
-    image: ${WP_REDIS_IMAGE:-redis:alpine}
+    image: ${WP_REDIS_IMAGE:-redis:8.10-alpine}
     container_name: ${WP_REDIS_CONTAINER_NAME:-wordpress_redis}
     environment:
       REDIS_PASSWORD: ${WP_REDIS_PASSWORD:-}

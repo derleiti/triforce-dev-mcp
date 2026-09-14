@@ -1,10 +1,17 @@
 # AILinux APT Repository
 # Start: docker compose --env-file ../../.env up -d
 
+x-logging: &default_logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   repository:
-    image: ${REPO_IMAGE:-nginx:alpine}
+    image: ${REPO_IMAGE:-nginx:1.29-alpine}
     container_name: ${REPO_CONTAINER_NAME:-ailinux-repository}
+    logging: *default_logging
     restart: ${REPO_RESTART_POLICY:-unless-stopped}
     # External ports removed - Apache proxies via internal network
     # Uncomment for local debugging:
@@ -33,11 +40,13 @@ services:
       start_period: ${REPO_HEALTHCHECK_START:-30s}
 
   apt-mirror:
+    profiles: ["mirror"]
     build:
       context: .
       dockerfile: Dockerfile
     image: ${REPO_MIRROR_IMAGE:-ailinux-apt-mirror}
     container_name: ${REPO_MIRROR_CONTAINER_NAME:-ailinux-apt-mirror}
+    logging: *default_logging
     restart: "no"
     environment:
       - TZ=${TZ:-Europe/Berlin}

@@ -1,0 +1,9 @@
+# Local bot-detection defaults. The limiter itself remains disabled in settings.yml.
+# Keeping trusted proxy ranges explicit avoids noisy startup/request diagnostics and
+# makes a future limiter enablement deterministic behind the AILinux reverse proxy.
+[botdetection]
+trusted_proxies = [
+  "127.0.0.0/8",
+  "::1",
+  "172.16.0.0/12",
+]

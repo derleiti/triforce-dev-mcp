@@ -1,15 +1,23 @@
 # SearXNG Meta-Suchmaschine
 # Start: docker compose --env-file ../../.env up -d
 
+x-logging: &default_logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   searxng:
     image: ${SEARXNG_IMAGE:-searxng/searxng:latest}
     container_name: ${SEARXNG_CONTAINER_NAME:-ailinux-searxng}
+    logging: *default_logging
     restart: ${SEARXNG_RESTART_POLICY:-unless-stopped}
     ports:
       - "${SEARXNG_PORT:-8089}:8080"
     volumes:
       - ${SEARXNG_SETTINGS_PATH:-./settings.yml}:/etc/searxng/settings.yml:ro
+      - ./limiter.toml:/etc/searxng/limiter.toml:ro
       - ${SEARXNG_DATA_VOLUME:-searxng-data}:/etc/searxng
     environment:
       - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://localhost:8089/}
@@ -26,7 +34,7 @@ services:
     networks:
       - ${SEARXNG_NETWORK:-searxng-network}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "-qO-", "--header=X-Forwarded-For: 127.0.0.1", "--header=X-Real-IP: 127.0.0.1", "http://localhost:8080/healthz"]
       interval: ${SEARXNG_HEALTHCHECK_INTERVAL:-30s}
       timeout: ${SEARXNG_HEALTHCHECK_TIMEOUT:-10s}
       retries: ${SEARXNG_HEALTHCHECK_RETRIES:-3}

@@ -1,11 +1,18 @@
 # Docker Mailserver - Korrektes Mount ohne Symlink
+x-logging: &default_logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   mailserver:
-    image: ghcr.io/docker-mailserver/docker-mailserver:16.0.1
+    image: ${MAILSERVER_IMAGE:-ghcr.io/docker-mailserver/docker-mailserver:16.0.1}
     container_name: mailserver
-    hostname: mail
-    domainname: ailinux.me
-    restart: unless-stopped
+    logging: *default_logging
+    hostname: ${MAIL_HOSTNAME:-mail}
+    domainname: ${MAIL_DOMAIN:-ailinux.me}
+    restart: ${MAILSERVER_RESTART_POLICY:-unless-stopped}
     stop_grace_period: 1m
     ports:
       - "25:25"
@@ -37,7 +44,6 @@ services:
       - TZ=Europe/Berlin
     cap_add:
       - NET_ADMIN
-      - SYS_PTRACE
     networks:
       - mail-network
     healthcheck:

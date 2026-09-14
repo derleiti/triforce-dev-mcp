@@ -35,3 +35,9 @@ cd ~/ailinux-project/packaging
 # Dann nach repository/data/pool/ kopieren
 reprepro -b ./data includedeb noble ../packaging/*.deb
 ```
+
+## AILinux production policy
+
+The nginx repository service is the persistent runtime. `apt-mirror` is an explicit `mirror` Compose profile/batch job and is not started by normal stack startup. This prevents a repository restart from unexpectedly launching a full mirror operation.
+
+Use the canonical `config/triforce.env` and `scripts/docker/stack-control.sh` for normal service lifecycle operations. Run mirror maintenance through the repository update scripts/profile deliberately.

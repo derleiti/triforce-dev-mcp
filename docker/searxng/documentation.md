@@ -37,3 +37,7 @@ cd /home/zombie/workspace/triforce/docker/searxng
 docker compose --env-file ../../.env up -d
 docker compose logs -f searxng
 ```
+
+## Production update policy
+
+`SEARXNG_IMAGE` is pinned in the canonical `config/triforce.env`. Update the pin deliberately, validate Compose, restart only this stack, then verify `/healthz` and public search before accepting the update. Avoid unattended `latest` drift on the production instance.

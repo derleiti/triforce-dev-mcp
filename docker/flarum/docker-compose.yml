@@ -1,0 +1,117 @@
+# Flarum Community Forum
+# Start: docker compose --env-file ../../.env up -d
+
+x-logging: &default_logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  flarum:
+    image: ${FLARUM_IMAGE:-mondedie/flarum:latest}
+    container_name: ${FLARUM_CONTAINER_NAME:-flarum}
+    logging: *default_logging
+    depends_on:
+      flarum_db:
+        condition: service_healthy
+    ports:
+      - "${FLARUM_PORT:-9080}:8888"
+    environment:
+      - FORUM_URL=${FLARUM_URL:-https://forum.ailinux.me}
+      - DB_HOST=${FLARUM_DB_HOST:-flarum_db}
+      - DB_PORT=${FLARUM_DB_PORT:-3306}
+      - DB_NAME=${FLARUM_DB_NAME:-flarum}
+      - DB_USER=${FLARUM_DB_USER:-flarum}
+      - DB_PASS=${FLARUM_DB_PASSWORD}
+      - DB_PASSWORD=${FLARUM_DB_PASSWORD}
+      - DB_PREFIX=${FLARUM_DB_PREFIX:-}
+      - DB_PREF=${FLARUM_DB_PREFIX:-}
+      - DB_TIMEOUT=${FLARUM_DB_TIMEOUT:-60}
+      - UPLOAD_MAX_SIZE=${FLARUM_UPLOAD_MAX_SIZE:-50M}
+      - PHP_MEMORY_LIMIT=${FLARUM_PHP_MEMORY_LIMIT:-256M}
+      - OPCACHE_MEMORY_LIMIT=${FLARUM_OPCACHE_MEMORY:-128}
+      - LOG_TO_STDOUT=${FLARUM_LOG_STDOUT:-true}
+      - DEBUG=${FLARUM_DEBUG:-false}
+      - TZ=${TZ:-Europe/Berlin}
+      - FLARUM_ADMIN_USER=${FLARUM_ADMIN_USER:-admin}
+      - FLARUM_ADMIN_PASS=${FLARUM_ADMIN_PASSWORD}
+      - FLARUM_ADMIN_MAIL=${FLARUM_ADMIN_EMAIL:-admin@ailinux.me}
+      - FLARUM_TITLE=${FLARUM_TITLE:-AILinux Community Forum}
+    volumes:
+      - ${FLARUM_ASSETS_PATH:-./flarum/assets}:/flarum/app/public/assets:rw
+      - ${FLARUM_EXTENSIONS_PATH:-./flarum/extensions}:/flarum/app/extensions:rw
+      - ${FLARUM_STORAGE_PATH:-./flarum/storage}:/flarum/app/storage:rw
+    networks:
+      - ${FLARUM_NETWORK:-flarum-network}
+      - ${WP_NETWORK:-wordpress-network}
+    restart: ${FLARUM_RESTART_POLICY:-unless-stopped}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8888 || exit 1"]
+      interval: ${FLARUM_HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${FLARUM_HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${FLARUM_HEALTHCHECK_RETRIES:-3}
+      start_period: ${FLARUM_HEALTHCHECK_START:-60s}
+
+  flarum_db:
+    image: ${FLARUM_DB_IMAGE:-mariadb:11.8}
+    container_name: ${FLARUM_DB_CONTAINER_NAME:-flarum_db}
+    logging: *default_logging
+    environment:
+      - MYSQL_ROOT_PASSWORD=${FLARUM_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${FLARUM_DB_NAME:-flarum}
+      - MYSQL_USER=${FLARUM_DB_USER:-flarum}
+      - MYSQL_PASSWORD=${FLARUM_DB_PASSWORD}
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ${FLARUM_DB_DATA_PATH:-flarum_db_data}:/var/lib/mysql
+    networks:
+      - ${FLARUM_NETWORK:-flarum-network}
+    restart: ${FLARUM_RESTART_POLICY:-unless-stopped}
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-p${FLARUM_DB_ROOT_PASSWORD}"]
+      interval: ${FLARUM_DB_HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${FLARUM_DB_HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${FLARUM_DB_HEALTHCHECK_RETRIES:-3}
+      start_period: ${FLARUM_DB_HEALTHCHECK_START:-30s}
+
+  flarum_backup:
+    image: ${FLARUM_BACKUP_IMAGE:-mariadb:11.8}
+    container_name: ${FLARUM_BACKUP_CONTAINER_NAME:-flarum_backup}
+    logging: *default_logging
+    profiles:
+      - backup
+    depends_on:
+      flarum_db:
+        condition: service_healthy
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
+      - FLARUM_DB_ROOT_PASSWORD=${FLARUM_DB_ROOT_PASSWORD}
+      - FLARUM_DB_NAME=${FLARUM_DB_NAME:-flarum}
+      - BACKUP_RETENTION_DAYS=${FLARUM_BACKUP_RETENTION:-30}
+    volumes:
+      - ${FLARUM_BACKUP_PATH:-./backups}:/backups
+    networks:
+      - ${FLARUM_NETWORK:-flarum-network}
+    restart: ${FLARUM_RESTART_POLICY:-unless-stopped}
+    entrypoint: |
+      bash -c '
+        while true; do
+          TIMESTAMP=$$(date +%Y%m%d_%H%M%S)
+          mariadb-dump -h flarum_db -u root -p$${FLARUM_DB_ROOT_PASSWORD} $${FLARUM_DB_NAME} | gzip > /backups/flarum-$$TIMESTAMP.sql.gz
+          find /backups -name "flarum-*.sql.gz" -mtime +$${BACKUP_RETENTION_DAYS} -delete
+          sleep 86400
+        done
+      '
+
+networks:
+  flarum-network:
+    name: ${FLARUM_NETWORK:-flarum-network}
+    driver: ${FLARUM_NETWORK_DRIVER:-bridge}
+  wordpress-network:
+    external: true
+    name: ${WP_NETWORK:-wordpress-network}
+
+volumes:
+  flarum_db_data:
+    name: ${FLARUM_DB_VOLUME_NAME:-flarum_db_data}

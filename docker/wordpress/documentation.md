@@ -1,52 +1,34 @@
-# WordPress Stack Documentation
+# WordPress production stack
 
-## Compose File
-- `docker/wordpress/docker-compose.yml`
+## Architecture
 
-## Services
-- `apache` (`httpd:2.4-alpine`)
-- `wordpress_fpm` (`wordpress:6.8.1-php8.3-fpm-alpine`)
-- `wordpress_db` (`mariadb:11`)
-- `wordpress_redis` (`redis:alpine`)
-- `wpcli` (`wordpress:cli`, profile `tools`)
+Apache terminates HTTP/TLS and proxies PHP to WordPress PHP-FPM. MariaDB stores durable application data and Redis is used as an object cache. The webroot is bind-mounted so the deployed site remains explicit and inspectable.
 
-## Purpose
-- Main website runtime (Apache + PHP-FPM + MariaDB + Redis cache).
+## Canonical settings
 
-## Networks
-- `${WP_NETWORK:-wordpress-network}` (local bridge)
+Runtime values come from `../../config/triforce.env`. Important keys include `WP_FPM_IMAGE`, `WP_DB_IMAGE`, `WP_REDIS_IMAGE`, `WORDPRESS_DB_*`, `WP_REDIS_PASSWORD`, `WP_DISALLOW_FILE_EDIT`, `WP_FORCE_SSL_ADMIN`, and `WP_ENVIRONMENT_TYPE`.
 
-## Ports
-- HTTP: `${WP_HTTP_PORT:-80}`
-- HTTPS: `${WP_HTTPS_PORT:-443}`
+The persisted `wp-config.php` uses the official Docker `getenv_docker()` pattern. Database credentials and AILinux production flags therefore come from environment variables instead of duplicated literal configuration.
 
-## Core Volumes
-- `./html -> /var/www/html`
-- `./apache/*` config mounts
-- `./php/custom.ini`, `./php/www.conf`
-- `./mysql/custom.cnf`
-- `./redis/redis-optimized.conf`
-- named volumes: `wp_db_data`, `wp_redis_data`
+## Performance policy
 
-## Key Settings
-- DB connection via `WORDPRESS_DB_*`
-- Redis via `WORDPRESS_REDIS_*` and optional `WP_REDIS_PASSWORD`
-- TLS certs from `/etc/letsencrypt` (read-only)
+- One PHP tuning file: `php/custom.ini`.
+- One OPCache profile: `php/opcache-boost.ini`.
+- One FPM pool: `php/www.conf`.
+- One MariaDB tuning file: `mysql/custom.cnf`.
+- Redis cache: `redis/redis-optimized.conf` with bounded memory and RDB persistence.
+- PHP JIT is disabled: WordPress benefits more from predictable OPCache behavior than JIT complexity.
 
-## Healthchecks
-- Apache config test (`httpd -t`)
-- FPM config validation (`php-fpm --test`)
-- MariaDB ping
-- Redis `PING` (with password when set)
+Historical `www-optimized.conf`, `zz-ailinux-opcache.ini`, and the unused nested MariaDB performance file were retired to prevent conflicting effective settings.
 
-## Typical Commands
+## Operations
+
 ```bash
-cd /home/zombie/workspace/triforce/docker/wordpress
-docker compose --env-file ../../.env up -d
-docker compose ps
-docker compose logs -f apache wordpress_fpm
+cd /home/zombie/workspace/triforce
+scripts/docker/stack-control.sh config wordpress
+scripts/docker/stack-control.sh restart wordpress
+scripts/docker/stack-control.sh status wordpress
+scripts/docker/stack-control.sh logs wordpress
 ```
 
-## Operational Notes
-- Keep `WORDPRESS_DB_PASSWORD` and `MYSQL_ROOT_PASSWORD` in `.env`, never in git.
-- `wpcli` is for maintenance tasks, not a persistent runtime service.
+For WP-CLI use the `tools` profile only when needed. Never delete `wp_db_data` during routine maintenance.

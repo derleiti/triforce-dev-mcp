@@ -264,3 +264,23 @@ android_workspace/**/build/
 !tests/test_tool_result_logging.py
 
 !tests/test_slack_notifications.py
+docker/wordpress/.cf_token
+docker/wordpress/.cf_token.DISABLED
+
+# Docker stack source manifests/docs are versioned; runtime state stays local.
+!docker/flarum/
+docker/flarum/*
+!docker/flarum/docker-compose.yml
+!docker/flarum/README.md
+
+!docker/mailserver/
+docker/mailserver/*
+!docker/mailserver/docker-compose.yml
+!docker/mailserver/documentation.md
+!docker/mailserver/setup.sh
+!docker/mailserver/config/
+docker/mailserver/config/*
+!docker/mailserver/config/dovecot-quotas.cf
+!docker/mailserver/config/postfix-virtual.cf
+docker/mailserver/config/postfix-accounts.cf
+docker/mailserver/config/opendkim/

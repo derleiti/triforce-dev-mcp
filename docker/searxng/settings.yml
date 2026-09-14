@@ -1,5 +1,10 @@
 # SearXNG Settings for AILinux - Fixed
-use_default_settings: true
+use_default_settings:
+  engines:
+    remove:
+      - torch
+      - ahmia
+      - wikidata
 
 general:
   debug: false
@@ -14,7 +19,7 @@ search:
     - json
 
 server:
-  secret_key: "ailinux-searxng-secret-key-2024"
+  secret_key: "change-me-via-SEARXNG_SECRET"
   limiter: false
   image_proxy: true
   method: "POST"
@@ -74,10 +79,3 @@ engines:
     engine: arxiv
     shortcut: arx
     disabled: false
-    
-  # Torch/Ahmia deaktiviert (Darkweb, instabil)
-  - name: torch
-    disabled: true
-    
-  - name: ahmia
-    disabled: true
