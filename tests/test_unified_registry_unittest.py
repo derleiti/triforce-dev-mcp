@@ -65,6 +65,13 @@ class TestCanonicalMcpSurface(unittest.TestCase):
         # alias deliberately.
         self.assertFalse(names & retired, names & retired)
 
+class TestCoreDeviceDiscovery(unittest.TestCase):
+    def test_core_keeps_global_vision_and_input_schemas_discoverable(self):
+        from app.mcp.tool_registry_unified import get_canonical_all_tools, filter_tools_for_profile
+        names = {tool["name"] for tool in filter_tools_for_profile(get_canonical_all_tools(), "core")}
+        self.assertTrue({"computer_observe", "computer_screenshot", "computer_input"} <= names)
+
+
 class TestCanonicalMcpCompatibilityDelegates(unittest.TestCase):
     def test_service_tools_list_matches_route_exactly(self):
         import asyncio

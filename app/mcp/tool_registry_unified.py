@@ -211,8 +211,11 @@ CORE_TOOL_NAMES = frozenset({
     "shell", "status", "service_control", "container_control", "hot_reload",
     "log_viewer", "mcp_analytics", "config", "config_set",
     "file_ops", "code_search", "code_edit", "code_tree", "git",
-    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast",
-    "agent_start", "agent_stop", "search", "crawl", "ollama_status",
+    # Keep native vision/control discoverable even before pairing. Authority is
+    # still enforced by the workspace lease, advertised capability and share grant.
+    "computer_observe", "computer_screenshot", "computer_input",
+    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast", "agent_start",
+    "search", "crawl",
     "mesh_status", "mesh_task", "remote_hosts", "remote_task",
     "memory_store", "memory_search", "memory_history", "prompts", "prompt_set",
     "notify_list", "notify_send", "group_chat_create", "group_chat_ask",
