@@ -551,7 +551,7 @@ async def download_ailinux_helper(platform: str):
         "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.19-linux-x86_64.AppImage", "application/vnd.appimage"),
         "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.19-linux-amd64.deb", "application/vnd.debian.binary-package"),
         "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.19-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.16-mac-arm64.dmg", "application/x-apple-diskimage"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.19-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
     spec = artifacts.get(platform)
     if not spec:
@@ -559,7 +559,7 @@ async def download_ailinux_helper(platform: str):
     source_name, download_name, media_type = spec
     artifact = release_root / source_name
     if not artifact.is_file():
-        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.16", "repository": "ailinux-helper"})
+        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.19", "repository": "ailinux-helper"})
     return FileResponse(artifact, filename=download_name, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
@@ -570,7 +570,7 @@ async def download_desktop_workspace_helper(platform: str) -> Response:
         "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.19-linux-x86_64.AppImage", "application/vnd.appimage"),
         "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.19-linux-amd64.deb", "application/vnd.debian.binary-package"),
         "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.19-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.16-mac-arm64.dmg", "application/x-apple-diskimage"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.19-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
     item = artifacts.get(platform.lower())
     if not item:
