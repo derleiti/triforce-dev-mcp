@@ -112,6 +112,8 @@ PORTABLE_DEVICE_TOOLS = [
                 "text": {"type": "string", "maxLength": 65536},
                 "keys": {"type": "array", "items": {"type": "string"}, "maxItems": 16},
                 "target_id": {"type": "string", "maxLength": 256, "description": "Stable target identifier from the latest native vision/accessibility scene."},
+                "observe_after": {"type": "boolean", "default": false, "description": "Ask the native Helper to return a fresh accessibility scene with the input result, avoiding a second round trip after UI-changing actions."},
+                "observe_wait_ms": {"type": "integer", "minimum": 0, "maximum": 500, "default": 180, "description": "Maximum bounded wait for accessibility events to settle before observe_after returns the scene."},
                 **_CTX,
             },
             "required": ["action"],
