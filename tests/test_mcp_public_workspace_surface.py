@@ -76,8 +76,10 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     # Share fabric: a resume no longer requires a workspace. A native-only
     # capability share (clipboard/display/compute) must resume as well.
     assert 'manualDisconnect||(!resumeToken&&!pairCode)||!navigator.onLine' in html
-    assert 'const nativeTools=await nativeHelperTools();' in html
+    assert 'const nativeTools=await effectiveHelperTools();' in html
     assert 'if(!rootHandle&&!rootEntry&&!nativeTools.length)return;' in html
+    assert 'function browserHelperTools()' in html
+    assert 'function effectiveHelperTools()' in html
     assert "capabilities=[...(rootHandle||rootEntry?READ_TOOLS:[]),...(workspaceMode==='write'&&rootHandle?WRITE_TOOLS:[]),...nativeTools];renderShareSummary();" in html
     assert "pairing code|workspace credential|resume token" in html
     assert "sessionStorage.removeItem('tf_pair_code')" in html
@@ -226,6 +228,35 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "resume_token" in html
     assert "resumeToken" in html
 
+
+
+def test_browser_helper_uses_runtime_capabilities_when_the_browser_exposes_them():
+    from app.routes.mcp import _workspace_setup_html
+    html = _workspace_setup_html()
+    assert "navigator.mediaDevices.getDisplayMedia" in html
+    assert "browserHelperTools()" in html
+    assert "function browserHelperTools(){if(nativeHelper)return []" in html
+    assert "browserClipboardRead()" in html
+    assert "browserClipboardWrite" in html
+    assert "browserDeviceInfo()" in html
+    assert "source:'browser-getDisplayMedia'" in html
+    assert "source:'browser-clipboard'" in html
+    assert "effectiveShareProfile()" in html
+    assert "display:{observe:s.display&&webShareProfile.screenObserve===true,control:false}" in html
+    assert "device:{observe:s.deviceInfo&&webShareProfile.resourceAdvertise===true,control:false}" in html
+    assert "OS input injection is not exposed by this browser" in html
+
+
+def test_browser_python_runtime_is_isolated_and_does_not_impersonate_docker_compute():
+    from app.routes.mcp import _workspace_setup_html
+    html = _workspace_setup_html()
+    assert 'id="webRuntimePanel"' in html
+    assert 'Pyodide 314.0.6' in html
+    assert "new Worker(url)" in html
+    assert "cdn.jsdelivr.net/pyodide/v314.0.6/full/" in html
+    assert "runPythonAsync" in html
+    assert "native Docker compute bridge unavailable; browser Python is a separate local worker runtime" in html
+    assert "compute:{advertise:false,available:false,runtime:'browser-worker'}" in html
 
 def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
     from app.routes.mcp import _workspace_setup_html
