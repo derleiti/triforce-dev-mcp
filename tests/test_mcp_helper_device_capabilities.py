@@ -27,5 +27,7 @@ def test_global_computer_input_schema_covers_desktop_and_android_actions():
     actions = set(schema["properties"]["action"]["enum"])
     assert {"click", "double_click", "move", "scroll", "type", "key"} <= actions
     assert {"tap", "long_press", "swipe", "back", "home", "recents", "notifications"} <= actions
-    assert {"x2", "y2", "duration_ms"} <= set(schema["properties"])
+    assert {"x2", "y2", "duration_ms", "observe_after", "observe_wait_ms"} <= set(schema["properties"])
+    assert schema["properties"]["observe_after"]["default"] is False
+    assert schema["properties"]["observe_wait_ms"]["maximum"] == 500
     assert schemas["aihelper_input"]["annotations"]["readOnlyHint"] is False
