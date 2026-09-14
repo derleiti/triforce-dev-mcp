@@ -110,7 +110,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
-    assert 'AILinux Helper 2.90.16' in html
+    assert 'AILinux Helper 2.90.19' in html
     assert 'id="terminalBackend"' in html
     assert 'native.setShellBackend' in html
     assert "$('terminalBackend').onchange" in html
@@ -159,7 +159,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
     assert '/v1/mcp/helper/android' in html
-    assert '/v1/mcp/helper/icon.png?v=29016' in html
+    assert '/v1/mcp/helper/icon.png?v=29019' in html
     assert '/v1/mcp/helper/linux-appimage' in html
     assert '/v1/mcp/helper/linux-deb' in html
     assert '/v1/mcp/helper/windows' in html
@@ -208,7 +208,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.16-browser'" in html
+    assert "EXECUTOR_VERSION='2.90.19-browser'" in html
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -245,8 +245,8 @@ def test_mobile_workspace_install_surface_and_pwa_contract():
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=29016' in html
-    assert "/v1/mcp/sw.js?v=29016" in html
+    assert '/v1/mcp/manifest.webmanifest?v=29019' in html
+    assert "/v1/mcp/sw.js?v=29019" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
     assert 'native foreground executor' in html
@@ -261,9 +261,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     assert manifest['start_url'] == '/v1/mcp'
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v29016" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.16')" in worker.body
-    assert b'ailinux-helper-v29016' in worker.body
+    assert b"ailinux-helper-v29019" in worker.body
+    assert b"caches.match('/v1/mcp?app=2.90.19')" in worker.body
+    assert b'ailinux-helper-v29019' in worker.body
     assert b'caches.delete' in worker.body
 
 
@@ -272,9 +272,9 @@ def test_helper_surface_is_unified_and_branded():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
     assert '<h1>AILinux Helper</h1>' in html
-    assert 'AILinux Helper 2.90.16' in html
+    assert 'AILinux Helper 2.90.19' in html
     assert 'Mobile Workspace' not in html
-    assert '/v1/mcp/helper/icon.png?v=29016' in html
+    assert '/v1/mcp/helper/icon.png?v=29019' in html
 
 
 @pytest.mark.asyncio
@@ -297,7 +297,9 @@ async def test_paired_read_only_discovery_intersects_capabilities_and_grants(mon
     assert by_name['computer_observe']['x_execution'] == 'local_workspace'
     # Announced capability alone cannot bypass the read-only workspace grant.
     assert 'file_edit' not in names
-    assert {'computer_screenshot', 'clipboard_read', 'shell'}.isdisjoint(names)
+    assert {'clipboard_read', 'shell'}.isdisjoint(names)
+    assert 'computer_screenshot' in names
+    assert by_name['computer_screenshot']['x_requires_workspace'] is True
 
 
 @pytest.mark.asyncio
@@ -367,15 +369,15 @@ async def test_pair_ticket_returns_no_store_qr_for_exact_one_time_code():
     assert response.headers["pragma"] == "no-cache"
 
 
-def test_linux_helper_download_metadata_tracks_published_29016_build():
+def test_linux_helper_download_metadata_tracks_published_29019_build():
     import inspect
     from app.routes.mcp import download_ailinux_helper, download_desktop_workspace_helper
 
     public_source = inspect.getsource(download_ailinux_helper)
     desktop_source = inspect.getsource(download_desktop_workspace_helper)
     for source in (public_source, desktop_source):
-        assert "AILinux-Helper-2.90.16-linux-x86_64.AppImage" in source
-        assert "AILinux-Helper-2.90.16-linux-amd64.deb" in source
+        assert "AILinux-Helper-2.90.19-linux-x86_64.AppImage" in source
+        assert "AILinux-Helper-2.90.19-linux-amd64.deb" in source
 
 
 def test_public_tools_list_semantic_inventory_never_reexpands_to_full_catalog():
@@ -439,3 +441,30 @@ def test_authenticated_bridge_discovers_workspace_schemas_before_pairing_without
         {"workspace_context": "unpaired-chat", "path": "probe.txt", "operation": "create", "content": "x"},
     ))
     assert denied["structuredContent"]["code"] == "WORKSPACE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_paired_device_schema_stays_discoverable_when_runtime_capability_temporarily_drops(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+
+    binding = {
+        'mode': 'write',
+        'capabilities': ['app_ops', 'computer_input'],
+        'connection': None,
+    }
+    monkeypatch.setattr(bridge, 'get_workspace_lease', lambda session_id: binding)
+
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'paired-device'))
+    by_name = {tool['name']: tool for tool in result['tools']}
+
+    # Runtime-sensitive schemas must remain stable even when Android temporarily
+    # drops screen capture/accessibility capabilities. Execution still enforces
+    # the live capability/grant later in call_public_local_tool().
+    for name in {
+        'app_ops', 'computer_input', 'computer_observe', 'computer_screenshot',
+        'vision_start', 'vision_status', 'vision_observe', 'vision_stop',
+    }:
+        assert name in by_name
+        assert by_name[name]['x_execution'] == 'local_workspace'
+        if name not in {'app_ops', 'computer_input'}:
+            assert by_name[name]['x_requires_workspace'] is True

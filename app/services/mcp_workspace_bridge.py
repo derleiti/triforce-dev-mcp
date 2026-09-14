@@ -241,7 +241,14 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
                 continue
             locked_local = name in LOCAL_TOOL_NAMES and not _local_tool_visible(name, binding)
-            if locked_local and not (binding is None and name in DISCOVERABLE_LOCKED_LOCAL_TOOLS):
+            # Keep selected device/vision schemas stable across the full lease lifecycle.
+            # ChatGPT and other MCP clients may cache tools/list before or during pairing;
+            # hiding a tool when Android temporarily drops a runtime capability (for
+            # example MediaProjection after a process restart) leaves the client with a
+            # stale schema until a new connector session is created.  Discovery is not
+            # authority: execution below still requires the live advertised capability
+            # plus the matching share-manifest grant.
+            if locked_local and name not in DISCOVERABLE_LOCKED_LOCAL_TOOLS:
                 continue
             cloned = deepcopy(tool)
             execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
