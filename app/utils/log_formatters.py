@@ -98,6 +98,10 @@ def redact_sensitive(value: Any) -> str:
 
 _PRIVATE_LOG_KEYS = {
     "workspace_context",
+    "openai/organization",
+    "openai/session",
+    "openai/subject",
+    "openai/userlocation",
 }
 
 

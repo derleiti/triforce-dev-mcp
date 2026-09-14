@@ -116,6 +116,14 @@ def test_structured_log_sanitizer_recurses_and_hides_workspace_context():
             "Authorization": "Bearer nested-secret",
             "items": [{"api_key": "nested-api-secret", "keep": "visible"}],
         },
+        "_meta": {
+            "openai/userAgent": "ChatGPT/test",
+            "openai/locale": "de-DE",
+            "openai/subject": "private-subject",
+            "openai/session": "private-session",
+            "openai/organization": "private-org",
+            "openai/userLocation": {"latitude": 49.0, "longitude": 12.0},
+        },
     }
     safe = sanitize_log_data(source)
 
@@ -125,6 +133,12 @@ def test_structured_log_sanitizer_recurses_and_hides_workspace_context():
     assert safe["nested"]["Authorization"] == "[REDACTED]"
     assert safe["nested"]["items"][0]["api_key"] == "[REDACTED]"
     assert safe["nested"]["items"][0]["keep"] == "visible"
+    assert safe["_meta"]["openai/userAgent"] == "ChatGPT/test"
+    assert safe["_meta"]["openai/locale"] == "de-DE"
+    assert safe["_meta"]["openai/subject"] == "[REDACTED]"
+    assert safe["_meta"]["openai/session"] == "[REDACTED]"
+    assert safe["_meta"]["openai/organization"] == "[REDACTED]"
+    assert safe["_meta"]["openai/userLocation"] == "[REDACTED]"
     assert source["workspace_token"] == "workspace-token-must-not-leak"
 
 
