@@ -166,6 +166,7 @@ def test_same_pairing_id_reconnects_same_session_after_suspend():
     second = DummyConnection('mobile-2')
     resumed = sessions.reconnect_web_workspace(code, second, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
     assert resumed['session_id'] == 'session-A'
+    assert resumed['resume_token']
     bound = sessions.get_workspace('session-A')
     assert bound is not None
     assert bound['client_id'] == 'mobile-2'

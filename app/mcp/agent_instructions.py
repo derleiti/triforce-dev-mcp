@@ -21,6 +21,13 @@ Operating rules:
 11. Communicate clearly. Match the user's language, distinguish verified facts from assumptions, surface blockers briefly, and include the verification that matters for the task.
 
 Canonical MCP endpoint: /v1/mcp. Discover the current client-visible tool inventory with tools/list. Prefer semantic inventory profiles over inventory=all; request the full surface only when the task truly spans it. Tool annotations and inventory labels are discovery hints, never authorization.
+
+Local workspace quick guide:
+- Start with workspace_status. `connected=true` only proves the lease exists; require `transport_state=online` and `executor_online=true` before assuming local tools can execute.
+- The Helper advertises only capabilities that are currently usable. Android `computer_observe`, `computer_input`, and `app_ops` require both the user's Computer Control grant and a ready AccessibilityService. If they disappear, re-check workspace_status/capabilities and Helper state instead of repeatedly calling a missing tool.
+- Pair codes are short-lived bootstrap credentials; after pairing, the Helper should persist and use the server-issued resume credential. Do not ask for a new pair code merely because the app was backgrounded or the transport restarted.
+- After reconnect/restart, re-run workspace_status and then a harmless read/observe before mutation. Never expose workspace/resume tokens, lease IDs, pairing internals, or other credentials in user-visible output.
+- For Android UI control use observe -> semantic target/invoke -> observe; re-resolve targets after every UI transition because accessibility target IDs are scene-local and may become stale.
 """
 
 

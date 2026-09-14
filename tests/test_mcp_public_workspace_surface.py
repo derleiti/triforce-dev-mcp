@@ -231,7 +231,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.26-browser'" in html
+    assert "EXECUTOR_VERSION='2.90.29-browser'" in html
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -316,8 +316,8 @@ def test_mobile_workspace_install_surface_and_pwa_contract():
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=29026' in html
-    assert "/v1/mcp/sw.js?v=29026" in html
+    assert '/v1/mcp/manifest.webmanifest?v=29029' in html
+    assert "/v1/mcp/sw.js?v=29029" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
     assert 'native APK selected for foreground workspace' in html
@@ -332,9 +332,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     assert manifest['start_url'] == '/v1/mcp'
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v29026" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.26')" in worker.body
-    assert b'ailinux-helper-v29026' in worker.body
+    assert b"ailinux-helper-v29029" in worker.body
+    assert b"caches.match('/v1/mcp?app=2.90.29')" in worker.body
+    assert b'ailinux-helper-v29029' in worker.body
     assert b'caches.delete' in worker.body
 
 
@@ -585,6 +585,10 @@ def test_shared_reflection_protocol_reaches_mcp_and_tristar_model_init():
         assert 'PASS 2 — DIVERGE + CHALLENGE' in prompt
         assert 'REALITY GATE' in prompt
         assert 'What would prove me wrong?' in prompt
+    assert 'transport_state=online' in mcp_prompt
+    assert 'AccessibilityService' in mcp_prompt
+    assert 'Pair codes are short-lived bootstrap credentials' in mcp_prompt
+    assert 'observe -> semantic target/invoke -> observe' in mcp_prompt
 
 
 @pytest.mark.asyncio

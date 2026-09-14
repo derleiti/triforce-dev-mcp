@@ -819,6 +819,7 @@ def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str 
     lease_id = str(item.get("lease_id") or uuid.uuid4().hex)
     item["lease_id"] = lease_id
     _persist_lease(item)
+    resume_token = str(item.get("resume_token") or "")
     primary = str(item.get("paired_session_id") or next(iter(aliases)))
     result = None
     for alias in sorted(aliases):
@@ -828,10 +829,14 @@ def reconnect_web_workspace(code: str, connection: Any, *, mode: str, task: str 
         )
         if alias == primary:
             result = bound
-    return result or bind_workspace(
-        primary, connection, mode=normalized_mode, task=task, capabilities=capabilities,
-        reconnect_pair_key=key, lease_id=lease_id,
-    )
+    if result is None:
+        result = bind_workspace(
+            primary, connection, mode=normalized_mode, task=task, capabilities=capabilities,
+            reconnect_pair_key=key, lease_id=lease_id,
+        )
+    if resume_token:
+        result["resume_token"] = resume_token
+    return result
 
 
 def get_or_create_pair_code(session_id: str) -> str:
