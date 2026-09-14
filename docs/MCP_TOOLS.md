@@ -323,3 +323,13 @@ The dedicated `triforce-sandbox-egress` network uses an isolated subnet and fail
 ### Restart-safe workspace pairing
 
 Web-first pair tickets are persisted in Redis **by SHA-256 hash only** for their short TTL. The raw pairing code is never persisted. This lets an Android/Helper executor reconnect after a TriForce restart or worker handoff without turning a still-valid code into `WORKSPACE_PAIR_FAILED`. Once a durable workspace lease exists, the ordinary lease/resume indexes replace the temporary pair-ticket record.
+
+### Global native vision and computer control
+
+Paired AILinux Helper nodes expose the same AI-facing control vocabulary across supported native platforms:
+
+- `computer_observe` / `computer_screenshot` for explicit screen sharing,
+- `computer_input` for bounded pointer, keyboard, gesture and navigation actions,
+- `window_ops` / `app_ops` where the native platform adapter supports them.
+
+Desktop Helpers use typed Linux/Windows/macOS adapters. Android uses MediaProjection for vision and an Android AccessibilityService for `tap`, `long_press`, `swipe`, focused-field `type`, `back`, `home`, `recents`, and `notifications`. No unrestricted device shell is used as an input fallback. These capabilities are absent until the user enables the corresponding local Helper grant; Android additionally advertises `computer_input` only while its Accessibility service is actually ready. Public/unpaired MCP sessions never receive execution access to these device-control capabilities.

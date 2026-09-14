@@ -95,13 +95,16 @@ PORTABLE_DEVICE_TOOLS = [
     },
     {
         "name": "computer_input",
-        "description": "Send bounded keyboard, pointer or scroll input to the paired desktop only when the user explicitly enabled computer control. Use computer_observe before and after actions to verify state.",
+        "description": "Send bounded keyboard, pointer, gesture or navigation input to the paired native device only when the user explicitly enabled computer control. Supports desktop mouse/keyboard adapters and Android Accessibility control. Use computer_observe/computer_screenshot before and after actions to verify state.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["click", "double_click", "move", "scroll", "type", "key"]},
+                "action": {"type": "string", "enum": ["click", "double_click", "move", "scroll", "type", "key", "tap", "long_press", "swipe", "back", "home", "recents", "notifications"]},
                 "x": {"type": "integer"},
                 "y": {"type": "integer"},
+                "x2": {"type": "integer", "description": "Android swipe destination X."},
+                "y2": {"type": "integer", "description": "Android swipe destination Y."},
+                "duration_ms": {"type": "integer", "minimum": 40, "maximum": 3000},
                 "button": {"type": "string", "enum": ["left", "middle", "right"], "default": "left"},
                 "delta_x": {"type": "integer", "minimum": -10000, "maximum": 10000, "default": 0},
                 "delta_y": {"type": "integer", "minimum": -10000, "maximum": 10000, "default": 0},

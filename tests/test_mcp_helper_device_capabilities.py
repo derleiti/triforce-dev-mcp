@@ -19,3 +19,13 @@ def test_device_consent_is_separate_from_workspace_write_mode():
     assert "clipboard_write" in bridge.DEVICE_WRITE_TOOLS
     assert "clipboard_write" not in bridge.BROWSER_WRITE_TOOLS
     assert bridge.workspace_tool_requires_write("clipboard_write", {"text": "x"}) is False
+
+
+def test_global_computer_input_schema_covers_desktop_and_android_actions():
+    schemas = {item["name"]: item for item in bridge._workspace_contract_base_tools()}
+    schema = schemas["computer_input"]["inputSchema"]
+    actions = set(schema["properties"]["action"]["enum"])
+    assert {"click", "double_click", "move", "scroll", "type", "key"} <= actions
+    assert {"tap", "long_press", "swipe", "back", "home", "recents", "notifications"} <= actions
+    assert {"x2", "y2", "duration_ms"} <= set(schema["properties"])
+    assert schemas["computer_input"]["annotations"]["readOnlyHint"] is False

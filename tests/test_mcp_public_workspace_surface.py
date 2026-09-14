@@ -424,7 +424,7 @@ def test_authenticated_bridge_discovers_workspace_schemas_before_pairing_without
     )
     payload = asyncio.run(handle_tools_list({}, request=request))
     by_name = {tool["name"]: tool for tool in payload["tools"]}
-    for name in ("workspace_status", "file_read", "file_edit", "code_edit", "workspace_clear", "compute_execute", "computer_screenshot"):
+    for name in ("workspace_status", "file_read", "file_edit", "code_edit", "workspace_clear", "compute_execute", "computer_observe", "computer_screenshot", "computer_input"):
         assert name in by_name
     assert by_name["file_edit"]["x_requires_workspace"] is True
 
