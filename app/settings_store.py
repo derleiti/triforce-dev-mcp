@@ -34,23 +34,88 @@ MASKED_SECRET_VALUE = "••••••••"
 
 # Explicit classification: never infer secrecy from a field name at runtime.
 SECRET_ENV_KEYS = frozenset({
-    "AILINUX_WEBHOOK_SECRET", "ANTHROPIC_API_KEY", "CHATGPT_PASS",
-    "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ZONE_API_TOKEN", "CODESTRAL_API_KEY", "FEDERATION_SECRET",
-    "FIREWORKS_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "GOOGLE_API_KEY",
-    "GOOGLE_AI_STUDIO_KEY", "GOOGLE_GEMINI_KEY", "GOOGLE_PASS",
-    "GPT_OSS_API_KEY", "GROQ_API_KEY", "HUGGINGFACE_API_KEY", "INTERNAL_API_KEY",
-    "JINA_API_KEY", "JWT_SECRET", "LEMONSQUEEZY_WEBHOOK_SECRET",
-    "MAIL_IMAP_PASS", "MAIL_SMTP_PASS", "MCP_INTERNAL_PROFILE_VALUE",
-    "MCP_OAUTH_PASS", "MISTRAL_API_KEY", "N8N_MCP_TOKEN", "NOVA_AI_INTERNAL_KEY",
-    "NOVA_CHATGPT_PASS", "NOVA_CLAUDE_PASS", "NOVA_GOOGLE_PASS", "NOVA_MISTRAL_PASS",
-    "OLLAMA_BEARER_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
-    "STABLE_DIFFUSION_API_KEY", "STABLE_DIFFUSION_PASSWORD", "TOGETHER_API_KEY",
-    "TRIFORCE_ADMIN_SECRET", "TRISTAR_GUI_PASSWORD", "USER_MASTER_KEY",
-    "WEBHOOK_SECRET", "WORDPRESS_PASSWORD",
+    # TriForce / authentication
+    "ADMIN_PASSWORD", "AILINUX_WEBHOOK_SECRET", "CHATGPT_PASS", "FEDERATION_SECRET",
+    "FEDERATION_TOKEN", "INTERNAL_API_KEY", "JWT_SECRET", "MCP_API_KEY",
+    "MCP_BASIC_BASE64_KEY", "MCP_INTERNAL_PROFILE_VALUE", "MCP_OAUTH_PASS",
+    "TRIFORCE_ADMIN_SECRET", "TRISTAR_GUI_PASSWORD", "USER_MASTER_KEY", "WEBHOOK_SECRET",
+
+    # External providers / integrations
+    "ANTHROPIC_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ZONE_API_TOKEN",
+    "CODESTRAL_API_KEY", "FAL_API_KEY", "FIREWORKS_API_KEY", "GEMINI_API_KEY",
+    "GITHUB_PAT_TOKEN", "GITHUB_TOKEN", "GOOGLE_API_KEY", "GOOGLE_AI_STUDIO_KEY",
+    "GOOGLE_GEMINI_KEY", "GOOGLE_PASS", "GPT_OSS_API_KEY", "GROQ_API_KEY",
+    "HUGGINGFACE_API_KEY", "JINA_API_KEY", "KIMI_API_KEY", "LINEAR_API_KEY",
+    "MISTRAL_API_KEY", "MIXTRAL_API_KEY", "OLLAMA_BEARER_TOKEN", "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY", "REPLICATE_API_KEY", "STABLE_DIFFUSION_API_KEY",
+    "STABLE_DIFFUSION_PASSWORD", "TOGETHER_API_KEY",
+
+    # Commerce / webhooks. Keep Lemon Squeezy and NOVA-LS explicitly protected.
+    "LEMONSQUEEZY_API_KEY", "LEMONSQUEEZY_WEBHOOK_SECRET", "LEMONSQUEZZY_API_KEY_TEST",
+    "NOVA_AI_INTERNAL_KEY", "NOVA_LS_API_KEY", "NOVA_LS_WEBHOOK_SECRET",
+
+    # Mail / automation
+    "MAIL_IMAP_PASS", "MAIL_SMTP_PASS", "N8N_BASIC_AUTH_PASSWORD",
+    "N8N_ENCRYPTION_KEY", "N8N_MCP_TOKEN",
+
+    # WordPress / Redis / Flarum / SearXNG production runtime
+    "WORDPRESS_PASSWORD", "WORDPRESS_APP_PASSWORD", "WORDPRESS_DB_PASSWORD",
+    "MYSQL_ROOT_PASSWORD", "WP_REDIS_PASSWORD", "FLARUM_ADMIN_PASSWORD",
+    "FLARUM_DB_PASSWORD", "FLARUM_DB_ROOT_PASSWORD", "SEARXNG_SECRET", "SEARXNG_SECRET_KEY",
+
+    # Legacy Docker blueprint aliases retained for migration compatibility.
     "DOCKER_WORDPRESS_DB_PASSWORD", "DOCKER_WORDPRESS_DB_ROOT_PASSWORD",
-    "DOCKER_FLARUM_DB_PASSWORD", "DOCKER_FLARUM_DB_ROOT_PASSWORD",
-    "DOCKER_SEARXNG_SECRET",
+    "DOCKER_FLARUM_DB_PASSWORD", "DOCKER_FLARUM_DB_ROOT_PASSWORD", "DOCKER_SEARXNG_SECRET",
+
+    # Agent login credentials
+    "NOVA_CHATGPT_PASS", "NOVA_CLAUDE_PASS", "NOVA_GOOGLE_PASS", "NOVA_MISTRAL_PASS",
 })
+
+
+# Legacy Docker blueprint settings are kept for API/package compatibility, while
+# the production split stacks use the service-specific variables below. The
+# replacement map lets the Control Center explain the migration instead of
+# silently presenting two competing settings contracts.
+LEGACY_REPLACEMENTS: dict[str, str] = {
+    "DOCKER_WORDPRESS_IMAGE": "WP_FPM_IMAGE",
+    "DOCKER_WORDPRESS_CONTAINER": "WP_FPM_CONTAINER_NAME",
+    "DOCKER_WORDPRESS_DB_IMAGE": "WP_DB_IMAGE",
+    "DOCKER_WORDPRESS_DB_CONTAINER": "WP_DB_CONTAINER_NAME",
+    "DOCKER_WORDPRESS_DB_NAME": "WORDPRESS_DB_NAME",
+    "DOCKER_WORDPRESS_DB_USER": "WORDPRESS_DB_USER",
+    "DOCKER_WORDPRESS_DB_PASSWORD": "WORDPRESS_DB_PASSWORD",
+    "DOCKER_WORDPRESS_DB_ROOT_PASSWORD": "MYSQL_ROOT_PASSWORD",
+    "DOCKER_FLARUM_IMAGE": "FLARUM_IMAGE",
+    "DOCKER_FLARUM_CONTAINER": "FLARUM_CONTAINER_NAME",
+    "DOCKER_FLARUM_DB_IMAGE": "FLARUM_DB_IMAGE",
+    "DOCKER_FLARUM_DB_CONTAINER": "FLARUM_DB_CONTAINER_NAME",
+    "DOCKER_FLARUM_DB_NAME": "FLARUM_DB_NAME",
+    "DOCKER_FLARUM_DB_USER": "FLARUM_DB_USER",
+    "DOCKER_FLARUM_DB_PASSWORD": "FLARUM_DB_PASSWORD",
+    "DOCKER_FLARUM_DB_ROOT_PASSWORD": "FLARUM_DB_ROOT_PASSWORD",
+    "DOCKER_FLARUM_ASSETS_PATH": "FLARUM_ASSETS_PATH",
+    "DOCKER_FLARUM_EXTENSIONS_PATH": "FLARUM_EXTENSIONS_PATH",
+    "DOCKER_FLARUM_STORAGE_PATH": "FLARUM_STORAGE_PATH",
+    "DOCKER_SEARXNG_IMAGE": "SEARXNG_IMAGE",
+    "DOCKER_SEARXNG_CONTAINER": "SEARXNG_CONTAINER_NAME",
+    "DOCKER_SEARXNG_PORT": "SEARXNG_PORT",
+    "DOCKER_SEARXNG_BASE_URL": "SEARXNG_BASE_URL",
+    "DOCKER_SEARXNG_SECRET": "SEARXNG_SECRET_KEY",
+    "DOCKER_SEARXNG_CONFIG_PATH": "SEARXNG_SETTINGS_PATH",
+    "DOCKER_N8N_IMAGE": "N8N_IMAGE",
+    "DOCKER_N8N_CONTAINER": "N8N_CONTAINER_NAME",
+    "DOCKER_N8N_PORT": "N8N_PORT",
+    "DOCKER_N8N_HOST": "N8N_HOST",
+    "DOCKER_N8N_PROTOCOL": "N8N_PROTOCOL",
+    "DOCKER_REPOSITORY_IMAGE": "REPO_IMAGE",
+    "DOCKER_REPOSITORY_CONTAINER": "REPO_CONTAINER_NAME",
+    "DOCKER_REPOSITORY_PORT": "REPO_HTTP_PORT",
+    "DOCKER_REPOSITORY_DATA_PATH": "REPO_DATA_PATH",
+    "DOCKER_MAILSERVER_IMAGE": "MAILSERVER_IMAGE",
+    "DOCKER_MAILSERVER_CONTAINER": "MAILSERVER_CONTAINER_NAME",
+    "DOCKER_MAILSERVER_HOSTNAME": "MAIL_HOSTNAME",
+    "DOCKER_MAILSERVER_CONFIG_PATH": "MAILSERVER_CONFIG_PATH",
+}
 
 
 class ConfigError(RuntimeError):
@@ -155,27 +220,43 @@ def _aliases(field: Any) -> tuple[str, ...]:
 def _category(name: str, env_names: Iterable[str]) -> str:
     joined = " ".join((name, *env_names)).upper()
     for marker, category in (
-        ("MEMORY", "Memory"), ("EPISODIC", "Memory"),
         ("DOCKER_", "Docker"),
-        ("MCP_", "MCP & Sicherheit"),
+        ("LEMONSQUEEZY", "Lemon Squeezy"), ("NOVA_LS_", "Lemon Squeezy"),
+        ("WORDPRESS", "WordPress"), ("WP_", "WordPress"),
+        ("FLARUM", "Flarum"),
+        ("SEARX", "SearXNG"),
+        ("N8N", "n8n"),
+        ("MAILSERVER", "Mailserver"), ("MAIL_", "Mailserver"),
+        ("REPO_", "Repository"),
+        ("REDIS", "Redis"),
+        ("SLACK", "Slack"),
+        ("CLOUDFLARE", "Cloudflare"),
+        ("FEDERATION", "Federation"),
+        ("MEMORY", "Memory"), ("EPISODIC", "Memory"),
+        ("MCP_", "MCP"),
+        ("DOCKER_", "Docker"),
         ("AGENT", "Agenten"), ("CODEX", "Agenten"), ("OPENCODE", "Agenten"),
         ("NOVA_CLAUDE", "Agenten"), ("TRISTAR", "Agenten"),
-        ("OLLAMA", "Provider & Modelle"),
-        ("GEMINI", "Provider & Modelle"), ("OPENAI", "Provider & Modelle"),
-        ("OPENROUTER", "Provider & Modelle"), ("ANTHROPIC", "Provider & Modelle"),
-        ("MISTRAL", "Provider & Modelle"), ("GROQ", "Provider & Modelle"),
-        ("CEREBRAS", "Provider & Modelle"), ("NVIDIA", "Provider & Modelle"),
-        ("CLOUDFLARE", "Provider & Modelle"), ("REDIS", "Server & Integrationen"),
-        ("WORDPRESS", "Server & Integrationen"), ("MAIL_", "Server & Integrationen"),
-        ("CRAWLER", "Server & Integrationen"), ("FEDERATION", "Server & Integrationen"),
-        ("TELEGRAM", "Server & Integrationen"), ("N8N", "Server & Integrationen"),
-        ("SEARX", "Server & Integrationen"), ("SEARCH", "Server & Integrationen"),
+        ("OLLAMA", "AI Provider"), ("GEMINI", "AI Provider"),
+        ("OPENAI", "AI Provider"), ("OPENROUTER", "AI Provider"),
+        ("ANTHROPIC", "AI Provider"), ("MISTRAL", "AI Provider"),
+        ("GROQ", "AI Provider"), ("CEREBRAS", "AI Provider"),
+        ("NVIDIA", "AI Provider"), ("GITHUB_MODELS", "AI Provider"),
+        ("CRAWLER", "Advanced"), ("TELEGRAM", "Advanced"),
         ("TRIFORCE_DEPLOYMENT", "Server"), ("TRIFORCE_BIND", "Server"),
-        ("TRIFORCE_API_PORT", "Server"), ("CORS", "Server & Sicherheit"),
+        ("TRIFORCE_API_PORT", "Server"), ("TRIFORCE_KEEPALIVE", "Server"),
+        ("TRIFORCE_GRACEFUL", "Server"), ("TRIFORCE_WS_", "Server"),
+        ("CORS", "Security"), ("JWT", "Security"), ("AUTH", "Security"),
+        ("SECURITY_", "Security"),
     ):
         if marker in joined:
             return category
-    return "Erweitert"
+    return "Advanced"
+
+
+def classify_env_key(key: str) -> str:
+    """Classify a raw runtime env key for the Control Center."""
+    return _category(key, (key,))
 
 
 
@@ -247,6 +328,8 @@ def settings_inventory() -> list[SettingMeta]:
         env_names = _aliases(field)
         title = name.replace("_", " ").strip().title()
         minimum, maximum = _field_limits(field)
+        primary_env = env_names[0] if env_names else name
+        replaced_by = LEGACY_REPLACEMENTS.get(primary_env)
         result.append(SettingMeta(
             name=name,
             env_names=env_names,
@@ -259,7 +342,8 @@ def settings_inventory() -> list[SettingMeta]:
             minimum=minimum,
             maximum=maximum,
             choices=_field_choices(field.annotation),
-            deprecated=bool(getattr(field, "deprecated", False)),
+            deprecated=bool(getattr(field, "deprecated", False)) or replaced_by is not None,
+            replaced_by=replaced_by,
         ))
     return result
 

@@ -68,7 +68,7 @@ _bootstrap_backend_config_path()
 from app.config import VERSION, get_settings
 from app.settings_store import (
     MASKED_SECRET_VALUE, SECRET_ENV_KEYS, ConfigConflict, ConfigSnapshot,
-    effective_environment, load_snapshot, redact, redact_dotenv_text,
+    classify_env_key, effective_environment, load_snapshot, redact, redact_dotenv_text,
     restore_masked_secrets, save_raw_text, save_updates, settings_inventory,
     validate_supported_values,
 )
@@ -79,6 +79,9 @@ APP_NAME = "TriForce Control Center"
 ADMIN_HELPER = Path("/usr/lib/triforce/triforce-admin-helper")
 DESKTOP_FILE = Path("/usr/share/applications/triforce-control-center.desktop")
 AUTOSTART_FILE = Path.home() / ".config/autostart/triforce-control-center.desktop"
+PROJECT_ROOT = Path(os.environ.get("TRIFORCE_PROJECT_ROOT", str(Path(__file__).resolve().parents[1]))).expanduser().resolve()
+STACK_CONTROL = PROJECT_ROOT / "scripts" / "docker" / "stack-control.sh"
+DOCKER_STACKS = frozenset({"wordpress", "flarum", "searxng", "n8n", "repository", "mailserver"})
 MASK = MASKED_SECRET_VALUE
 
 
@@ -166,6 +169,62 @@ def recent_logs(lines: int = 200) -> str:
     return _redact_log_text(out if rc == 0 else err)
 
 
+def docker_inventory() -> list[dict[str, str]]:
+    """Return container metadata without granting the GUI arbitrary Docker access."""
+    rc, out, _err = run_cmd(["docker", "ps", "-a", "--format", "{{json .}}"], 8)
+    if rc != 0:
+        return []
+    stats_by_name: dict[str, dict[str, str]] = {}
+    stats_rc, stats_out, _ = run_cmd(["docker", "stats", "--no-stream", "--format", "{{json .}}"], 12)
+    if stats_rc == 0:
+        for line in stats_out.splitlines():
+            try:
+                row = json.loads(line)
+                stats_by_name[str(row.get("Name", ""))] = row
+            except json.JSONDecodeError:
+                continue
+    result: list[dict[str, str]] = []
+    for line in out.splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        name = str(row.get("Names", ""))
+        if not name:
+            continue
+        inspect_rc, inspect_out, _ = run_cmd(["docker", "inspect", name], 5)
+        if inspect_rc != 0:
+            continue
+        try:
+            details = json.loads(inspect_out)[0]
+        except (json.JSONDecodeError, IndexError, TypeError):
+            continue
+        config = details.get("Config") or {}
+        host = details.get("HostConfig") or {}
+        labels = config.get("Labels") or {}
+        working_dir = str(labels.get("com.docker.compose.project.working_dir", ""))
+        stack = Path(working_dir).name if working_dir else str(labels.get("com.docker.compose.project", ""))
+        if stack not in DOCKER_STACKS:
+            continue
+        mounts = details.get("Mounts") or []
+        mount_text = ", ".join(str(m.get("Destination", "")) for m in mounts if m.get("Destination"))
+        restart = (host.get("RestartPolicy") or {}).get("Name") or "no"
+        stats = stats_by_name.get(name, {})
+        result.append({
+            "stack": stack,
+            "name": name,
+            "image": str(config.get("Image") or row.get("Image") or ""),
+            "status": str(row.get("Status", "")),
+            "health": str((details.get("State") or {}).get("Health", {}).get("Status", "—")),
+            "restart": str(restart),
+            "ports": str(row.get("Ports", "")),
+            "mounts": mount_text,
+            "memory": str(stats.get("MemUsage", "—")),
+            "cpu": str(stats.get("CPUPerc", "—")),
+        })
+    return sorted(result, key=lambda item: (item["stack"], item["name"]))
+
+
 class OverviewPage(QWidget):
     refresh_requested = pyqtSignal()
 
@@ -223,11 +282,13 @@ class SettingsPage(QWidget):
         layout.addLayout(top)
         self.notice = QLabel(""); self.notice.setWordWrap(True); layout.addWidget(self.notice)
 
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["Einstellung", "Wert", "Typ", "Kategorie", "Quelle", "Status"])
+        self.table = QTableWidget(0, 9)
+        self.table.setHorizontalHeaderLabels([
+            "Einstellung", "Wert", "Typ", "Kategorie", "Quelle", "Default", "Secret", "Neustart", "Status"
+        ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for col in range(2, 6): self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        for col in range(2, 9): self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setAlternatingRowColors(True); layout.addWidget(self.table, 1)
 
         self.raw_editor = QPlainTextEdit()
@@ -286,29 +347,35 @@ class SettingsPage(QWidget):
     def _populate(self, snapshot: ConfigSnapshot, effective: dict[str, str], origins: dict[str, str], raw_text: str):
         self.loading = True; self.snapshot = snapshot; self.dirty.clear()
         metas = settings_inventory(); known_env = {alias for meta in metas for alias in meta.env_names}
-        categories = sorted({m.category for m in metas})
-        self.category.blockSignals(True); self.category.clear(); self.category.addItem("Alle Kategorien"); self.category.addItems(categories + ["Unbekannt"]); self.category.blockSignals(False)
+        categories = sorted({m.category for m in metas} | {classify_env_key(k) for k in snapshot.values})
+        self.category.blockSignals(True); self.category.clear(); self.category.addItem("Alle Kategorien"); self.category.addItems(categories); self.category.blockSignals(False)
         rows = []
         for meta in metas:
             env = meta.env_names[0] if meta.env_names else meta.name
             value = effective.get(env, "" if meta.default is None else str(meta.default)); source = origins.get(env, "Default")
             limits = f"Grenzen: {meta.minimum if meta.minimum is not None else '–'} … {meta.maximum if meta.maximum is not None else '–'}" if meta.minimum is not None or meta.maximum is not None else ""
             choices = f"Auswahl: {', '.join(meta.choices)}" if meta.choices else ""
-            tooltip = "\n".join(x for x in (meta.description, limits, choices, f"Speicher: {meta.storage}", "Neustart erforderlich" if meta.required_restart else "Live übernehmbar") if x)
-            rows.append((env, value, meta.value_type, meta.category, source, "Secret" if meta.secret else "", meta.secret, tooltip))
+            migration = f"Ersetzt durch: {meta.replaced_by}" if meta.replaced_by else ""
+            tooltip = "\n".join(x for x in (meta.description, limits, choices, f"Speicher: {meta.storage}", migration, "Neustart erforderlich" if meta.required_restart else "Live übernehmbar") if x)
+            status = "Legacy" if meta.deprecated else ""
+            rows.append((env, value, meta.value_type, meta.category, source, meta.default, meta.secret, meta.required_restart, status, tooltip))
         for key, value in snapshot.values.items():
             if key not in known_env:
-                rows.append((key, "" if value is None else value, "unbekannt", "Unbekannt", "file", "Nicht im Schema", key in SECRET_ENV_KEYS, "Kein bekannter Verbraucher; nur eingeschränkt validiert.") )
+                secret = key in SECRET_ENV_KEYS
+                rows.append((key, "" if value is None else value, "runtime", classify_env_key(key), "file", "–", secret, True, "Runtime / nicht im Pydantic-Schema", "Direkt von Runtime/Compose/Integration verwendet; eingeschränkt schema-validiert."))
         self.table.setRowCount(len(rows))
-        for row, (key, value, value_type, category, source, status, secret, tooltip) in enumerate(rows):
+        for row, (key, value, value_type, category, source, default, secret, restart, status, tooltip) in enumerate(rows):
             key_item = QTableWidgetItem(key); key_item.setFlags(key_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             shown = MASK if secret and value not in (None, "") else str(value)
             value_item = QTableWidgetItem(shown); value_item.setData(Qt.ItemDataRole.UserRole, {"key": key, "secret": secret, "initial": str(value)})
             type_item = QTableWidgetItem(value_type); type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             cat_item = QTableWidgetItem(category); cat_item.setFlags(cat_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             src_item = QTableWidgetItem(source); src_item.setFlags(src_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            default_item = QTableWidgetItem("–" if default is None else str(default)); default_item.setFlags(default_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            secret_item = QTableWidgetItem("ja" if secret else "nein"); secret_item.setFlags(secret_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            restart_item = QTableWidgetItem("ja" if restart else "nein"); restart_item.setFlags(restart_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             stat_item = QTableWidgetItem(status); stat_item.setFlags(stat_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            for col, item in enumerate((key_item, value_item, type_item, cat_item, src_item, stat_item)):
+            for col, item in enumerate((key_item, value_item, type_item, cat_item, src_item, default_item, secret_item, restart_item, stat_item)):
                 item.setToolTip(tooltip); self.table.setItem(row, col, item)
         self.raw_editor.setPlainText(raw_text)
         self.notice.setText(f"Datei: {snapshot.path} · Änderungen sind gespeichert erst nach kontrolliertem Neustart aktiv, sofern das Feld keinen getesteten Live-Reload besitzt.")
@@ -361,7 +428,7 @@ class SettingsPage(QWidget):
         if not key: return
         value = item.text()
         if meta.get("secret") and value == MASK: self.dirty.pop(key, None); return
-        self.dirty[key] = value; self.table.item(item.row(), 5).setText("Bearbeitet")
+        self.dirty[key] = value; self.table.item(item.row(), 8).setText("Bearbeitet")
         self.notice.setText(f"{len(self.dirty)} Änderung(en) noch nicht gespeichert.")
 
     def filter_rows(self):
@@ -369,7 +436,7 @@ class SettingsPage(QWidget):
         for row in range(self.table.rowCount()):
             key = self.table.item(row, 0).text().lower(); cat = self.table.item(row, 3).text()
             show = (not query or query in key or query in cat.lower()) and (category == "Alle Kategorien" or category == cat)
-            if not advanced and cat in {"Erweitert", "Unbekannt"}: show = False
+            if not advanced and cat == "Advanced": show = False
             self.table.setRowHidden(row, not show)
 
     def validate(self) -> bool:
@@ -504,6 +571,96 @@ class ServicesPage(QWidget):
                 AUTOSTART_FILE.unlink(missing_ok=True)
         except OSError as exc:
             QMessageBox.critical(self, APP_NAME, str(exc)); self.desktop.setChecked(not checked)
+
+
+class DockerServicesPage(QWidget):
+    """Whitelisted Docker stack control; no arbitrary compose paths or shell input."""
+
+    def __init__(self):
+        super().__init__()
+        self.proc: QProcess | None = None
+        self.pool = QThreadPool.globalInstance()
+        layout = QVBoxLayout(self)
+        self.table = QTableWidget(0, 9)
+        self.table.setHorizontalHeaderLabels([
+            "Container", "Image", "Status", "Health", "Restart", "Ports", "Mounts", "Memory", "CPU"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for col in range(2, 9):
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        layout.addWidget(self.table, 1)
+
+        buttons = QHBoxLayout()
+        for text, action in (
+            ("Start", "start"), ("Stop", "stop"), ("Restart", "restart"),
+            ("Logs", "logs"), ("Config validieren", "config"), ("Pull", "pull"),
+            ("Compose anwenden", "apply"),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(lambda _=False, a=action: self.run_action(a))
+            buttons.addWidget(button)
+        self.refresh_btn = QPushButton("Aktualisieren")
+        self.refresh_btn.clicked.connect(self.refresh)
+        buttons.addWidget(self.refresh_btn)
+        layout.addLayout(buttons)
+        self.output = QPlainTextEdit(); self.output.setReadOnly(True); self.output.setMaximumHeight(180); layout.addWidget(self.output)
+        self.refresh()
+
+    def _selected_stack(self) -> str | None:
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        item = self.table.item(row, 0)
+        stack = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return str(stack) if stack in DOCKER_STACKS else None
+
+    def set_inventory(self, rows: list[dict[str, str]]):
+        self.table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            values = [row[k] for k in ("name", "image", "status", "health", "restart", "ports", "mounts", "memory", "cpu")]
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if col == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, row["stack"])
+                self.table.setItem(row_index, col, item)
+        if rows and self.table.currentRow() < 0:
+            self.table.selectRow(0)
+
+    def refresh(self):
+        worker = Worker(docker_inventory)
+        worker.signals.done.connect(self.set_inventory)
+        worker.signals.error.connect(lambda err: self.output.setPlainText(f"Docker-Status fehlgeschlagen: {err}"))
+        self.pool.start(worker)
+
+    def run_action(self, action: str):
+        if action not in {"start", "stop", "restart", "logs", "config", "pull", "apply"}:
+            return
+        stack = self._selected_stack()
+        if not stack:
+            QMessageBox.information(self, APP_NAME, "Wähle zuerst einen Container/Stack aus.")
+            return
+        if self.proc is not None:
+            QMessageBox.warning(self, APP_NAME, "Eine Docker-Aktion läuft bereits.")
+            return
+        if not STACK_CONTROL.is_file():
+            QMessageBox.critical(self, APP_NAME, f"Stack-Control fehlt: {STACK_CONTROL}")
+            return
+        proc = QProcess(self); self.proc = proc
+        proc.setProgram(str(STACK_CONTROL)); proc.setArguments([action, stack])
+        self.output.setPlainText(f"{stack}: {action} läuft …")
+        def finished(code, _status):
+            out = bytes(proc.readAllStandardOutput()).decode(errors="replace")
+            err = bytes(proc.readAllStandardError()).decode(errors="replace")
+            self.proc = None
+            self.output.setPlainText(_redact_log_text((out + "\n" + err).strip()))
+            if code != 0:
+                QMessageBox.warning(self, APP_NAME, f"Docker-Aktion fehlgeschlagen ({code}).")
+            self.refresh()
+        proc.finished.connect(finished); proc.start()
 
 
 class SetupPage(QWidget):
@@ -641,8 +798,8 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         splitter = QSplitter(); self.nav = QListWidget(); self.nav.setMaximumWidth(240)
         self.stack = QStackedWidget(); splitter.addWidget(self.nav); splitter.addWidget(self.stack); splitter.setStretchFactor(1, 1); self.setCentralWidget(splitter)
-        self.overview = OverviewPage(); self.settings = SettingsPage(); self.services = ServicesPage(); self.setup = SetupPage(); self.logs = LogsPage()
-        for title, page in (("Übersicht", self.overview), ("Einstellungen", self.settings), ("Dienste", self.services), ("Einrichtung", self.setup), ("Logs & Diagnose", self.logs)):
+        self.overview = OverviewPage(); self.settings = SettingsPage(); self.services = ServicesPage(); self.docker = DockerServicesPage(); self.setup = SetupPage(); self.logs = LogsPage()
+        for title, page in (("Übersicht", self.overview), ("Einstellungen", self.settings), ("Dienste", self.services), ("Docker & Services", self.docker), ("Einrichtung", self.setup), ("Logs & Diagnose", self.logs)):
             self.nav.addItem(title); self.stack.addWidget(page)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex); self.nav.setCurrentRow(0)
         self.overview.refresh_requested.connect(self.refresh_status); self.services.refresh_requested.connect(self.refresh_status); self.settings.saved.connect(self.refresh_status)
@@ -671,6 +828,11 @@ def main() -> int:
     window = MainWindow(); window.show()
     if smoke:
         def finish_smoke():
+            # Smoke mode starts the same asynchronous status/inventory workers as
+            # the real GUI. Drain them before destroying Qt signal objects so the
+            # test exits without spurious WorkerSignals teardown tracebacks.
+            QThreadPool.globalInstance().waitForDone(5000)
+            app.processEvents()
             if screenshot:
                 window.grab().save(screenshot)
             print(f"GUI_SMOKE_OK pages={window.stack.count()} settings_rows={window.settings.table.rowCount()}", flush=True)

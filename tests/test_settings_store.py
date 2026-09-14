@@ -124,7 +124,7 @@ def test_inventory_exposes_type_limits_choices_and_storage():
 def test_inventory_has_required_control_center_categories():
     from app.settings_store import settings_inventory
     categories = {m.category for m in settings_inventory()}
-    assert {"Provider & Modelle", "MCP & Sicherheit", "Agenten", "Memory", "Server & Integrationen"}.issubset(categories)
+    assert {"AI Provider", "MCP", "Agenten", "Memory", "Server", "Security"}.issubset(categories)
 
 def test_redacted_raw_roundtrip_preserves_secret_and_comments(tmp_path):
     from app.settings_store import redact_dotenv_text, restore_masked_secrets, save_raw_text, load_snapshot
@@ -165,3 +165,37 @@ def test_cloudflare_zone_token_is_separate_and_secret():
     assert "CLOUDFLARE_ZONE_API_TOKEN" in SECRET_ENV_KEYS
     assert inventory["cloudflare_zone_api_token"].secret is True
     assert inventory["cloudflare_zone_id"].secret is False
+
+
+def test_runtime_service_secrets_are_explicitly_classified():
+    from app.settings_store import SECRET_ENV_KEYS
+    required = {
+        "ADMIN_PASSWORD", "WORDPRESS_APP_PASSWORD", "WORDPRESS_DB_PASSWORD",
+        "MYSQL_ROOT_PASSWORD", "WP_REDIS_PASSWORD", "FLARUM_ADMIN_PASSWORD",
+        "FLARUM_DB_PASSWORD", "FLARUM_DB_ROOT_PASSWORD", "SEARXNG_SECRET_KEY",
+        "MAIL_SMTP_PASS", "N8N_MCP_TOKEN", "N8N_ENCRYPTION_KEY",
+        "LEMONSQUEEZY_API_KEY", "LEMONSQUEEZY_WEBHOOK_SECRET",
+        "NOVA_LS_API_KEY", "NOVA_LS_WEBHOOK_SECRET", "CLOUDFLARE_API_TOKEN",
+        "FEDERATION_SECRET", "FEDERATION_TOKEN",
+    }
+    assert required <= SECRET_ENV_KEYS
+
+
+def test_legacy_docker_settings_expose_replacements():
+    from app.settings_store import settings_inventory
+    rows = {row.env_names[0]: row for row in settings_inventory() if row.env_names}
+    assert rows["DOCKER_WORDPRESS_DB_PASSWORD"].deprecated is True
+    assert rows["DOCKER_WORDPRESS_DB_PASSWORD"].replaced_by == "WORDPRESS_DB_PASSWORD"
+    assert rows["DOCKER_SEARXNG_SECRET"].replaced_by == "SEARXNG_SECRET_KEY"
+    assert rows["DOCKER_N8N_IMAGE"].replaced_by == "N8N_IMAGE"
+
+
+def test_runtime_categories_cover_control_center_services():
+    from app.settings_store import classify_env_key
+    assert classify_env_key("WP_FPM_IMAGE") == "WordPress"
+    assert classify_env_key("FLARUM_DB_PASSWORD") == "Flarum"
+    assert classify_env_key("SEARXNG_IMAGE") == "SearXNG"
+    assert classify_env_key("N8N_IMAGE") == "n8n"
+    assert classify_env_key("MAILSERVER_IMAGE") == "Mailserver"
+    assert classify_env_key("REPO_IMAGE") == "Repository"
+    assert classify_env_key("NOVA_LS_API_KEY") == "Lemon Squeezy"
