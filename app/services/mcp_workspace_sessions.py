@@ -26,6 +26,7 @@ RECONNECT_TTL_SECONDS = 2 * 60 * 60
 LEASE_TTL_SECONDS = 30 * 24 * 60 * 60
 MAX_WEB_PAIR_TICKETS = 2048
 RESUME_TICKET_TTL_SECONDS = 60
+SOCKET_TICKET_TTL_SECONDS = 60
 HANDOFF_TICKET_TTL_SECONDS = 90
 REDIS_LEASE_PREFIX = "triforce:workspace:lease:"
 REDIS_RESUME_PREFIX = "triforce:workspace:resume:"
@@ -48,6 +49,9 @@ _RESUME_INDEX: dict[str, str] = {}
 # One-shot WebSocket reconnect tickets. Values contain the raw resume token only
 # in process memory for at most 60 seconds so long-lived credentials never enter URLs/logs.
 _RESUME_TICKETS: dict[str, dict[str, Any]] = {}
+# One-shot browser socket tickets bind a WebSocket upgrade to an existing Join ID
+# without exposing that Join ID in the request target.
+_SOCKET_TICKETS: dict[str, dict[str, Any]] = {}
 # One-shot browser -> native app transfer tickets. These deliberately rotate
 # the durable resume credential only after the target executor proves it can
 # connect and advertise the workspace tool.
@@ -252,6 +256,32 @@ def _load_lease_by_resume(token: str) -> Optional[dict[str, Any]]:
 def resolve_resume_token(token: str) -> Optional[dict[str, Any]]:
     item = _load_lease_by_resume(token)
     return dict(item) if item and not _expired(item) else None
+
+
+def create_workspace_socket_ticket(join_code: str) -> str:
+    """Mint a one-shot transport ticket for an existing browser Join ID."""
+    normalized = str(join_code or "").strip().upper()
+    if not resolve_web_pair_code(normalized):
+        raise ValueError("Invalid or expired workspace pairing code")
+    now = time.time()
+    for key, item in list(_SOCKET_TICKETS.items()):
+        if float(item.get("expires_at") or 0) <= now:
+            _SOCKET_TICKETS.pop(key, None)
+    ticket = _new_code()
+    _SOCKET_TICKETS[_pair_key(ticket)] = {
+        "join_code": normalized,
+        "expires_at": now + SOCKET_TICKET_TTL_SECONDS,
+    }
+    return ticket
+
+
+def consume_workspace_socket_ticket(ticket: str) -> str:
+    """Consume a browser transport ticket exactly once and return its Join ID."""
+    item = _SOCKET_TICKETS.pop(_pair_key(ticket), None)
+    if not item or float(item.get("expires_at") or 0) <= time.time():
+        return ""
+    join_code = str(item.get("join_code") or "").strip().upper()
+    return join_code if resolve_web_pair_code(join_code) else ""
 
 
 def create_workspace_resume_ticket(token: str) -> str:

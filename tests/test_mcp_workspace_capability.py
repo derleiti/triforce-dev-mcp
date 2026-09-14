@@ -74,6 +74,15 @@ def test_web_pair_codes_are_unique_and_authorize_multiple_aliases():
     assert sessions.get_workspace('session-B')['client_id'] == conn.client_id
 
 
+def test_browser_socket_ticket_is_one_shot_and_bound_to_join_code():
+    code = sessions.create_web_pair_code()
+    ticket = sessions.create_workspace_socket_ticket(code)
+    assert ticket != code
+    assert sessions.consume_workspace_socket_ticket(ticket) == code
+    assert sessions.consume_workspace_socket_ticket(ticket) == ''
+
+
+
 @pytest.mark.asyncio
 async def test_workspace_status_tells_user_to_use_web_setup_page():
     req = DummyRequest('session-A')
@@ -1299,3 +1308,11 @@ def test_cached_shell_device_alias_rejects_unknown_target():
 
     with pytest.raises(ValueError):
         _device_tool_from_shell_alias('shell', {'command': '@device shell {"command":"id"}'})
+
+
+def test_workspace_socket_ticket_subprotocol_parser_ignores_base_protocol():
+    from app.routes.mcp_node import _workspace_ticket_from_subprotocol
+
+    headers = {"sec-websocket-protocol": "ailinux-workspace-v1, ailinux-ticket.ABCD-1234-EF56"}
+    assert _workspace_ticket_from_subprotocol(headers) == "ABCD-1234-EF56"
+    assert _workspace_ticket_from_subprotocol({"sec-websocket-protocol": "ailinux-workspace-v1"}) == ""

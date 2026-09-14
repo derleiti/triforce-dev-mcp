@@ -79,6 +79,16 @@ async def test_internal_admin_catalog_keeps_server_tools_and_explicit_core_stays
     assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'group_chat_create', 'mail_inbox', 'aihelper_pair'} <= full_names
 
 
+def test_browser_workspace_socket_credential_uses_subprotocol_not_query():
+    from app.routes.mcp import _workspace_setup_html
+    html = _workspace_setup_html()
+    assert "/v1/mcp/workspace/socket-ticket" in html
+    assert "ailinux-workspace-v1" in html
+    assert "ailinux-ticket." in html
+    assert "new WebSocket(socketUrl" in html
+    assert "&pair_code=" not in html
+
+
 def test_browser_workspace_page_prefers_native_pair_handover_over_the_url():
     """P0: the pair code must not depend on a URL query to reach the page.
 

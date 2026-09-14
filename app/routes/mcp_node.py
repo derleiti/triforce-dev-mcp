@@ -403,6 +403,16 @@ class ProxyToolResponse(BaseModel):
 # WebSocket Endpoint für Clients
 # =============================================================================
 
+def _workspace_ticket_from_subprotocol(headers: Any) -> str:
+    """Extract a one-shot workspace ticket from Sec-WebSocket-Protocol."""
+    raw = str((headers or {}).get("sec-websocket-protocol") or "")
+    for item in raw.split(","):
+        token = item.strip()
+        if token.startswith("ailinux-ticket."):
+            return token.removeprefix("ailinux-ticket.").strip().upper()
+    return ""
+
+
 @router.websocket("/connect")
 async def websocket_connect(
     websocket: WebSocket,
@@ -426,7 +436,10 @@ async def websocket_connect(
 
     Nach Verbindung kann der Server Tools auf dem Client ausführen.
     """
-    await websocket.accept()
+    request_headers = getattr(websocket, "headers", {}) or {}
+    offered_protocols = {item.strip() for item in str(request_headers.get("sec-websocket-protocol") or "").split(",") if item.strip()}
+    accepted_protocol = "ailinux-workspace-v1" if "ailinux-workspace-v1" in offered_protocols else None
+    await websocket.accept(subprotocol=accepted_protocol)
     
     # mode=workspace is an anonymous, session-paired local executor. It never
     # represents an account and can expose only client_workspace_tool.
@@ -436,7 +449,7 @@ async def websocket_connect(
     # Native clients keep workspace credentials out of URLs. Query parameters
     # remain a compatibility fallback for older/browser clients; log formatters
     # redact them while those clients are upgraded.
-    request_headers = getattr(websocket, "headers", {}) or {}
+    protocol_ticket = _workspace_ticket_from_subprotocol(request_headers)
     pair_code = str(
         request_headers.get("x-ailinux-pair-code")
         or websocket.query_params.get("pair_code")
@@ -459,8 +472,11 @@ async def websocket_connect(
     if is_workspace_node:
         try:
             from app.services.mcp_workspace_sessions import (
-                consume_workspace_handoff_ticket, consume_workspace_resume_ticket, pair_code_kind,
+                consume_workspace_handoff_ticket, consume_workspace_resume_ticket,
+                consume_workspace_socket_ticket, pair_code_kind,
             )
+            if protocol_ticket:
+                pair_code = consume_workspace_socket_ticket(protocol_ticket) or protocol_ticket
             if handoff_code:
                 handoff_context = consume_workspace_handoff_ticket(handoff_code)
                 if handoff_context:
