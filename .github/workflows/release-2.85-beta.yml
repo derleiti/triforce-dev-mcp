@@ -90,6 +90,7 @@ jobs:
           echo DEBIAN_RELEASE_SMOKE_OK
       - uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: triforce-linux-2.85-beta2
           if-no-files-found: error
           path: ${{ runner.temp }}/release-linux/*
@@ -150,6 +151,7 @@ jobs:
           (cd /tmp/arch-artifacts && sha256sum *.pkg.tar.zst > SHA256SUMS-arch.txt)
       - uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: triforce-arch-2.85-beta2
           if-no-files-found: error
           path: /tmp/arch-artifacts/*
@@ -241,6 +243,7 @@ jobs:
           sha256sum AIWindows-Client-${{ steps.version.outputs.version }}.exe AIWindows-Client-Setup-${{ steps.version.outputs.version }}.exe > SHA256SUMS-windows.txt
       - uses: actions/upload-artifact@v7
         with:
+          retention-days: 1
           name: aiwindows-1.0.0-beta2
           if-no-files-found: error
           path: |

@@ -41,7 +41,9 @@ jobs:
       - run: npm run check
       - run: npm run ${{ matrix.command }} -- --publish never
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
         with:
+          retention-days: 1
           name: ailinux-workspace-${{ matrix.label }}
           path: |
             workspace_browser/dist/*.AppImage
