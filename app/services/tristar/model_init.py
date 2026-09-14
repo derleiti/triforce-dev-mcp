@@ -28,6 +28,7 @@ import aiofiles
 import logging
 
 from app.paths import TRISTAR_DIR
+from app.mcp.agent_instructions import EVIDENCE_REFLECTION_PROTOCOL
 
 logger = logging.getLogger("ailinux.tristar.model_init")
 
@@ -514,10 +515,11 @@ class ModelInitService:
         """Generiert den System-Prompt für ein Modell"""
         template = DEFAULT_SYSTEM_PROMPTS.get(config.role, DEFAULT_SYSTEM_PROMPTS[ModelRole.WORKER])
 
-        return template.format(
+        role_prompt = template.format(
             model_id=config.model_id,
             capabilities=", ".join(c.value for c in config.capabilities),
         )
+        return role_prompt.rstrip() + "\n\n" + EVIDENCE_REFLECTION_PROTOCOL.strip()
 
     def _assign_initial_neighbors(self, config: ModelConfig) -> List[str]:
         """Weist initiale Nachbarn zu (basierend auf Capabilities)"""

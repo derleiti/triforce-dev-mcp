@@ -429,9 +429,33 @@ def is_ai_coder_request(request) -> bool:
 def filter_tools_for_external(
     tools: List[Dict[str, Any]], request=None,
 ) -> List[Dict[str, Any]]:
-    """Default-deny external catalogue using the normal MCP external policy."""
-    allowed = EXTERNAL_TOOL_ALLOWLIST
-    return [t for t in tools if t.get("name") in allowed]
+    """Default-deny external catalogue with explicit product-scope separation.
+
+    ``x_scope`` is discovery metadata, not authorization. It lets us keep the
+    model-facing surface coherent: public callers see global + explicitly shared
+    AILinux Helper tools, authenticated callers may additionally discover
+    TriForce account/integration tools, and engine-admin tools remain internal.
+    Existing per-tool allowlists/RBAC still gate server-side execution.
+    """
+    state = getattr(request, "state", None) if request is not None else None
+    auth_method = str(getattr(state, "mcp_auth_method", "") or "")
+    public_guest = auth_method == "public_guest"
+    result: List[Dict[str, Any]] = []
+    for tool in tools:
+        name = str(tool.get("name") or "")
+        scope = str(tool.get("x_scope") or "global")
+        if scope == "triforce_admin":
+            continue
+        if scope == "triforce_auth":
+            if not public_guest and auth_method and str(getattr(state, "mcp_auth_user", "") or "").strip():
+                result.append(tool)
+            continue
+        if scope == "aihelper":
+            result.append(tool)
+            continue
+        if name in EXTERNAL_TOOL_ALLOWLIST:
+            result.append(tool)
+    return result
 
 
 def _external_action_is_read_only(name: str, arguments: Optional[Dict[str, Any]]) -> bool:
@@ -446,22 +470,49 @@ def _external_action_is_read_only(name: str, arguments: Optional[Dict[str, Any]]
     return True
 
 
-def is_tool_allowed(tool_name: str, request, arguments: Optional[Dict[str, Any]] = None) -> bool:
-    """
-    Darf der Caller dieses Tool aufrufen?
+def _is_authenticated_request(request) -> bool:
+    state = getattr(request, "state", None) if request is not None else None
+    method = str(getattr(state, "mcp_auth_method", "") or "").strip().lower()
+    user = str(getattr(state, "mcp_auth_user", "") or "").strip()
+    return bool(method and method not in {"public_guest", "none", "anonymous"} and user)
 
-    - Privilegierte Tools: nur mit internal_full.
-    - Gemischte Tools: extern nur in read-only Modi.
-    - Sonst: Allowlist oder internal_full.
+
+def is_tool_allowed(tool_name: str, request, arguments: Optional[Dict[str, Any]] = None) -> bool:
+    """Authorize one server-side MCP call after discovery filtering.
+
+    Global tools follow the external allowlist/read-only rules. TriForce account
+    integrations (mail/forum/WordPress/notifications/Nova/n8n) require a real
+    authenticated identity. TriForce engine/admin tools remain internal_full only.
+    AILinux Helper tools are authorized separately by the workspace lease/share
+    manifest and are routed before this server-side gate.
     """
     name = tool_name[9:] if tool_name.startswith("triforce_") else tool_name
     internal_full = is_internal_full_request(request)
+    if internal_full:
+        return True
+    try:
+        from app.mcp.tool_registry_unified import (
+            CANONICAL_TOOL_NAMES,
+            TOOL_SCOPE_TRIFORCE_ADMIN,
+            TOOL_SCOPE_TRIFORCE_AUTH,
+            tool_scope,
+        )
+        # Scope metadata governs the canonical surface. Legacy compatibility
+        # handlers keep their established external allowlist semantics until they
+        # are removed or explicitly migrated; otherwise a broad legacy inventory
+        # label (for example service_status -> admin) would silently break AICoder.
+        scope = tool_scope(name) if name in CANONICAL_TOOL_NAMES else "legacy"
+    except Exception:
+        scope = "legacy"
+    if scope == TOOL_SCOPE_TRIFORCE_ADMIN:
+        return False
+    if scope == TOOL_SCOPE_TRIFORCE_AUTH:
+        return _is_authenticated_request(request)
     if name in PRIVILEGED_TOOLS:
-        return internal_full
+        return False
     if name in EXTERNAL_TOOL_ALLOWLIST:
-        return internal_full or _external_action_is_read_only(name, arguments)
-    # Unbekannte Tools: nur intern erlaubt (default-deny)
-    return internal_full
+        return _external_action_is_read_only(name, arguments)
+    return False
 
 
 # Legacy-Alias: EXTERNAL_TOOL_ALLOWLIST == FULL fuer Backward-Compat

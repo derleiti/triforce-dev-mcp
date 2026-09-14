@@ -1,5 +1,5 @@
 """
-Central Logging v3.0 - Komprimiert & Optimiert
+Central Logging v4.0 - Structured TriForce/Uvicorn Console
 ==============================================
 Logs: ./triforce/logs/ AND /triforce/logs/
 - all.log, auth.log, mcp.log, api.log, llm.log, agents.log, errors.log
@@ -11,6 +11,8 @@ import sys
 from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+from .log_formatters import TriForceConsoleFormatter
 
 # Directories
 _BASE = Path(__file__).parent.parent.parent
@@ -81,7 +83,7 @@ def setup_central_logging(console_level: int = logging.INFO, enable_console: boo
     if enable_console:
         console = logging.StreamHandler(sys.stdout)
         console.setLevel(console_level)
-        console.setFormatter(ColorFormatter(FMT, DATE_FMT))
+        console.setFormatter(TriForceConsoleFormatter(include_source=True))
         root.addHandler(console)
 
     # Category loggers
@@ -106,7 +108,7 @@ def setup_central_logging(console_level: int = logging.INFO, enable_console: boo
     _setup_error_debug(root)
 
     root.info("=" * 50)
-    root.info(f"TriForce Logging v3.0 | {LOG_DIR} | {ERROR_DEBUG_DIR}")
+    root.info(f"TriForce Logging v4.0 | structured console + Uvicorn | {LOG_DIR} | {ERROR_DEBUG_DIR}")
     root.info("=" * 50)
 
 

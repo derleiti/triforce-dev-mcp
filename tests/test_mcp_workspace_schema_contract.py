@@ -56,17 +56,17 @@ async def test_workspace_control_contract_is_versioned_and_complete():
     result = await handle_tools_list({}, request=FakeRequest("public_guest", False, "schema-public"))
     tools = {tool["name"]: tool for tool in result["tools"]}
 
-    assert "workspace_pair" in tools
-    status_props = tools["workspace_status"]["inputSchema"]["properties"]
-    assert {"workspace_id", "workspace_token"} <= set(status_props)
+    assert "aihelper_pair" in tools
+    pair_props = tools["aihelper_pair"]["inputSchema"]["properties"]
+    assert {"action", "code", "workspace_context", "wait_seconds"} <= set(pair_props)
+    assert {"status", "pair", "reconnect", "disconnect"} <= set(pair_props["action"]["enum"])
 
     contract_fp = bridge.workspace_contract_fingerprint()
     assert len(contract_fp) == 64
-    for name in ("workspace_status", "workspace_pair"):
-        tool = tools[name]
-        assert tool["x_schema_version"] == bridge.WORKSPACE_SCHEMA_VERSION
-        assert tool["x_schema_fingerprint"] == bridge.workspace_tool_schema_fingerprint(tool)
-        assert tool["x_workspace_contract_fingerprint"] == contract_fp
+    tool = tools["aihelper_pair"]
+    assert tool["x_schema_version"] == bridge.WORKSPACE_SCHEMA_VERSION
+    assert tool["x_schema_fingerprint"] == bridge.workspace_tool_schema_fingerprint(tool)
+    assert tool["x_workspace_contract_fingerprint"] == contract_fp
 
 
 @pytest.mark.asyncio
@@ -101,7 +101,7 @@ async def test_shared_tool_names_use_canonical_registry_schema_hash(monkeypatch)
 @pytest.mark.asyncio
 async def test_each_tools_list_call_rebuilds_workspace_contract(monkeypatch):
     first = await handle_tools_list({}, request=FakeRequest("public_guest", False, "schema-one"))
-    first_tool = {tool["name"]: tool for tool in first["tools"]}["workspace_status"]
+    first_tool = {tool["name"]: tool for tool in first["tools"]}["aihelper_pair"]
 
     original = workspace_tool_contract.WORKSPACE_CONTROL_TOOLS[0]["inputSchema"]["properties"]
     changed = dict(original)
@@ -109,7 +109,7 @@ async def test_each_tools_list_call_rebuilds_workspace_contract(monkeypatch):
     monkeypatch.setitem(workspace_tool_contract.WORKSPACE_CONTROL_TOOLS[0]["inputSchema"], "properties", changed)
 
     second = await handle_tools_list({}, request=FakeRequest("public_guest", False, "schema-two"))
-    second_tool = {tool["name"]: tool for tool in second["tools"]}["workspace_status"]
+    second_tool = {tool["name"]: tool for tool in second["tools"]}["aihelper_pair"]
 
     assert "contract_refresh_probe" not in first_tool["inputSchema"]["properties"]
     assert "contract_refresh_probe" in second_tool["inputSchema"]["properties"]

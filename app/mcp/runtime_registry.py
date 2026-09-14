@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from ..services.node_registry import node_registry
 from ..services.share_manifest import CLIPBOARD_WRITE_TOOLS, WORKSPACE_WRITE_TOOLS
 from ..utils.tool_normalizer import normalize_tool_name
+from .workspace_tool_contract import AIHELPER_CANONICAL_TO_WIRE
 
 Handler = Callable[[Dict[str, Any]], Awaitable[Any]]
 
@@ -43,11 +44,12 @@ class RuntimeToolRegistry:
         self._load_errors: List[str] = []
 
     def _policy_defaults(self, name: str, inventory: str, source: str) -> Dict[str, Any]:
+        wire_name = AIHELPER_CANONICAL_TO_WIRE.get(name, name)
         open_world = name in {"search", "web_search", "smart_search", "multi_search", "crawl", "crawl_url", "crawl_site", "fetch", "image_search"}
-        requires_file_write = name in {"file_write", "codebase_edit", "code_edit", "code_patch", "file_ops"} or name in WORKSPACE_WRITE_TOOLS
-        requires_shell = name in {"shell", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin"}
-        destructive = name in {"shell", "task_runner", "binary_exec", "remote_admin", "ollama_delete", "memory_clear", "queue_clear", "workspace_clear", "docker_stack"}
-        read_only = not (requires_file_write or requires_shell or destructive or name in CLIPBOARD_WRITE_TOOLS or name in {"workspace_pair", "compute_execute", "memory_history", "prompt_set", "config_set", "service_control", "container_control", "package_manager", "vault_add", "mail_send", "wp_create_draft", "wp_update_post", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "flarum_admin_request", "notify_send", "notify_clear", "notify_read", "idle_assign", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input"})
+        requires_file_write = wire_name in {"file_write", "codebase_edit", "code_edit", "code_patch", "file_ops"} or wire_name in WORKSPACE_WRITE_TOOLS
+        requires_shell = wire_name in {"shell", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin"}
+        destructive = wire_name in {"shell", "task_runner", "binary_exec", "remote_admin", "ollama_delete", "memory_clear", "queue_clear", "workspace_clear", "docker_stack"}
+        read_only = not (requires_file_write or requires_shell or destructive or wire_name in CLIPBOARD_WRITE_TOOLS or name == "aihelper_pair" or wire_name in {"workspace_pair", "compute_execute", "memory_history", "prompt_set", "config_set", "service_control", "container_control", "package_manager", "vault_add", "mail_send", "wp_create_draft", "wp_update_post", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "flarum_admin_request", "notify_send", "notify_clear", "notify_read", "idle_assign", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input", "vision_start", "vision_stop"})
         min_tier = "enterprise" if (requires_file_write or requires_shell or destructive) else "free"
         path_sensitive = name in {"file_read", "file_write", "file_ops", "code_read", "code_edit", "code_patch", "codebase_edit", "codebase_file"}
         client_visible = name not in {"initialize", "tools/list", "tools/call"}
@@ -66,13 +68,14 @@ class RuntimeToolRegistry:
         }
 
     def _classify_tool(self, name: str, defaults: Dict[str, Any]) -> str:
+        wire_name = AIHELPER_CANONICAL_TO_WIRE.get(name, name)
         if name in {"initialize", "tools/list", "tools/call", "prompts/list", "prompts/get", "resources/list", "resources/read"}:
             return "internal_only"
-        if name in {"shell", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin", "remote_exec"}:
+        if wire_name in {"shell", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin", "remote_exec"}:
             return "exec_privileged"
-        if name in {"config_set", "prompt_set", "service_control", "container_control", "docker_stack", "package_manager", "vault_add", "restart", "restart_backend", "restart_agent", "flarum_admin_request", "memory_history"}:
+        if wire_name in {"config_set", "prompt_set", "service_control", "container_control", "docker_stack", "package_manager", "vault_add", "restart", "restart_backend", "restart_agent", "flarum_admin_request", "memory_history"}:
             return "write_privileged"
-        if name in WORKSPACE_WRITE_TOOLS or name in CLIPBOARD_WRITE_TOOLS or name in {"workspace_pair", "compute_execute", "file_write", "file_ops", "code_patch", "codebase_edit", "codebase_create", "wp_create_draft", "wp_update_post", "mail_send", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "notify_send", "notify_clear", "notify_read", "idle_assign", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input"}:
+        if wire_name in WORKSPACE_WRITE_TOOLS or wire_name in CLIPBOARD_WRITE_TOOLS or name == "aihelper_pair" or wire_name in {"workspace_pair", "compute_execute", "file_write", "file_ops", "code_patch", "codebase_edit", "codebase_create", "wp_create_draft", "wp_update_post", "mail_send", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "notify_send", "notify_clear", "notify_read", "idle_assign", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input", "vision_start", "vision_stop"}:
             return "write_scoped"
         if name in {"debug", "debug_mcp_request", "tool_introspect", "binary_list", "template_list", "task_reference", "check_compatibility"}:
             return "preview_safe"

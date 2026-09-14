@@ -9,10 +9,10 @@ def test_helper_device_schemas_are_exposed():
     # Schemas now come from the canonical registry via the workspace contract,
     # not from a module-level _TOOL_SCHEMAS list.
     schemas = {item["name"]: item for item in bridge._workspace_contract_base_tools()}
-    assert schemas["computer_screenshot"]["annotations"]["readOnlyHint"] is True
-    assert schemas["clipboard_read"]["annotations"]["readOnlyHint"] is True
-    assert schemas["clipboard_write"]["annotations"]["readOnlyHint"] is False
-    assert schemas["clipboard_write"]["inputSchema"]["required"] == ["text"]
+    assert schemas["aihelper_screenshot"]["annotations"]["readOnlyHint"] is True
+    assert schemas["aihelper_clipboard_read"]["annotations"]["readOnlyHint"] is True
+    assert schemas["aihelper_clipboard_write"]["annotations"]["readOnlyHint"] is False
+    assert schemas["aihelper_clipboard_write"]["inputSchema"]["required"] == ["text"]
 
 
 def test_device_consent_is_separate_from_workspace_write_mode():
@@ -23,9 +23,9 @@ def test_device_consent_is_separate_from_workspace_write_mode():
 
 def test_global_computer_input_schema_covers_desktop_and_android_actions():
     schemas = {item["name"]: item for item in bridge._workspace_contract_base_tools()}
-    schema = schemas["computer_input"]["inputSchema"]
+    schema = schemas["aihelper_input"]["inputSchema"]
     actions = set(schema["properties"]["action"]["enum"])
     assert {"click", "double_click", "move", "scroll", "type", "key"} <= actions
     assert {"tap", "long_press", "swipe", "back", "home", "recents", "notifications"} <= actions
     assert {"x2", "y2", "duration_ms"} <= set(schema["properties"])
-    assert schemas["computer_input"]["annotations"]["readOnlyHint"] is False
+    assert schemas["aihelper_input"]["annotations"]["readOnlyHint"] is False

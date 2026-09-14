@@ -29,6 +29,7 @@ from ..services.triforce import (
 )
 from ..services.triforce.tool_registry import get_tool_index_summary, get_tools_for_llm
 from ..services.triforce.llm_mesh import get_llm_status, get_available_llms, MODEL_ALIASES
+from ..mcp.agent_instructions import EVIDENCE_REFLECTION_PROTOCOL
 
 router = APIRouter(prefix="/triforce", tags=["TriForce"])
 
@@ -242,7 +243,7 @@ async def triforce_init(request: InitRequest) -> Dict[str, Any]:
         tools = get_tools_for_llm(request.llm_id or "unknown")
 
         return {
-            "systemprompt": BOOTSTRAP_PROMPT + "\n\n" + role_prompt,
+            "systemprompt": BOOTSTRAP_PROMPT + "\n\n" + role_prompt + "\n\n" + EVIDENCE_REFLECTION_PROTOCOL.strip(),
             "role": role.value,
             "available_tools": [t["name"] for t in tools],
             "tool_count": len(tools),

@@ -657,6 +657,21 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
     legacy = str(item.get("paired_session_id") or "")
     if legacy:
         aliases.add(legacy)
+
+    # One MCP session may own only one Helper/workspace lease at a time. A fresh
+    # valid pairing code explicitly replaces a previous lease for this session,
+    # including an offline/suspended lease restored from Redis. Without this,
+    # an older Helper can later resume and reclaim the same MCP session after the
+    # user has paired a different device.
+    current = get_workspace_lease(session_id)
+    if current and str(current.get("reconnect_pair_key") or "") == key:
+        result = dict(current)
+        if resume_token:
+            result["resume_token"] = resume_token
+        return result
+    if current:
+        clear_session(session_id)
+
     if not _connection_live(item):
         # The pairing code itself is the authorization. Once a browser has
         # registered this ticket at least once, an MCP client may claim it even
@@ -685,16 +700,6 @@ def claim_waiting_workspace(code: str, session_id: str) -> dict[str, Any]:
             binding["resume_token"] = resume_token
         _notify_workspace_paired(connection, binding)
         return binding
-
-    current = get_workspace(session_id)
-    if current and current.get("reconnect_pair_key") == key:
-        # A repeated claim is idempotent, but callers still need the durable
-        # credential. bind_workspace intentionally does not persist raw tokens
-        # in the session binding, so re-attach it from the owning lease.
-        result = dict(current)
-        if resume_token:
-            result["resume_token"] = resume_token
-        return result
 
     aliases.add(session_id)
     lease_id = str(item.get("lease_id") or uuid.uuid4().hex)

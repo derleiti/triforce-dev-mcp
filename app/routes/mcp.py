@@ -142,14 +142,14 @@ def _helper_design_css() -> str:
 def _workspace_setup_html() -> str:
     return r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AILinux Helper · TriForce MCP</title><link rel="icon" type="image/png" href="/v1/mcp/helper/icon.png?v=29023"><link rel="apple-touch-icon" href="/v1/mcp/helper/icon.png?v=29023"><link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=29023"><meta name="theme-color" content="#0d1117"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="AILinux Helper">
+<title>AILinux Helper · TriForce MCP</title><link rel="icon" type="image/png" href="/v1/mcp/helper/icon.png?v=29024"><link rel="apple-touch-icon" href="/v1/mcp/helper/icon.png?v=29024"><link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=29024"><meta name="theme-color" content="#0d1117"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="AILinux Helper">
 <style>
 /*AILINUX_DESIGN_TOKENS*/
 *{box-sizing:border-box}body{font-family:var(--ailinux-typography),system-ui,sans-serif;background:var(--ailinux-background);color:var(--ailinux-text);margin:0}main{max-width:860px;margin:5vh auto;padding:24px}section{background:var(--ailinux-glass);border:1px solid var(--ailinux-glass-border);border-radius:var(--ailinux-radius);box-shadow:var(--ailinux-shadow);padding:22px;margin:16px 0}h1{font-size:2rem;margin:.25rem 0}h2{margin-top:0}p{line-height:1.5;color:var(--ailinux-text-muted)}.muted{color:var(--ailinux-text-muted)}.ok{color:var(--ailinux-success)}.warn{color:var(--ailinux-warning)}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{background:var(--ailinux-accent);color:var(--ailinux-background);border:1px solid var(--ailinux-accent);border-radius:8px;padding:11px 16px;font-weight:650;cursor:pointer}button:hover{background:var(--ailinux-accent-hover);border-color:var(--ailinux-accent-hover)}button.secondary{background:var(--ailinux-surface);color:var(--ailinux-text);border-color:var(--ailinux-glass-border)}button:disabled{opacity:.45;cursor:not-allowed}input[type=text],textarea{width:100%;background:var(--ailinux-surface);border:1px solid var(--ailinux-glass-border);color:var(--ailinux-text);padding:11px;border-radius:8px}textarea{min-height:76px;resize:vertical}code,.mono{font-family:ui-monospace,SFMono-Regular,monospace}.pair{font-size:1.05rem;letter-spacing:.04em}.pill{display:inline-block;border:1px solid var(--ailinux-accent);background:var(--ailinux-glass);color:var(--ailinux-accent);padding:5px 10px;border-radius:999px}.hidden{display:none}.status{font-weight:650}.choice{padding:9px 12px;border:1px solid var(--ailinux-glass-border);border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.drop{margin-top:10px;border-style:dashed;text-align:center}@media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head><body><main>
 <span class="pill">AILinux · TriForce MCP</span><h1>AILinux Helper</h1>
 <p>The selected folder stays on this device. Selecting a folder does not enumerate or analyze it. Use the native Android helper for a persistent foreground executor, or install this page as a web app on Android/iOS for automatic resume when the OS suspends it.</p>
-<section id="helperPanel"><div class="row"><img src="/v1/mcp/helper/icon.png?v=29023" width="64" height="64" alt="AILinux Helper icon" style="border-radius:14px"><div><h2 style="margin-bottom:4px">AILinux Helper 2.90.23</h2><span class="pill">AILinux Share & Compute node</span></div></div><p id="helperText" class="muted">Nothing is shared automatically. Choose exactly which local capabilities this device contributes to the AI network; every grant can be revoked again.</p><div id="helperActions" class="row"><button id="openAppBtn" class="hidden">Open AILinux Helper</button><a id="androidDownload" class="hidden" href="/v1/mcp/helper/android"><button>Android APK</button></a><button id="installPwaBtn" class="secondary hidden">Install web app</button><a id="linuxAppImage" href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a id="linuxDeb" href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a id="windowsDownload" href="/v1/mcp/helper/windows"><button class="secondary">Windows</button></a><a id="macDownload" href="/v1/mcp/helper/macos"><button class="secondary">macOS</button></a></div><p id="helperNote" class="muted">The browser/PWA remains the zero-install fallback. Legacy Workspace URLs stay compatible.</p></section>
+<section id="helperPanel"><div class="row"><img src="/v1/mcp/helper/icon.png?v=29024" width="64" height="64" alt="AILinux Helper icon" style="border-radius:14px"><div><h2 style="margin-bottom:4px">AILinux Helper 2.90.24</h2><span class="pill">AILinux Share & Compute node</span></div></div><p id="helperText" class="muted">Nothing is shared automatically. Choose exactly which local capabilities this device contributes to the AI network; every grant can be revoked again.</p><div id="helperActions" class="row"><button id="openAppBtn" class="hidden">Open AILinux Helper</button><a id="androidDownload" class="hidden" href="/v1/mcp/helper/android"><button>Android APK</button></a><button id="installPwaBtn" class="secondary hidden">Install web app</button><a id="linuxAppImage" href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a id="linuxDeb" href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a id="windowsDownload" href="/v1/mcp/helper/windows"><button class="secondary">Windows</button></a><a id="macDownload" href="/v1/mcp/helper/macos"><button class="secondary">macOS</button></a></div><p id="helperNote" class="muted">The browser/PWA remains the zero-install fallback. Legacy Workspace URLs stay compatible.</p></section>
 <section id="nativeSharePanel"><h2>1 · Choose capabilities</h2><p class="muted">The browser exposes capabilities it can really provide and can additionally route an explicitly granted remote compute shell through TriForce. Native-only OS controls appear only inside the Helper.</p><div class="grid"><label class="choice"><input id="shareClipboardRead" type="checkbox"> Clipboard read</label><label class="choice"><input id="shareClipboardWrite" type="checkbox"> Clipboard write</label><label class="choice"><input id="shareDisplay" type="checkbox"> Display / vision observe</label><label id="shareSystemObserveChoice" class="choice"><input id="shareSystemObserve" type="checkbox"> System / process observe</label><label id="shareSystemControlChoice" class="choice"><input id="shareSystemControl" type="checkbox"> System / app / service control</label><label id="shareComputerControlChoice" class="choice"><input id="shareComputerControl" type="checkbox"> Mouse / keyboard control</label><label id="shareResourcesChoice" class="choice"><input id="shareResources" type="checkbox"> Device resource metadata</label><label id="shareComputeChoice" class="choice"><input id="shareCompute" type="checkbox"> <span id="shareComputeLabel">Compute sandbox</span></label><label id="shareMcpChoice" class="choice"><input id="shareMcp" type="checkbox"> Local MCP bridge</label></div><div class="row" style="margin-top:12px"><button id="saveNativeShares" class="secondary">Apply capability grants</button><button id="refreshResources" class="secondary">Refresh resource inventory</button></div><pre id="resourceInventory" class="muted"></pre></section>
 <section id="webRuntimePanel"><h2>2 · Browser Python + JavaScript runtime</h2><p class="muted">The web Helper now has an optional Python 3.14 runtime in an isolated Web Worker, backed by Pyodide 314.0.6. JavaScript remains the host capability broker. This browser runtime is local to the page and deliberately does not impersonate TriForce <code>compute_execute</code>, which remains the hardened Docker contract.</p><div class="row"><span id="webRuntimeState" class="pill">Not loaded</span><button id="webRuntimeLoadBtn" class="secondary">Load Python</button><button id="webRuntimeStopBtn" class="secondary" disabled>Stop Python</button></div><textarea id="webPythonCode" spellcheck="false" class="mono">import platform
 print(platform.python_version())
@@ -177,7 +177,7 @@ const WRITE_TOOLS=['file_edit','directory_create','workspace_clear','code_edit']
 const HELPER_DEVICE_TOOLS=['computer_observe','computer_screenshot','vision_start','vision_status','vision_observe','vision_stop','clipboard_read','clipboard_write','device_info','process_ops','service_ops','app_ops','window_ops','computer_input','device_control','compute_execute'];
 const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
 const MAX_TEXT=2*1024*1024;
-const EXECUTOR_VERSION='2.90.23-browser';
+const EXECUTOR_VERSION='2.90.24-browser';
 const urlPair=(new URLSearchParams(location.search).get('pair_code')||'').trim().toUpperCase();let pairCode=urlPair||sessionStorage.getItem('tf_pair_code')||'',rootHandle=null,rootEntry=null,workspaceBackend='none',ws=null,workspaceMode=sessionStorage.getItem('tf_workspace_mode')||'read_only',capabilities=[],heartbeatTimer=null,watchdogTimer=null,reconnectTimer=null,reconnectAttempt=0,manualDisconnect=false,lastPongAt=0,workspaceAttached=false,resumeToken='',toolQueue=Promise.resolve(),wakeLockSentinel=null,wakeLockWanted=localStorage.getItem('tf_workspace_wake_lock')==='1',connectPromise=null;if(urlPair){sessionStorage.setItem('tf_pair_code',urlPair);try{history.replaceState({},document.title,location.pathname)}catch{}}
 const directPicker=typeof window.showDirectoryPicker==='function';
 const android=/Android/i.test(navigator.userAgent),ios=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1),firefox=/Firefox\//i.test(navigator.userAgent);let deferredInstallPrompt=null;
@@ -235,7 +235,7 @@ $('opfsBtn').classList.toggle('hidden',!webSupport().opfs);{const w=webSupport()
 const HELPER_DOWNLOAD_IDS=['androidDownload','linuxAppImage','linuxDeb','windowsDownload','macDownload'];
 function detectedHelperOs(){const ua=String(navigator.userAgent||''),platform=String((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||'');if(/Android/i.test(ua))return 'android';if(ios)return 'ios';if(/Windows|Win32|Win64/i.test(platform)||/Windows/i.test(ua))return 'windows';if(/Mac/i.test(platform)||/Macintosh|Mac OS X/i.test(ua))return 'macos';if(/Linux/i.test(platform)||/Linux/i.test(ua))return 'linux';return 'unknown';}
 function showHelperDownloads(ids){const visible=new Set(ids);for(const id of HELPER_DOWNLOAD_IDS)$(id).classList.toggle('hidden',!visible.has(id));}
-function setupMobileUi(){const os=detectedHelperOs(),downloads={android:['androidDownload'],linux:['linuxAppImage','linuxDeb'],windows:['windowsDownload'],macos:['macDownload'],ios:[],unknown:HELPER_DOWNLOAD_IDS};showHelperDownloads(downloads[os]||HELPER_DOWNLOAD_IDS);$('openAppBtn').classList.toggle('hidden',os!=='android');if(os==='android'){$('helperText').textContent='Android detected · use the native APK with the native foreground executor. The workspace can remain active after the UI is closed and connection controls stay in the system notification.';}else if(os==='ios'){$('helperText').textContent='iPhone/iPad detected · install this page as the AILinux Helper web app. The durable lease survives transport suspension and reconnects when iOS allows the app to resume.';$('helperNote').textContent='Detected OS: iOS · no native iOS package is available. iOS may suspend background networking and cannot guarantee an arbitrary WebSocket after force-quit.';}else if(os==='linux'){$('helperText').textContent='Linux detected · choose AppImage for a portable launch or the .deb package for Debian/Ubuntu/AILinux integration.';}else if(os==='windows'){$('helperText').textContent='Windows detected · the Windows Helper package is selected for this system.';}else if(os==='macos'){$('helperText').textContent='macOS detected · the macOS Helper disk image is selected for this system.';}else{$('helperText').textContent='Operating system not recognized reliably · all AILinux Helper packages are shown so you can choose the correct one.';$('helperNote').textContent='Detected OS: unknown · Android APK, Linux AppImage/.deb, Windows and macOS downloads are all available.';}if(os!=='ios'&&os!=='unknown')$('helperNote').textContent='Detected OS: '+os+' · showing the recommended Helper package'+(os==='linux'?'s':'')+'. The browser/PWA remains the zero-install fallback.';if('serviceWorker' in navigator)navigator.serviceWorker.register('/v1/mcp/sw.js?v=29023',{scope:'/v1/mcp',updateViaCache:'none'}).catch(()=>{});}
+function setupMobileUi(){const os=detectedHelperOs(),downloads={android:['androidDownload'],linux:['linuxAppImage','linuxDeb'],windows:['windowsDownload'],macos:['macDownload'],ios:[],unknown:HELPER_DOWNLOAD_IDS};showHelperDownloads(downloads[os]||HELPER_DOWNLOAD_IDS);$('openAppBtn').classList.toggle('hidden',os!=='android');if(os==='android'){$('helperText').textContent='Android detected · use the native APK with the native foreground executor. The workspace can remain active after the UI is closed and connection controls stay in the system notification.';}else if(os==='ios'){$('helperText').textContent='iPhone/iPad detected · install this page as the AILinux Helper web app. The durable lease survives transport suspension and reconnects when iOS allows the app to resume.';$('helperNote').textContent='Detected OS: iOS · no native iOS package is available. iOS may suspend background networking and cannot guarantee an arbitrary WebSocket after force-quit.';}else if(os==='linux'){$('helperText').textContent='Linux detected · choose AppImage for a portable launch or the .deb package for Debian/Ubuntu/AILinux integration.';}else if(os==='windows'){$('helperText').textContent='Windows detected · the Windows Helper package is selected for this system.';}else if(os==='macos'){$('helperText').textContent='macOS detected · the macOS Helper disk image is selected for this system.';}else{$('helperText').textContent='Operating system not recognized reliably · all AILinux Helper packages are shown so you can choose the correct one.';$('helperNote').textContent='Detected OS: unknown · Android APK, Linux AppImage/.deb, Windows and macOS downloads are all available.';}if(os!=='ios'&&os!=='unknown')$('helperNote').textContent='Detected OS: '+os+' · showing the recommended Helper package'+(os==='linux'?'s':'')+'. The browser/PWA remains the zero-install fallback.';if('serviceWorker' in navigator)navigator.serviceWorker.register('/v1/mcp/sw.js?v=29024',{scope:'/v1/mcp',updateViaCache:'none'}).catch(()=>{});}
 setupMobileUi();
 refreshNativeHelperStatus().then(()=>{renderShareSummary();refreshDockerStatus().catch(()=>{});refreshServiceList().catch(()=>{});refreshResourceInventory().catch(()=>{})}).catch(()=>{});
 const native=(typeof window!=='undefined'&&window.ailinuxNative)||null;let nativeShell=null;
@@ -300,7 +300,7 @@ function useDroppedEntry(e){rootEntry=e;rootHandle=null;workspaceBackend='drop-l
 const dz=$('dropZone');for(const ev of ['dragenter','dragover'])dz.addEventListener(ev,e=>{e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect='copy';dz.style.borderColor='#58a6ff'});dz.addEventListener('dragleave',()=>dz.style.borderColor='');dz.addEventListener('drop',async e=>{e.preventDefault();e.stopPropagation();dz.style.borderColor='';const items=[...(e.dataTransfer?.items||[])];const handlePromises=items.map(i=>typeof i.getAsFileSystemHandle==='function'?i.getAsFileSystemHandle().catch(()=>null):Promise.resolve(null));const legacy=items.map(i=>{try{const fn=i.getAsEntry||i.webkitGetAsEntry;return typeof fn==='function'?fn.call(i):null}catch{return null}}).filter(Boolean);const handles=(await Promise.all(handlePromises)).filter(Boolean),dirHandle=handles.find(h=>h.kind==='directory'),dirEntry=legacy.find(x=>x.isDirectory);if(dirHandle)return useDroppedHandle(dirHandle);if(dirEntry)return useDroppedEntry(dirEntry);status('The browser did not expose a directory handle/entry for this drop.','warn')});
 async function runQueuedToolCall(msg,responseSocket){let r;const outer=msg.params?.arguments||{},tool=String(outer.tool||''),requestId=String(msg.id||'');try{if(msg.params?.name!=='client_workspace_tool')throw new Error('unexpected tool');if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/tool_stage',params:{request_id:requestId,tool,stage:'started'}}));r=await execute(tool,outer.arguments||{});if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/tool_stage',params:{request_id:requestId,tool,stage:'finished'}}))}catch(e){if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/tool_stage',params:{request_id:requestId,tool,stage:'failed'}}));r=result({ok:false,error:String(e.message||e)},true)}if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',id:msg.id,result:r}));}
 function queueToolCall(msg){const responseSocket=ws;toolQueue=toolQueue.then(()=>runQueuedToolCall(msg,responseSocket)).catch(()=>{});}
-async function handleServer(msg){lastPongAt=Date.now();if(msg.error&&/(pairing code|workspace credential|resume token)/i.test(String(msg.error))){pairCode='';sessionStorage.removeItem('tf_pair_code');workspaceAttached=false;$('pairPanel').classList.add('hidden');status('Workspace pairing expired. Creating a fresh pairing ID…','warn');try{if(ws)ws.close(4001,'pairing expired')}catch{}setTimeout(()=>connect(),250);return}if(msg.method==='connected'){ws.send(JSON.stringify({jsonrpc:'2.0',method:'client/info',params:{client:'triforce-browser-workspace',platform:navigator.platform||'browser',hostname:'browser',server_version:EXECUTOR_VERSION,mode:'workspace',workspace:rootHandle?.name||rootEntry?.name||'local',access_mode:workspaceMode,remote_profile:workspaceMode}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'tools/list',params:{tools:['client_workspace_tool']}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/share',params:shareDescriptor()}));return}if(msg.method==='workspace/shared'){if(msg.params?.ok){if(msg.params?.resume_token){resumeToken=String(msg.params.resume_token);await saveWorkspaceState('resumeToken',resumeToken);if(pairCode)await saveWorkspaceState('joinCode',pairCode);$('handoffBtn').disabled=false}reconnectAttempt=0;lastPongAt=Date.now();workspaceAttached=!msg.params?.waiting_for_session;if(pairCode&&!urlPair){$('pair').value=pairCode;$('pairPanel').classList.remove('hidden')}else if(urlPair){$('pairPanel').classList.add('hidden')}status(workspaceAttached?(msg.params?.reconnected?'Workspace reconnected and AI-reachable.':'Workspace connected and AI-reachable.'):'Browser connected. Waiting for the AI chat to pair this ID.','ok');$('connectBtn').disabled=true;$('disconnectBtn').disabled=false}else status('TriForce rejected workspace: '+(msg.params?.error||'unknown error'),'warn');return}if(msg.method==='workspace/paired'){if(msg.params?.resume_token){resumeToken=String(msg.params.resume_token);await saveWorkspaceState('resumeToken',resumeToken);if(pairCode)await saveWorkspaceState('joinCode',pairCode);$('handoffBtn').disabled=false}workspaceAttached=true;status('Workspace lease paired; this Join ID remains valid until disconnect or workspace replacement.','ok');return}if(msg.method==='workspace/handoff_complete'){manualDisconnect=true;workspaceAttached=false;resumeToken='';pairCode='';sessionStorage.removeItem('tf_pair_code');await deleteWorkspaceState('resumeToken');await deleteWorkspaceState('joinCode');$('handoffBtn').disabled=true;$('pairPanel').classList.add('hidden');status('Workspace handed off to the app. This browser no longer owns the resume credential.','ok');return}if(msg.method==='workspace/detached'){workspaceAttached=false;status('AI transport detached; workspace lease is retained. The same pairing ID remains reconnectable.','warn');return}if(msg.method==='tools/call'){queueToolCall(msg);return}if(msg.method==='ping'){ws.send(JSON.stringify({jsonrpc:'2.0',method:'pong'}));return}if(msg.method==='pong'){lastPongAt=Date.now();return}}
+async function handleServer(msg){lastPongAt=Date.now();if(msg.error&&/(pairing code|workspace credential|resume token)/i.test(String(msg.error))){manualDisconnect=true;workspaceAttached=false;status('Pairing ID invalid or expired. The ID was kept; generate a new ID explicitly before retrying.','warn');try{if(ws)ws.close(4001,'pairing credential rejected')}catch{}return}if(msg.method==='connected'){ws.send(JSON.stringify({jsonrpc:'2.0',method:'client/info',params:{client:'triforce-browser-workspace',platform:navigator.platform||'browser',hostname:'browser',server_version:EXECUTOR_VERSION,mode:'workspace',workspace:rootHandle?.name||rootEntry?.name||'local',access_mode:workspaceMode,remote_profile:workspaceMode}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'tools/list',params:{tools:['client_workspace_tool']}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/share',params:shareDescriptor()}));return}if(msg.method==='workspace/shared'){if(msg.params?.ok){if(msg.params?.resume_token){resumeToken=String(msg.params.resume_token);await saveWorkspaceState('resumeToken',resumeToken);if(pairCode)await saveWorkspaceState('joinCode',pairCode);$('handoffBtn').disabled=false}reconnectAttempt=0;lastPongAt=Date.now();workspaceAttached=!msg.params?.waiting_for_session;if(pairCode&&!urlPair){$('pair').value=pairCode;$('pairPanel').classList.remove('hidden')}else if(urlPair){$('pairPanel').classList.add('hidden')}status(workspaceAttached?(msg.params?.reconnected?'Workspace reconnected and AI-reachable.':'Workspace connected and AI-reachable.'):'Browser connected. Waiting for the AI chat to pair this ID.','ok');$('connectBtn').disabled=true;$('disconnectBtn').disabled=false}else status('TriForce rejected workspace: '+(msg.params?.error||'unknown error'),'warn');return}if(msg.method==='workspace/paired'){if(msg.params?.resume_token){resumeToken=String(msg.params.resume_token);await saveWorkspaceState('resumeToken',resumeToken);if(pairCode)await saveWorkspaceState('joinCode',pairCode);$('handoffBtn').disabled=false}workspaceAttached=true;status('Workspace lease paired; this Join ID remains valid until disconnect or workspace replacement.','ok');return}if(msg.method==='workspace/handoff_complete'){manualDisconnect=true;workspaceAttached=false;resumeToken='';pairCode='';sessionStorage.removeItem('tf_pair_code');await deleteWorkspaceState('resumeToken');await deleteWorkspaceState('joinCode');$('handoffBtn').disabled=true;$('pairPanel').classList.add('hidden');status('Workspace handed off to the app. This browser no longer owns the resume credential.','ok');return}if(msg.method==='workspace/detached'){workspaceAttached=false;status('AI transport detached; workspace lease is retained. The same pairing ID remains reconnectable.','warn');return}if(msg.method==='tools/call'){queueToolCall(msg);return}if(msg.method==='ping'){ws.send(JSON.stringify({jsonrpc:'2.0',method:'pong'}));return}if(msg.method==='pong'){lastPongAt=Date.now();return}}
 function stopHeartbeat(){if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}if(watchdogTimer){clearInterval(watchdogTimer);watchdogTimer=null}}
 function startHeartbeat(){stopHeartbeat();lastPongAt=Date.now();const ping=()=>{if(ws&&ws.readyState===WebSocket.OPEN){try{ws.send(JSON.stringify({jsonrpc:'2.0',method:'ping',params:{ts:Date.now()}}))}catch{}}};ping();heartbeatTimer=setInterval(ping,20000);watchdogTimer=setInterval(()=>{if(document.hidden||!ws||ws.readyState!==WebSocket.OPEN)return;if(Date.now()-lastPongAt>70000){status('Workspace transport is stale; reconnecting…','warn');try{ws.close(4002,'heartbeat stale')}catch{}}},15000)}
 async function websocketPairCode(){if(!resumeToken)return pairCode;const r=await fetch('/v1/mcp/workspace/resume-ticket',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({resume_token:resumeToken})});if(!r.ok)throw new Error('workspace resume ticket failed: '+r.status);const data=await r.json();const ticket=String(data.pair_code||'');if(!ticket)throw new Error('server returned no workspace resume ticket');return ticket;}
@@ -555,14 +555,14 @@ async def download_android_workspace_helper() -> Response:
     apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/workspace/triforce/releases/helper/AILinux-Helper-latest.apk")
     if not os.path.isfile(apk_path):
         return JSONResponse(
-            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.23"},
+            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.24"},
             status_code=404,
             headers={"Cache-Control": "no-store"},
         )
     return FileResponse(
         apk_path,
         media_type="application/vnd.android.package-archive",
-        filename="AILinux-Helper-2.90.23-android.apk",
+        filename="AILinux-Helper-2.90.24-android.apk",
         headers={"Cache-Control": "no-cache"},
     )
 
@@ -579,11 +579,11 @@ async def ailinux_helper_icon() -> Response:
 async def download_ailinux_helper(platform: str):
     release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
     artifacts = {
-        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.23-android.apk", "application/vnd.android.package-archive"),
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.23-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.23-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.23-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.23-mac-arm64.dmg", "application/x-apple-diskimage"),
+        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.24-android.apk", "application/vnd.android.package-archive"),
+        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.24-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.24-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.24-win-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.24-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
     spec = artifacts.get(platform)
     if not spec:
@@ -591,7 +591,7 @@ async def download_ailinux_helper(platform: str):
     source_name, download_name, media_type = spec
     artifact = release_root / source_name
     if not artifact.is_file():
-        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.23", "repository": "ailinux-helper"})
+        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.24", "repository": "ailinux-helper"})
     return FileResponse(artifact, filename=download_name, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
@@ -599,10 +599,10 @@ async def download_ailinux_helper(platform: str):
 async def download_desktop_workspace_helper(platform: str) -> Response:
     root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/workspace/triforce/releases/helper")
     artifacts = {
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.23-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.23-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.23-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.23-mac-arm64.dmg", "application/x-apple-diskimage"),
+        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.24-linux-x86_64.AppImage", "application/vnd.appimage"),
+        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.24-linux-amd64.deb", "application/vnd.debian.binary-package"),
+        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.24-win-x64.exe", "application/vnd.microsoft.portable-executable"),
+        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.24-mac-arm64.dmg", "application/x-apple-diskimage"),
     }
     item = artifacts.get(platform.lower())
     if not item:
@@ -610,7 +610,7 @@ async def download_desktop_workspace_helper(platform: str) -> Response:
     source, filename, media_type = item
     path = os.path.join(root, source)
     if not os.path.isfile(path):
-        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.90.23", "workflow": "ailinux-helper/build.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.90.24", "workflow": "ailinux-helper/build.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
     return FileResponse(path, media_type=media_type, filename=filename, headers={"Cache-Control": "no-cache"})
 
 
@@ -626,13 +626,13 @@ async def workspace_pwa_manifest() -> JSONResponse:
         "background_color": "#0d1117",
         "theme_color": "#0d1117",
         "description": "AILinux cross-platform local MCP companion and workspace executor",
-        "icons": [{"src": "/v1/mcp/helper/icon.png?v=29023", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+        "icons": [{"src": "/v1/mcp/helper/icon.png?v=29024", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
     }, media_type="application/manifest+json", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store"})
 
 
 @public_router.get("/mcp/sw.js", tags=["MCP"], summary="AILinux workspace PWA service worker")
 async def workspace_pwa_service_worker() -> Response:
-    script = """'use strict';const CACHE='ailinux-helper-v29023';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.23')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.23'))))});"""
+    script = """'use strict';const CACHE='ailinux-helper-v29024';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.24')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.24'))))});"""
     return Response(script, media_type="application/javascript", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store", "Service-Worker-Allowed": "/v1/mcp"})
 
 
@@ -2030,7 +2030,11 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
             "unified",
             request,
             note=f"canonical MCP surface profile={inventory}",
-            discovery_profile=(None if inventory.strip().lower() in {"core", "minimal", "default"} else inventory),
+            # Preserve the selected discovery profile even through the public/local
+            # workspace overlay. Pairing/device schemas are explicitly part of core,
+            # so there is no reason to inflate a small model-facing inventory back
+            # to the complete global catalogue.
+            discovery_profile=(None if inventory.strip().lower() in {"all", "full", "*"} else inventory),
         )
         # Compact semantic index for clients that implement progressive disclosure.
         # These are discovery labels only; RBAC and per-tool policy remain authoritative.
@@ -3232,7 +3236,10 @@ def _log_edit(action: str, path: str, details: Dict[str, Any]):
 
 
 async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Edit a file in the codebase with safety checks."""
+    """Compatibility wrapper around the canonical MCP service edit handler."""
+    from app.services.mcp_service import handle_codebase_edit as service_handle_codebase_edit
+    return await service_handle_codebase_edit(params)
+
     file_path = params.get("path")
     mode = params.get("mode")
 
@@ -3284,11 +3291,11 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
         new_content = original_content.replace(old_text, new_text, 1)
 
     elif mode == "insert":
-        line_number = params.get("line_number")
+        line_number = params.get("line_number") or params.get("line")
         new_text = params.get("new_text", "")
 
         if not line_number or line_number < 1:
-            raise ValueError("'line_number' (>= 1) required for insert mode")
+            raise ValueError("'line' (>= 1) required for insert mode")
 
         lines = original_lines.copy()
         insert_idx = min(line_number - 1, len(lines))
@@ -3313,12 +3320,13 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
         if not new_content.endswith("\n"):
             new_content += "\n"
 
-    elif mode == "delete_lines":
-        start_line = params.get("start_line")
-        end_line = params.get("end_line")
+    elif mode in {"delete", "delete_lines"}:
+        single_line = params.get("line") or params.get("line_number")
+        start_line = params.get("start_line") or single_line
+        end_line = params.get("end_line") or single_line
 
         if not start_line or not end_line:
-            raise ValueError("'start_line' and 'end_line' required for delete_lines mode")
+            raise ValueError("'line' (or start_line/end_line) required for delete mode")
         if start_line < 1 or end_line < start_line:
             raise ValueError("Invalid line range")
 

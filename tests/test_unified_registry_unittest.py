@@ -25,10 +25,13 @@ class TestCanonicalMcpSurface(unittest.TestCase):
         from app.routes.mcp import handle_tools_list
         payload = asyncio.run(handle_tools_list({}))
         names = {tool["name"] for tool in payload["tools"]}
-        self.assertLessEqual(payload["count"], 40)
-        self.assertIn("shell", names)
-        self.assertIn("memory_history", names)
+        self.assertLessEqual(payload["count"], 50)
+        self.assertIn("chat", names)
+        self.assertIn("memory_search", names)
         self.assertIn("code_search", names)
+        self.assertIn("aihelper_pair", names)
+        self.assertNotIn("shell", names)
+        self.assertNotIn("group_chat_create", names)
 
     def test_full_surface_matches_canonical_inventory_without_duplicates(self):
         import asyncio
@@ -69,7 +72,7 @@ class TestCoreDeviceDiscovery(unittest.TestCase):
     def test_core_keeps_global_vision_and_input_schemas_discoverable(self):
         from app.mcp.tool_registry_unified import get_canonical_all_tools, filter_tools_for_profile
         names = {tool["name"] for tool in filter_tools_for_profile(get_canonical_all_tools(), "core")}
-        self.assertTrue({"computer_observe", "computer_screenshot", "computer_input"} <= names)
+        self.assertTrue({"aihelper_observe", "aihelper_screenshot", "aihelper_input"} <= names)
 
 
 class TestCanonicalMcpCompatibilityDelegates(unittest.TestCase):
@@ -127,6 +130,25 @@ class TestCanonicalRegistryAudit(unittest.TestCase):
                 "service", "process", "network", "security", "display", "input",
                 "container", "logs", "package", "hardware", "custom",
             })
+
+    def test_every_hidden_v5_tool_has_an_explicit_consolidation_outcome(self):
+        from app.mcp.tool_registry_audit import LEGACY_CONSOLIDATION
+        from app.mcp.tool_registry_unified import CANONICAL_TOOL_NAMES
+        from app.mcp.tool_registry_v5 import get_all_tools
+
+        hidden = {tool["name"] for tool in get_all_tools()} - set(CANONICAL_TOOL_NAMES)
+        self.assertEqual(hidden, set(LEGACY_CONSOLIDATION))
+        for name, row in LEGACY_CONSOLIDATION.items():
+            self.assertIn(row["decision"], {"MERGE", "INTERNAL_ONLY", "REMOVE"}, name)
+            self.assertTrue(row["replacement"], name)
+
+    def test_inventory_report_exposes_legacy_consolidation_summary(self):
+        from app.mcp.tool_registry_audit import LEGACY_CONSOLIDATION, inventory_report
+        report = inventory_report(events=[])
+        self.assertEqual(report["legacy_consolidation"], LEGACY_CONSOLIDATION)
+        self.assertEqual(sum(report["legacy_decisions"].values()), len(LEGACY_CONSOLIDATION))
+        self.assertGreater(report["legacy_decisions"].get("MERGE", 0), 0)
+        self.assertGreater(report["legacy_decisions"].get("INTERNAL_ONLY", 0), 0)
 
     def test_known_code_read_compatibility_alias_is_explicit(self):
         from app.mcp.tool_registry_audit import build_canonical_inventory
@@ -186,6 +208,10 @@ class TestCanonicalRegistryAudit(unittest.TestCase):
             self.assertFalse(defaults["read_only"], name)
             self.assertEqual(registry._classify_tool(name, defaults), "write_scoped", name)
         self.assertTrue(registry._policy_defaults("workspace_clear", "workspace", "test")["destructive"])
+        for name in ("vision_start", "vision_stop"):
+            defaults = registry._policy_defaults(name, "device", "test")
+            self.assertFalse(defaults["read_only"], name)
+            self.assertEqual(registry._classify_tool(name, defaults), "write_scoped", name)
 
     def test_mixed_or_destructive_admin_tools_use_strongest_policy(self):
         from app.mcp.runtime_registry import RuntimeToolRegistry
@@ -242,8 +268,8 @@ class TestSemanticInventoryProfiles(unittest.TestCase):
         self.assertNotIn("file_edit", code_names)
         self.assertIn("file_edit", file_names)
         self.assertNotIn("code_search", file_names)
-        self.assertIn("device_info", system_names)
-        self.assertIn("process_ops", system_names)
+        self.assertIn("aihelper_device_info", system_names)
+        self.assertIn("aihelper_process_ops", system_names)
 
     def test_debug_and_vision_profiles_include_compact_hints(self):
         import asyncio
@@ -253,9 +279,25 @@ class TestSemanticInventoryProfiles(unittest.TestCase):
         vision = asyncio.run(handle_tools_list({"inventory": "vision"}))
         self.assertLessEqual(debug["count"], 8)
         self.assertEqual({tool["name"] for tool in vision["tools"]}, {
-            "computer_observe", "computer_screenshot", "browser_screenshot",
+            "aihelper_observe", "aihelper_screenshot", "aihelper_vision_start", "aihelper_vision_status",
+            "aihelper_vision_observe", "aihelper_vision_stop", "browser_screenshot",
         })
         status = next(tool for tool in debug["tools"] if tool["name"] == "status")
         self.assertIn("read-only", status["x_usage_hint"])
         self.assertIn("debug", debug["inventories"])
         self.assertEqual(debug["selected_inventory"], "debug")
+
+    def test_tool_scopes_and_aihelper_tooltips_are_explicit(self):
+        from app.mcp.tool_registry_unified import get_canonical_all_tools, get_inventory_catalog
+        tools = {tool["name"]: tool for tool in get_canonical_all_tools()}
+        assert tools["chat"]["x_scope"] == "global"
+        assert tools["current_time"]["x_scope"] == "global"
+        assert "read-only" in tools["current_time"]["x_tooltip"]
+        assert tools["aihelper_pair"]["x_scope"] == "aihelper"
+        assert tools["mail_inbox"]["x_scope"] == "triforce_auth"
+        assert tools["group_chat_create"]["x_scope"] == "triforce_admin"
+        assert "task=workspace" in tools["aihelper_pair"]["x_tooltip"]
+        catalog = get_inventory_catalog(list(tools.values()))
+        assert catalog["aihelper"]["tools"]
+        assert catalog["triforce_admin"]["tools"]
+        assert catalog["global"]["tools"]

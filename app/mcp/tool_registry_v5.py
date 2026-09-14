@@ -323,7 +323,8 @@ V5_TOOLS: List[Dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path to edit"},
+                "path": {"type": "string", "description": "File path to edit (absolute or relative to project root)"},
+                "root": {"type": "string", "description": "Approved project root directory (default: /home/zombie/workspace/triforce). Use for other workspace repositories such as /home/zombie/workspace/ai-coder."},
                 "mode": {
                     "type": "string",
                     "enum": ["replace", "insert", "append", "delete"],

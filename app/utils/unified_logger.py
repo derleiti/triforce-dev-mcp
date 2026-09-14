@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
+from .log_formatters import TriForceConsoleFormatter
+
 UNIFIED_LOG_PATH = Path(os.environ.get("TRIFORCE_LOG_DIR", str(Path(__file__).parent.parent.parent / "logs"))) / "unified.log"
 UNIFIED_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -48,7 +50,7 @@ def setup_unified_logging():
     # Single stdout handler  
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setLevel(logging.INFO)
-    stdout_handler.setFormatter(UnifiedFormatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
+    stdout_handler.setFormatter(TriForceConsoleFormatter(include_source=True))
     
     # Nur zum ailinux Root Logger hinzufügen
     ailinux_logger = logging.getLogger("ailinux")

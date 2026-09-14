@@ -1,5 +1,8 @@
-triforce-backend (1:2.86.4-1) noble; urgency=medium
+triforce-backend (1:2.86.5-1) noble; urgency=medium
 
+  * Consolidate MCP discovery into global, aihelper, authenticated and admin scopes.
+  * Add canonical aihelper_* device tools with legacy Helper wire compatibility.
+  * Add aihelper_pair lifecycle actions for status, pair, reconnect and disconnect.
   * Harden browser workspace reconnects after Android/background suspension.
   * Add server-originated workspace heartbeat and opt-in Screen Wake Lock.
   * Add one-shot browser-to-app workspace handoff with resume-key rotation.

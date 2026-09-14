@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request
 
-from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES
+from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES, AIHELPER_CANONICAL_TO_WIRE
 from .share_manifest import (
     CLIPBOARD_READ_TOOLS,
     CLIPBOARD_WRITE_TOOLS,
@@ -36,11 +36,11 @@ from .share_manifest import (
     manifest_resource,
 )
 from .mcp_workspace_sessions import (
-    claim_workspace_with_resume_token, get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
+    claim_workspace_with_resume_token, clear_session, get_workspace, get_workspace_by_token, get_workspace_lease, mark_transport_detached,
     resolve_web_pair_code, workspace_status as lease_status,
 )
 
-CONTROL_TOOLS = {"workspace_status", "workspace_pair"}
+CONTROL_TOOLS = {"aihelper_pair", "workspace_status", "workspace_pair"}
 BROWSER_READ_TOOLS = {
     "workspace_info", "file_read", "file_tree", "code_read", "code_tree",
     "code_search", "code_grep", "file_ops", "git",
@@ -48,12 +48,24 @@ BROWSER_READ_TOOLS = {
 BROWSER_WRITE_TOOLS = BROWSER_READ_TOOLS | {
     "file_edit", "directory_create", "workspace_clear", "code_edit", "shell",
 }
+
+# Public canonical names live in workspace_tool_contract; shipped Helper clients
+# may continue advertising the legacy wire vocabulary indefinitely.
+AIHELPER_WIRE_TO_CANONICAL = {wire: canonical for canonical, wire in AIHELPER_CANONICAL_TO_WIRE.items()}
 DEVICE_READ_TOOLS = {"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "clipboard_read", "device_info", "process_ops", "service_ops"}
 DEVICE_WRITE_TOOLS = {"clipboard_write", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input"}
 DEVICE_TOOLS = DEVICE_READ_TOOLS | DEVICE_WRITE_TOOLS
-READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS | DEVICE_TOOLS
-WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS | DEVICE_TOOLS | set(COMPUTE_TOOLS)
-LOCAL_TOOL_NAMES = WRITE_TOOLS
+AIHELPER_CANONICAL_TOOLS = set(AIHELPER_CANONICAL_TO_WIRE)
+READ_ONLY_TOOLS = CONTROL_TOOLS | BROWSER_READ_TOOLS | DEVICE_TOOLS | AIHELPER_CANONICAL_TOOLS
+WRITE_TOOLS = CONTROL_TOOLS | BROWSER_WRITE_TOOLS | DEVICE_TOOLS | AIHELPER_CANONICAL_TOOLS | set(COMPUTE_TOOLS)
+AIHELPER_LOCAL_TOOLS = set(AIHELPER_CANONICAL_TO_WIRE)
+LOCAL_TOOL_NAMES = WRITE_TOOLS | AIHELPER_LOCAL_TOOLS
+
+def _wire_tool_name(name: str) -> str:
+    return AIHELPER_CANONICAL_TO_WIRE.get(str(name or ""), str(name or ""))
+
+def _canonical_helper_tool_name(name: str) -> str:
+    return AIHELPER_WIRE_TO_CANONICAL.get(str(name or ""), str(name or ""))
 
 # Local MCP mirrors the canonical TriForce inventory automatically. These three
 # product domains intentionally stay invisible because they operate privileged
@@ -62,7 +74,11 @@ LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
 # Static MCP clients may cache tools/list before the user pairs a native Helper.
 # Keep the AI-facing vision/input schemas discoverable, but mark them locked;
 # execution still requires a live lease, advertised capability and manifest grant.
-DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset({"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "computer_input", "app_ops"})
+DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset({
+    "aihelper_pair", "aihelper_observe", "aihelper_screenshot", "aihelper_vision_start",
+    "aihelper_vision_status", "aihelper_vision_observe", "aihelper_vision_stop",
+    "aihelper_input", "aihelper_app_ops",
+})
 WORKSPACE_EXECUTOR_WAIT_SECONDS = 25.0
 WORKSPACE_EXECUTOR_POLL_SECONDS = 0.25
 
@@ -189,32 +205,38 @@ def _binding_share_manifest(binding: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _local_tool_visible(name: str, binding: Optional[Dict[str, Any]]) -> bool:
-    """Project local discovery from announced capability AND its active share grant."""
+    """Project local discovery from announced capability AND its active share grant.
+
+    Canonical ``aihelper_*`` names are translated to the legacy Helper wire
+    vocabulary before checking the capability advertisement/share manifest.
+    This keeps new MCP clients clean without breaking already-shipped helpers.
+    """
     if name in CONTROL_TOOLS:
         return True
     if not binding:
         return False
+    wire_name = _wire_tool_name(name)
     capabilities = set(binding.get("capabilities") or [])
-    if name not in capabilities:
+    if name not in capabilities and wire_name not in capabilities:
         return False
     manifest = _binding_share_manifest(binding)
-    if name in WORKSPACE_WRITE_TOOLS:
+    if wire_name in WORKSPACE_WRITE_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_WORKSPACE, "write")
-    if name in WORKSPACE_READ_TOOLS:
+    if wire_name in WORKSPACE_READ_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_WORKSPACE, "read")
-    if name in DISPLAY_OBSERVE_TOOLS:
+    if wire_name in DISPLAY_OBSERVE_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_DISPLAY, "observe")
-    if name in DISPLAY_CONTROL_TOOLS:
+    if wire_name in DISPLAY_CONTROL_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_DISPLAY, "control")
-    if name in SHARE_DEVICE_READ_TOOLS:
+    if wire_name in SHARE_DEVICE_READ_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_DEVICE, "read")
-    if name in DEVICE_CONTROL_TOOLS:
+    if wire_name in DEVICE_CONTROL_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_DEVICE, "control")
-    if name in CLIPBOARD_WRITE_TOOLS:
+    if wire_name in CLIPBOARD_WRITE_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_CLIPBOARD, "write")
-    if name in CLIPBOARD_READ_TOOLS:
+    if wire_name in CLIPBOARD_READ_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_CLIPBOARD, "read")
-    if name in COMPUTE_TOOLS:
+    if wire_name in COMPUTE_TOOLS:
         return manifest_has_grant(manifest, RESOURCE_COMPUTE, "execute")
     return False
 
@@ -238,7 +260,14 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
                 continue
             name = str(tool.get("name") or "")
             inventory = str(tool.get("x_inventory") or "misc")
+            namespace = str(tool.get("x_namespace") or "global")
+            access = str(tool.get("x_access") or "policy")
             if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
+                continue
+            # Public/local MCP exposes only portable global AI tools plus the
+            # explicitly shared AILinux Helper surface. TriForce-owned account
+            # integrations and engine administration stay on authenticated/admin MCP.
+            if namespace == "triforce" or access in {"authenticated", "admin"}:
                 continue
             locked_local = name in LOCAL_TOOL_NAMES and not _local_tool_visible(name, binding)
             # Keep selected device/vision schemas stable across the full lease lifecycle.
@@ -629,6 +658,56 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     workspace_id = str(arguments.pop("workspace_id", "") or "").strip().upper()
     workspace_context = str(arguments.pop("workspace_context", "") or "").strip()[:256]
 
+    if name == "aihelper_pair":
+        action = str(arguments.pop("action", "status") or "status").strip().lower()
+        wait_seconds = max(0.0, min(25.0, float(arguments.pop("wait_seconds", 5) or 0)))
+        code = str(arguments.get("code") or "").strip().upper()
+        affinity_sid = workspace_affinity_id(request, workspace_context)
+        effective_sid = affinity_sid or sid
+        binding = get_workspace_lease(effective_sid) if effective_sid else None
+
+        if action == "pair":
+            name = "workspace_pair"
+        elif action == "status":
+            name = "workspace_status"
+        elif action == "reconnect":
+            if binding is None:
+                if code:
+                    name = "workspace_pair"
+                else:
+                    return _tool_error(
+                        "AIHELPER_LEASE_REQUIRED",
+                        "No durable AILinux Helper lease is available to reconnect. Pair with a fresh one-time code first.",
+                        tool="aihelper_pair", action="reconnect", retryable=True,
+                    )
+            else:
+                refreshed = await wait_for_workspace_executor(request, binding, timeout=wait_seconds)
+                return _workspace_binding_response(refreshed, token="")
+        elif action == "disconnect":
+            if binding is None or not effective_sid:
+                return {
+                    "content": [{"type": "text", "text": "AILinux Helper is already disconnected for this MCP session."}],
+                    "structuredContent": {"ok": True, "connected": False, "revoked": False, "state": "unpaired"},
+                    "isError": False,
+                }
+            connection = binding.get("connection")
+            clear_session(effective_sid)
+            if connection is not None and not bool(getattr(connection, "closed", True)):
+                try:
+                    await connection.websocket.send_json({
+                        "jsonrpc": "2.0", "method": "workspace/revoked",
+                        "params": {"ok": True, "reason": "revoked_by_mcp_user_request"},
+                    })
+                except Exception:
+                    pass
+            return {
+                "content": [{"type": "text", "text": "AILinux Helper share/workspace lease disconnected and revoked."}],
+                "structuredContent": {"ok": True, "connected": False, "revoked": True, "state": "unpaired"},
+                "isError": False,
+            }
+        else:
+            return _tool_error("AIHELPER_PAIR_ACTION_INVALID", f"Unsupported aihelper_pair action: {action}", tool="aihelper_pair")
+
     try:
         name, arguments = _device_tool_from_shell_alias(name, arguments)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -737,18 +816,20 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             }
 
     mode = str(binding.get("mode") or "read_only")
-    if mode != "write" and name in BROWSER_WRITE_TOOLS and workspace_tool_requires_write(name, arguments):
+    wire_name = _wire_tool_name(name)
+    if mode != "write" and name in BROWSER_WRITE_TOOLS and workspace_tool_requires_write(wire_name, arguments):
         return _tool_error("WORKSPACE_READ_ONLY", f"Browser workspace is Read only; tool '{name}' requires Write mode.", tool=name)
 
     capabilities = set(binding.get("capabilities") or [])
-    if name not in capabilities:
+    if name not in capabilities and wire_name not in capabilities:
         return _tool_error(
             "WORKSPACE_TOOL_UNAVAILABLE",
             f"The paired browser did not advertise local tool '{name}'.",
             tool=name,
+            wire_tool=wire_name,
             capabilities=sorted(capabilities),
         )
-    if name in DISPLAY_OBSERVE_TOOLS and not manifest_has_grant(
+    if wire_name in DISPLAY_OBSERVE_TOOLS and not manifest_has_grant(
         _binding_share_manifest(binding), RESOURCE_DISPLAY, "observe"
     ):
         return _tool_error(
@@ -756,7 +837,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             "The paired helper has not granted display observation for this workspace.",
             tool=name,
         )
-    if name in DISPLAY_CONTROL_TOOLS and not manifest_has_grant(
+    if wire_name in DISPLAY_CONTROL_TOOLS and not manifest_has_grant(
         _binding_share_manifest(binding), RESOURCE_DISPLAY, "control"
     ):
         return _tool_error(
@@ -764,7 +845,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             "The paired helper has not granted desktop control for this workspace.",
             tool=name,
         )
-    if name in SHARE_DEVICE_READ_TOOLS and not manifest_has_grant(
+    if wire_name in SHARE_DEVICE_READ_TOOLS and not manifest_has_grant(
         _binding_share_manifest(binding), RESOURCE_DEVICE, "read"
     ):
         return _tool_error(
@@ -773,10 +854,10 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             tool=name,
         )
     if (
-        (name in DEVICE_CONTROL_TOOLS or (
-            name in DEVICE_MUTATING_TOOLS
-            and name not in DISPLAY_CONTROL_TOOLS
-            and workspace_tool_requires_write(name, arguments)
+        (wire_name in DEVICE_CONTROL_TOOLS or (
+            wire_name in DEVICE_MUTATING_TOOLS
+            and wire_name not in DISPLAY_CONTROL_TOOLS
+            and workspace_tool_requires_write(wire_name, arguments)
         ))
         and not manifest_has_grant(_binding_share_manifest(binding), RESOURCE_DEVICE, "control")
     ):
@@ -785,7 +866,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             "The paired helper has not granted device control for this workspace.",
             tool=name,
         )
-    if name in COMPUTE_TOOLS and not manifest_has_grant(
+    if wire_name in COMPUTE_TOOLS and not manifest_has_grant(
         _binding_share_manifest(binding), RESOURCE_COMPUTE, "execute"
     ):
         return _tool_error(
@@ -800,7 +881,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if "client_workspace_tool" not in set(getattr(connection, "supported_tools", []) or []):
         raise RuntimeError("Connected browser workspace does not provide client_workspace_tool")
 
-    if name in COMPUTE_TOOLS:
+    if wire_name in COMPUTE_TOOLS:
         compute = manifest_resource(_binding_share_manifest(binding), RESOURCE_COMPUTE)
         runtime = str(compute.get("runtime") or "").strip().lower().replace("-", "_")
         if runtime == "triforce_docker":
@@ -820,7 +901,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     try:
         result = await connection.send_tool_call(
             "client_workspace_tool",
-            {"tool": name, "arguments": arguments, "mode": mode},
+            {"tool": wire_name, "arguments": arguments, "mode": mode},
             timeout=180.0,
         )
     except (asyncio.TimeoutError, TimeoutError) as exc:
@@ -849,7 +930,7 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
         raise
     if not isinstance(result, dict):
         raise RuntimeError("Browser workspace returned an invalid MCP tool result")
-    return _normalize_display_tool_result(name, result)
+    return _normalize_display_tool_result(wire_name, result)
 
 
 # Backwards-compatible import name. Workspace routing is now shared by public

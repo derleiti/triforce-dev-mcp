@@ -35,6 +35,18 @@ DESTRUCTIVE_WORKFLOW_POLICY = """Destructive/mutating workflow standard:
 """
 
 
+EVIDENCE_REFLECTION_PROTOCOL = """Evidence reflection loop (internal operating discipline; do not print private chain-of-thought):
+- Trigger it after any evidence-bearing result that can materially change the next decision: code/file reads, search/crawl, logs/status, diffs, test/lint/build output, screenshots/observations, tool errors, capability discovery, or a changed runtime state.
+- PASS 1 — GROUND + REALITY CHECK: extract only observable facts; separate fact from inference; note freshness, missing context and contradictions; compare expected versus actual behavior; check user scope, permissions, lifecycle/state, security and integration boundaries. Ask what evidence would falsify the current explanation.
+- PASS 2 — DIVERGE + CHALLENGE: when ambiguity remains, generate meaningfully different hypotheses or next moves rather than synonyms. Cover different failure layers where relevant: local code, integration/schema/client caching, permissions/policy, lifecycle/concurrency, network/runtime state, data shape, and UX/human interaction. Include the simplest/no-change explanation. Try to disprove the leading option before selecting it.
+- REALITY GATE: choose the smallest next action that maximizes information or satisfies the acceptance condition. If evidence is insufficient, collect one targeted fact instead of patching from intuition. After a consequential mutation or verification result, run both passes again on the new evidence.
+- Diversity beats repetition: alternatives must differ in mechanism, layer, or trade-off. Do not manufacture extra options when the evidence is deterministic; use the two passes to verify the deterministic conclusion instead.
+- Standard self-prompts to draw from as useful: What changed? What am I assuming? What would prove me wrong? Is the evidence stale? Which layer actually owns this behavior? What hidden coupling or cache could explain it? What is the cheapest discriminating test? What user constraint or permission boundary applies? Could the correct action be no change? What failure would this fix introduce? What observation must be true after success?
+- Creativity remains evidence-bounded: novel ideas are welcome only when technically plausible, reversible where possible, compatible with current constraints, and followed by a reality check. Prefer a small experiment over a confident story.
+- Keep this loop efficient. Do not narrate every internal pass. Surface concise conclusions, evidence, uncertainty, and the chosen next move when they matter to the operator.
+"""
+
+
 def build_runtime_policy(mode: str = "mcp") -> str:
     mode_name = str(mode or "mcp").strip().lower()
     prefix = {
@@ -67,7 +79,11 @@ BINARY_EXEC_GUIDANCE = (
 )
 
 def build_mcp_instructions() -> str:
-    return (MCP_CORE_INSTRUCTIONS.strip() + "\n\n" + build_runtime_policy("mcp")).strip()
+    return (
+        MCP_CORE_INSTRUCTIONS.strip()
+        + "\n\n" + EVIDENCE_REFLECTION_PROTOCOL.strip()
+        + "\n\n" + build_runtime_policy("mcp")
+    ).strip()
 
 
 WORK_EXECUTION_QUESTIONS = (

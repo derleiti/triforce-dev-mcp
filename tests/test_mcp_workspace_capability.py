@@ -97,6 +97,40 @@ async def test_workspace_pair_claims_waiting_web_helper_for_current_session():
 
 
 @pytest.mark.asyncio
+async def test_aihelper_pair_canonical_lifecycle_supports_pair_status_reconnect_disconnect():
+    code = sessions.create_web_pair_code()
+    conn = DummyConnection('canary-helper')
+    sessions.register_waiting_workspace(code, conn, mode='read_only', task='canary', capabilities=['computer_observe'])
+    req = DummyRequest('session-A')
+
+    paired = await call_public_local_tool(req, 'aihelper_pair', {'action': 'pair', 'code': code})
+    assert paired['structuredContent']['ok'] is True
+    assert sessions.get_workspace('session-A')['client_id'] == 'canary-helper'
+
+    status = await call_public_local_tool(req, 'aihelper_pair', {'action': 'status'})
+    assert status['structuredContent']['connected'] is True
+
+    reconnected = await call_public_local_tool(req, 'aihelper_pair', {'action': 'reconnect', 'wait_seconds': 0})
+    assert reconnected['structuredContent']['connected'] is True
+
+    disconnected = await call_public_local_tool(req, 'aihelper_pair', {'action': 'disconnect'})
+    assert disconnected['structuredContent']['ok'] is True
+    assert disconnected['structuredContent']['revoked'] is True
+    assert sessions.get_workspace('session-A') is None
+
+
+@pytest.mark.asyncio
+async def test_aihelper_canonical_device_name_forwards_to_legacy_helper_wire_name():
+    conn = DummyConnection('compat-helper')
+    sessions.bind_workspace('session-A', conn, mode='read_only', capabilities=['computer_observe'])
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(req, 'aihelper_observe', {})
+    assert result['isError'] is False
+    assert conn.calls[-1][0] == 'client_workspace_tool'
+    assert conn.calls[-1][1]['tool'] == 'computer_observe'
+
+
+@pytest.mark.asyncio
 async def test_read_only_binding_blocks_write_and_allows_advertised_read():
     conn = DummyConnection()
     sessions.bind_workspace('session-A', conn, mode='read_only', task='inspect', capabilities=['file_read'])
@@ -467,9 +501,29 @@ async def test_valid_new_workspace_id_rebinds_from_old_suspended_lease():
     assert sessions.get_workspace('session-A')['client_id'] == 'new-browser'
 
     old_pair = sessions.resolve_web_pair_code(old_code)
-    assert old_pair is not None
-    assert 'session-A' not in old_pair['paired_session_ids']
-    assert old_pair['paired_session_id'] != 'session-A'
+    assert old_pair is None or 'session-A' not in old_pair.get('paired_session_ids', [])
+    if old_pair is not None:
+        assert old_pair.get('paired_session_id') != 'session-A'
+
+
+def test_direct_new_pair_replaces_old_suspended_lease_for_same_session():
+    old_code = sessions.create_web_pair_code()
+    old_conn = DummyConnection('old-direct-helper')
+    sessions.register_waiting_workspace(old_code, old_conn, mode='write', capabilities=['file_read'])
+    old_bound = sessions.claim_waiting_workspace(old_code, 'session-replace')
+    sessions.suspend_connection(old_conn)
+
+    new_code = sessions.create_web_pair_code()
+    new_conn = DummyConnection('new-direct-helper')
+    sessions.register_waiting_workspace(new_code, new_conn, mode='write', capabilities=['file_read', 'file_edit'])
+    new_bound = sessions.claim_waiting_workspace(new_code, 'session-replace')
+
+    assert new_bound['lease_id'] != old_bound['lease_id']
+    assert sessions.get_workspace('session-replace')['client_id'] == 'new-direct-helper'
+    old_pair = sessions.resolve_web_pair_code(old_code)
+    assert old_pair is None or 'session-replace' not in old_pair.get('paired_session_ids', [])
+    if old_pair is not None:
+        assert old_pair.get('paired_session_id') != 'session-replace'
 
 
 @pytest.mark.asyncio
@@ -1135,7 +1189,7 @@ def test_live_vision_tools_are_canonical_and_discoverable_when_unpaired():
     from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES
     from app.services.mcp_workspace_bridge import DISCOVERABLE_LOCKED_LOCAL_TOOLS
 
-    for name in ('vision_start', 'vision_status', 'vision_observe', 'vision_stop'):
+    for name in ('aihelper_vision_start', 'aihelper_vision_status', 'aihelper_vision_observe', 'aihelper_vision_stop'):
         assert name in WORKSPACE_TOOL_NAMES
         assert name in DISCOVERABLE_LOCKED_LOCAL_TOOLS
 

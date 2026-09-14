@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .runtime_registry import RuntimeToolRegistry
 from .tool_registry_unified import get_canonical_all_tools
+from .workspace_tool_contract import AIHELPER_CANONICAL_TO_WIRE
 
 TOOLSET_VERSION = "p7-v1"
 VALID_DECISIONS = frozenset({
@@ -29,6 +30,51 @@ VALID_CATEGORY_PREFIXES = frozenset({
 # not infer more aliases by similar descriptions/names; those need P7 evidence.
 KNOWN_DUPLICATES: Dict[str, str] = {
     "code_read": "file_read",
+}
+
+# Explicit migration outcome for every v5 definition intentionally omitted from
+# the canonical model-facing surface. This prevents silent tool loss when old
+# registries are compared during future consolidations. ``replacement`` is a
+# canonical capability/workflow, not necessarily a wire-compatible alias.
+LEGACY_CONSOLIDATION: Dict[str, Dict[str, str]] = {
+    "health": {"decision": "MERGE", "replacement": "status"},
+    "logs": {"decision": "MERGE", "replacement": "log_viewer"},
+    "logs_errors": {"decision": "MERGE", "replacement": "log_viewer"},
+    "logs_stats": {"decision": "MERGE", "replacement": "mcp_analytics"},
+    "restart": {"decision": "MERGE", "replacement": "service_control/agent_start"},
+    "hive_compress": {"decision": "INTERNAL_ONLY", "replacement": "memory subsystem"},
+    "hive_recall": {"decision": "INTERNAL_ONLY", "replacement": "memory subsystem"},
+    "hive_stats": {"decision": "INTERNAL_ONLY", "replacement": "memory subsystem"},
+    "code_patch": {"decision": "MERGE", "replacement": "code_edit (AICoder keeps local patch adapter)"},
+    "dev_analyze": {"decision": "MERGE", "replacement": "specialist + code tools"},
+    "dev_lint": {"decision": "MERGE", "replacement": "specialist + client-local lint/test"},
+    "dev_debug": {"decision": "MERGE", "replacement": "specialist + debug/code tools"},
+    "dev_summarize": {"decision": "MERGE", "replacement": "specialist + code_read/code_tree"},
+    "dev_links": {"decision": "MERGE", "replacement": "specialist + code_search"},
+    "dev_refactor": {"decision": "MERGE", "replacement": "specialist + code_edit"},
+    "image_search": {"decision": "MERGE", "replacement": "search(mode=images)"},
+    "ollama_run": {"decision": "MERGE", "replacement": "chat/models"},
+    "ollama_list": {"decision": "MERGE", "replacement": "models"},
+    "init": {"decision": "REMOVE", "replacement": "MCP initialize"},
+    "wp_list_drafts": {"decision": "MERGE", "replacement": "wp_list_posts"},
+    "doc_scan": {"decision": "MERGE", "replacement": "file_tree/code_tree"},
+    "doc_read": {"decision": "MERGE", "replacement": "file_read/code_read"},
+    "doc_search": {"decision": "MERGE", "replacement": "code_search/search(mode=docs)"},
+    "doc_tree": {"decision": "MERGE", "replacement": "file_tree/code_tree"},
+    "doc_stats": {"decision": "MERGE", "replacement": "specialist + file_tree"},
+    "telegram_mcp_agent": {"decision": "MERGE", "replacement": "nova_chat_agent"},
+    "flarum_refresh": {"decision": "MERGE", "replacement": "flarum_discussions"},
+    "flarum_admin_request": {"decision": "INTERNAL_ONLY", "replacement": "typed flarum_* tools"},
+    "flarum_discussion": {"decision": "MERGE", "replacement": "flarum_discussion_get"},
+    "idle_assign": {"decision": "INTERNAL_ONLY", "replacement": "agent orchestration"},
+    "notify_status": {"decision": "MERGE", "replacement": "notify_list/mcp_analytics"},
+    "group_chat_enqueue": {"decision": "INTERNAL_ONLY", "replacement": "group_chat_message"},
+    "group_chat_status": {"decision": "MERGE", "replacement": "group_chat_read/group_chat_list"},
+    "agent_chat_list": {"decision": "MERGE", "replacement": "group_chat_list"},
+    "agent_chat_read": {"decision": "MERGE", "replacement": "group_chat_read"},
+    "agent_chat_stream": {"decision": "MERGE", "replacement": "group_chat_read"},
+    "agent_chat_summary": {"decision": "MERGE", "replacement": "group_chat_consolidate"},
+    "agent_chat_cleanup": {"decision": "INTERNAL_ONLY", "replacement": "group-chat retention"},
 }
 
 _CLIENT_PLATFORMS = ["android", "browser", "linux", "macos", "windows"]
@@ -59,20 +105,28 @@ def _source_map() -> Dict[str, str]:
             name = str(tool.get("name") or "").strip()
             if name:
                 result.setdefault(name, source)
+                canonical_helper = next(
+                    (canonical for canonical, wire in AIHELPER_CANONICAL_TO_WIRE.items() if wire == name),
+                    "",
+                )
+                if canonical_helper:
+                    result.setdefault(canonical_helper, source + ":legacy-wire")
+    result.setdefault("aihelper_pair", "workspace_tool_contract")
     result.setdefault("nova_chat_agent", "tool_registry_unified:synthetic")
     return result
 
 
 def _category(name: str, inventory: str) -> str:
-    if name.startswith("workspace_"):
+    wire_name = AIHELPER_CANONICAL_TO_WIRE.get(name, name)
+    if name == "aihelper_pair" or name.startswith("workspace_"):
         return "workspace.core"
     if name in {"file_read", "file_tree", "file_edit", "directory_create", "code_read", "code_tree", "code_search", "code_grep", "code_edit", "file_ops"}:
         return "workspace.files"
-    if name in {"clipboard_read", "clipboard_write"}:
+    if wire_name in {"clipboard_read", "clipboard_write"}:
         return "share.clipboard"
-    if name in {"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop"}:
+    if wire_name in {"computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop"}:
         return "display.capture"
-    if name in {"shell", "compute_execute"}:
+    if wire_name in {"shell", "compute_execute"}:
         return "compute.exec"
     if name.startswith("service_") or name in {"restart", "hot_reload"}:
         return "service.control"
@@ -104,8 +158,11 @@ def _category(name: str, inventory: str) -> str:
         "network": "network.remote",
         "observability": "logs.observability",
         "filesystem": "dev.filesystem",
+        "code": "dev.code",
         "workspace": "workspace.core",
         "device": "share.device",
+        "aihelper": "share.device",
+        "security": "security.vault",
         "browser": "custom.browser",
         "wordpress": "custom.wordpress",
         "forum": "custom.forum",
@@ -120,8 +177,9 @@ def _category(name: str, inventory: str) -> str:
 
 
 def _required_capabilities(name: str) -> List[str]:
-    # These names are the wire capabilities used by share_manifest.py.  Server-
-    # local tools have no client capability prerequisite and therefore [].
+    # These names are the legacy wire capabilities used by share_manifest.py.
+    # Canonical aihelper_* names are translated at the protocol boundary.
+    wire_name = AIHELPER_CANONICAL_TO_WIRE.get(name, name)
     workspace_caps = {
         "workspace_status": ["workspace_info"],
         "workspace_info": ["workspace_info"],
@@ -146,7 +204,7 @@ def _required_capabilities(name: str) -> List[str]:
         "clipboard_write": ["clipboard_write"],
         "compute_execute": ["compute_execute"],
     }
-    return list(workspace_caps.get(name, []))
+    return list(workspace_caps.get(wire_name, []))
 
 
 def _platforms(name: str) -> List[str]:
@@ -275,9 +333,14 @@ def toolset_descriptor(records: Optional[List[Dict[str, Any]]] = None) -> Dict[s
 
 def inventory_report(*, events: Optional[Iterable[Mapping[str, Any]]] = None) -> Dict[str, Any]:
     records = build_canonical_inventory(events=events)
+    decisions: Dict[str, int] = defaultdict(int)
+    for row in LEGACY_CONSOLIDATION.values():
+        decisions[str(row.get("decision") or "UNKNOWN")] += 1
     return {
         "toolset": toolset_descriptor(records),
         "tools": records,
+        "legacy_consolidation": deepcopy(LEGACY_CONSOLIDATION),
+        "legacy_decisions": dict(sorted(decisions.items())),
     }
 
 

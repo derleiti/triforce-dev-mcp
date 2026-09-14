@@ -448,17 +448,44 @@ class TestMcpRuntimeSecurity:
     async def test_external_tools_list_filters_privileged_tools(self):
         from app.routes import mcp as route_mcp
 
-        internal_payload = await route_mcp.handle_tools_list({})
+        internal_payload = await route_mcp.handle_tools_list({"inventory": "all"})
         internal_names = {tool["name"] for tool in internal_payload["tools"]}
-        assert "agent_start" in internal_names
+        assert {"agent_start", "group_chat_create", "chat", "aihelper_pair"} <= internal_names
 
         external = _mock_mcp_request(headers={"X-Forwarded-Port": "9100"}, host="1.2.3.4")
         external_payload = await route_mcp.handle_tools_list({}, request=external)
         external_names = {tool["name"] for tool in external_payload["tools"]}
 
         assert "chat" in external_names
-        assert "group_chat_create" in external_names
+        assert "aihelper_pair" in external_names
+        assert "group_chat_create" not in external_names
         assert "agent_start" not in external_names
+
+    def test_name_only_scope_resolution_cannot_downgrade_admin_or_auth_tools(self):
+        """Server-side authorization often has only the tool name, not tools/list metadata."""
+        from app.utils.mcp_security import is_tool_allowed
+
+        guest = _mock_mcp_request(host="203.0.113.10")
+        guest.state.mcp_auth_method = "public_guest"
+        guest.state.mcp_auth_user = ""
+        guest.state.mcp_auth_full_access = False
+
+        authenticated = _mock_mcp_request(host="203.0.113.10")
+        authenticated.state.mcp_auth_method = "bearer"
+        authenticated.state.mcp_auth_user = "operator@example"
+        authenticated.state.mcp_auth_full_access = False
+
+        assert is_tool_allowed("chat", guest, {}) is True
+        assert is_tool_allowed("mail_inbox", guest, {}) is False
+        assert is_tool_allowed("n8n_mcp_call", guest, {}) is False
+        assert is_tool_allowed("group_chat_create", guest, {}) is False
+        assert is_tool_allowed("status", guest, {}) is True
+        assert is_tool_allowed("shell", guest, {}) is False
+
+        assert is_tool_allowed("mail_inbox", authenticated, {}) is True
+        assert is_tool_allowed("n8n_mcp_call", authenticated, {}) is True
+        assert is_tool_allowed("group_chat_create", authenticated, {}) is False
+        assert is_tool_allowed("status", authenticated, {}) is True
 
     @pytest.mark.asyncio
     async def test_external_tools_call_blocks_privileged_tools(self):

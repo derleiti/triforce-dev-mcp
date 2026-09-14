@@ -19,24 +19,32 @@ class FakeRequest:
         )
 
 
+def test_core_profile_contains_workspace_bootstrap_without_overlay():
+    """Pairing discovery must survive workspace-overlay/cache timing failures."""
+    from app.mcp.tool_registry_unified import get_canonical_all_tools, filter_tools_for_profile
+
+    names = {tool['name'] for tool in filter_tools_for_profile(get_canonical_all_tools(), 'core')}
+    assert {'aihelper_pair'} <= names
+
+
 @pytest.mark.asyncio
 async def test_public_guest_defaults_local_capabilities_off_until_share_exists():
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
     by_name = {tool['name']: tool for tool in result['tools']}
     names = set(by_name)
 
-    # Safe/cloud discovery plus pairing bootstrap remains available.
-    assert {'search', 'models', 'agent_start', 'memory_clear', 'service_control',
-            'workspace_status', 'workspace_pair'} <= names
+    # Global AI discovery plus AILinux Helper pairing/control bootstrap remains available.
+    assert {'chat', 'search', 'models', 'memory_search', 'aihelper_pair'} <= names
+    assert {'agent_start', 'memory_clear', 'service_control', 'group_chat_create'}.isdisjoint(names)
 
-    # No local resource is advertised before the client explicitly shared it.
+    # Workspace/file resources stay hidden until explicitly shared.
     assert {'shell', 'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
             'workspace_info', 'file_read', 'file_tree', 'file_edit',
-            'directory_create', 'workspace_clear', 'clipboard_read', 'clipboard_write'}.isdisjoint(names)
+            'directory_create', 'workspace_clear'}.isdisjoint(names)
 
-    # Static connectors discover native vision/input before pairing, but the
-    # schemas are explicitly locked until a workspace/helper lease exists.
-    for name in {'computer_observe', 'computer_screenshot', 'computer_input'}:
+    # Static connectors discover canonical Helper vision/input schemas before pairing,
+    # but execution remains locked until a share lease exists.
+    for name in {'aihelper_observe', 'aihelper_screenshot', 'aihelper_input'}:
         assert name in names
         assert by_name[name]['x_execution'] == 'local_workspace'
         assert by_name[name]['x_requires_workspace'] is True
@@ -50,19 +58,20 @@ async def test_public_guest_defaults_local_capabilities_off_until_share_exists()
     # silently become host-local execution.
     from app.mcp.tool_registry_unified import get_canonical_all_tools
     canonical = {tool['name']: tool for tool in get_canonical_all_tools()}
-    assert by_name['workspace_pair']['inputSchema'] == canonical['workspace_pair']['inputSchema']
-    assert by_name['workspace_pair']['x_execution'] == 'local_workspace'
+    assert by_name['aihelper_pair']['inputSchema'] == canonical['aihelper_pair']['inputSchema']
+    assert by_name['aihelper_pair']['x_execution'] == 'local_workspace'
     assert by_name['models']['x_execution'] == 'triforce_server'
-    assert by_name['service_control']['x_execution'] == 'triforce_server'
-    assert by_name['service_control']['x_requires_admin'] is True
 
 
 @pytest.mark.asyncio
 async def test_internal_admin_catalog_keeps_server_tools_but_local_overlay_defaults_off():
-    result = await handle_tools_list({}, request=FakeRequest('bearer', True))
-    names = {tool['name'] for tool in result['tools']}
-    assert {'workspace_status', 'workspace_pair', 'shell', 'git', 'code_edit'} <= names
-    assert {'workspace_info', 'file_read', 'file_tree', 'file_edit'}.isdisjoint(names)
+    core = await handle_tools_list({}, request=FakeRequest('bearer', True))
+    core_names = {tool['name'] for tool in core['tools']}
+    assert {'chat', 'aihelper_pair', 'git', 'code_edit'} <= core_names
+    assert 'shell' not in core_names
+    full = await handle_tools_list({'inventory': 'all'}, request=FakeRequest('bearer', True))
+    full_names = {tool['name'] for tool in full['tools']}
+    assert {'shell', 'group_chat_create', 'mail_inbox', 'aihelper_pair'} <= full_names
 
 
 def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_uri():
@@ -82,8 +91,11 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'function effectiveHelperTools()' in html
     assert "capabilities=[...(rootHandle||rootEntry?READ_TOOLS:[]),...(workspaceMode==='write'&&rootHandle?WRITE_TOOLS:[]),...nativeTools];renderShareSummary();" in html
     assert "pairing code|workspace credential|resume token" in html
-    assert "sessionStorage.removeItem('tf_pair_code')" in html
-    assert 'Workspace pairing expired. Creating a fresh pairing ID' in html
+    assert 'Workspace pairing expired. Creating a fresh pairing ID' not in html
+    assert 'Pairing ID invalid or expired. The ID was kept; generate a new ID explicitly before retrying.' in html
+    error_branch = html.split("if(msg.error&&/(pairing code|workspace credential|resume token)/i.test(String(msg.error)))",1)[1].split("if(msg.method==='connected')",1)[0]
+    assert "sessionStorage.removeItem('tf_pair_code')" not in error_branch
+    assert "setTimeout(()=>connect(),250)" not in error_branch
     assert 'function startHeartbeat()' in html
     assert 'watchdogTimer' in html
     assert 'connectPromise=null' in html
@@ -114,7 +126,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'Selecting a folder does not enumerate or analyze it' in html
     assert "let lastStatusText=''" in html
     assert 'aria-live="polite"' in html
-    assert 'AILinux Helper 2.90.23' in html
+    assert 'AILinux Helper 2.90.24' in html
     assert 'id="terminalBackend"' in html
     assert 'native.setShellBackend' in html
     assert "$('terminalBackend').onchange" in html
@@ -164,7 +176,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "execCommand('copy')" in html
     assert "Copy failed: " in html
     assert '/v1/mcp/helper/android' in html
-    assert '/v1/mcp/helper/icon.png?v=29023' in html
+    assert '/v1/mcp/helper/icon.png?v=29024' in html
     assert '/v1/mcp/helper/linux-appimage' in html
     assert '/v1/mcp/helper/linux-deb' in html
     assert '/v1/mcp/helper/windows' in html
@@ -213,7 +225,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.23-browser'" in html
+    assert "EXECUTOR_VERSION='2.90.24-browser'" in html
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -298,8 +310,8 @@ def test_mobile_workspace_install_surface_and_pwa_contract():
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=29023' in html
-    assert "/v1/mcp/sw.js?v=29023" in html
+    assert '/v1/mcp/manifest.webmanifest?v=29024' in html
+    assert "/v1/mcp/sw.js?v=29024" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
     assert 'native foreground executor' in html
@@ -314,9 +326,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     assert manifest['start_url'] == '/v1/mcp'
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v29023" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.23')" in worker.body
-    assert b'ailinux-helper-v29023' in worker.body
+    assert b"ailinux-helper-v29024" in worker.body
+    assert b"caches.match('/v1/mcp?app=2.90.24')" in worker.body
+    assert b'ailinux-helper-v29024' in worker.body
     assert b'caches.delete' in worker.body
 
 
@@ -325,9 +337,9 @@ def test_helper_surface_is_unified_and_branded():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
     assert '<h1>AILinux Helper</h1>' in html
-    assert 'AILinux Helper 2.90.23' in html
+    assert 'AILinux Helper 2.90.24' in html
     assert 'Mobile Workspace' not in html
-    assert '/v1/mcp/helper/icon.png?v=29023' in html
+    assert '/v1/mcp/helper/icon.png?v=29024' in html
 
 
 @pytest.mark.asyncio
@@ -345,14 +357,14 @@ async def test_paired_read_only_discovery_intersects_capabilities_and_grants(mon
     by_name = {tool['name']: tool for tool in result['tools']}
     names = set(by_name)
 
-    assert {'workspace_status', 'workspace_pair', 'file_read', 'file_tree', 'computer_observe'} <= names
+    assert {'aihelper_pair', 'file_read', 'file_tree', 'aihelper_observe'} <= names
     assert by_name['file_read']['x_execution'] == 'local_workspace'
-    assert by_name['computer_observe']['x_execution'] == 'local_workspace'
+    assert by_name['aihelper_observe']['x_execution'] == 'local_workspace'
     # Announced capability alone cannot bypass the read-only workspace grant.
     assert 'file_edit' not in names
-    assert {'clipboard_read', 'shell'}.isdisjoint(names)
-    assert 'computer_screenshot' in names
-    assert by_name['computer_screenshot']['x_requires_workspace'] is True
+    assert {'aihelper_clipboard_read', 'shell'}.isdisjoint(names)
+    assert 'aihelper_screenshot' in names
+    assert by_name['aihelper_screenshot']['x_requires_workspace'] is True
 
 
 @pytest.mark.asyncio
@@ -370,8 +382,8 @@ async def test_native_only_discovery_needs_no_workspace_grant(monkeypatch):
     by_name = {tool['name']: tool for tool in result['tools']}
     names = set(by_name)
 
-    assert {'compute_execute', 'computer_observe', 'clipboard_read'} <= names
-    assert by_name['compute_execute']['x_execution'] == 'local_workspace'
+    assert {'aihelper_compute_execute', 'aihelper_observe', 'aihelper_clipboard_read'} <= names
+    assert by_name['aihelper_compute_execute']['x_execution'] == 'local_workspace'
     assert {'workspace_info', 'file_read', 'file_edit'}.isdisjoint(names)
 
 
@@ -389,7 +401,7 @@ async def test_write_workspace_discovery_exposes_only_announced_write_tools(monk
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'paired-write'))
     names = {tool['name'] for tool in result['tools']}
     assert {'file_read', 'file_edit'} <= names
-    assert {'directory_create', 'workspace_clear', 'clipboard_write'}.isdisjoint(names)
+    assert {'directory_create', 'workspace_clear', 'aihelper_clipboard_write'}.isdisjoint(names)
 
 
 @pytest.mark.asyncio
@@ -422,15 +434,15 @@ async def test_pair_ticket_returns_no_store_qr_for_exact_one_time_code():
     assert response.headers["pragma"] == "no-cache"
 
 
-def test_linux_helper_download_metadata_tracks_published_29023_build():
+def test_linux_helper_download_metadata_tracks_published_29024_build():
     import inspect
     from app.routes.mcp import download_ailinux_helper, download_desktop_workspace_helper
 
     public_source = inspect.getsource(download_ailinux_helper)
     desktop_source = inspect.getsource(download_desktop_workspace_helper)
     for source in (public_source, desktop_source):
-        assert "AILinux-Helper-2.90.23-linux-x86_64.AppImage" in source
-        assert "AILinux-Helper-2.90.23-linux-amd64.deb" in source
+        assert "AILinux-Helper-2.90.24-linux-x86_64.AppImage" in source
+        assert "AILinux-Helper-2.90.24-linux-amd64.deb" in source
 
 
 def test_public_tools_list_semantic_inventory_never_reexpands_to_full_catalog():
@@ -445,8 +457,9 @@ def test_public_tools_list_semantic_inventory_never_reexpands_to_full_catalog():
     )
     payload = asyncio.run(handle_tools_list({"inventory": "debug"}, request=request))
     names = {tool["name"] for tool in payload["tools"]}
-    assert names == {"status", "debug", "log_viewer", "mcp_analytics"}
+    assert names == {"status"}
     assert payload["selected_inventory"] == "debug"
+    # Generic read-only status stays global; debug/log/analytics remain TriForce administration.
 
 
 def test_public_semantic_inventory_hints_match_effective_read_policy():
@@ -459,11 +472,11 @@ def test_public_semantic_inventory_hints_match_effective_read_policy():
         client=SimpleNamespace(host="127.0.0.1"),
         headers={}, cookies={}, query_params={},
     )
-    payload = asyncio.run(handle_tools_list({"inventory": "debug"}, request=request))
+    payload = asyncio.run(handle_tools_list({"inventory": "vision"}, request=request))
     by_name = {tool["name"]: tool for tool in payload["tools"]}
-    assert by_name["status"]["annotations"]["readOnlyHint"] is True
-    assert "read-only" in by_name["status"]["x_usage_hint"]
-    assert by_name["log_viewer"]["annotations"]["readOnlyHint"] is True
+    assert by_name["aihelper_observe"]["annotations"]["readOnlyHint"] is True
+    assert "read-only" in by_name["aihelper_observe"]["x_usage_hint"]
+    assert by_name["aihelper_screenshot"]["x_scope"] == "aihelper"
 
 
 def test_authenticated_bridge_discovers_workspace_schemas_before_pairing_without_granting_execution():
@@ -485,7 +498,7 @@ def test_authenticated_bridge_discovers_workspace_schemas_before_pairing_without
     )
     payload = asyncio.run(handle_tools_list({}, request=request))
     by_name = {tool["name"]: tool for tool in payload["tools"]}
-    for name in ("workspace_status", "file_read", "file_edit", "code_edit", "workspace_clear", "compute_execute", "computer_observe", "computer_screenshot", "computer_input"):
+    for name in ("aihelper_pair", "file_read", "file_edit", "code_edit", "workspace_clear", "aihelper_compute_execute", "aihelper_observe", "aihelper_screenshot", "aihelper_input"):
         assert name in by_name
     assert by_name["file_edit"]["x_requires_workspace"] is True
 
@@ -514,10 +527,36 @@ async def test_paired_device_schema_stays_discoverable_when_runtime_capability_t
     # drops screen capture/accessibility capabilities. Execution still enforces
     # the live capability/grant later in call_public_local_tool().
     for name in {
-        'app_ops', 'computer_input', 'computer_observe', 'computer_screenshot',
-        'vision_start', 'vision_status', 'vision_observe', 'vision_stop',
+        'aihelper_app_ops', 'aihelper_input', 'aihelper_observe', 'aihelper_screenshot',
+        'aihelper_vision_start', 'aihelper_vision_status', 'aihelper_vision_observe', 'aihelper_vision_stop',
     }:
         assert name in by_name
         assert by_name[name]['x_execution'] == 'local_workspace'
-        if name not in {'app_ops', 'computer_input'}:
+        if name not in {'aihelper_app_ops', 'aihelper_input'}:
             assert by_name[name]['x_requires_workspace'] is True
+
+
+def test_shared_reflection_protocol_reaches_mcp_and_tristar_model_init():
+    from app.mcp.agent_instructions import build_mcp_instructions
+    from app.services.tristar.model_init import ModelCapability, ModelConfig, ModelInitService, ModelRole
+
+    mcp_prompt = build_mcp_instructions()
+    cfg = ModelConfig(
+        model_id='prompt-audit', model_name='prompt-audit', provider='test',
+        role=ModelRole.WORKER, capabilities={ModelCapability.CODE},
+    )
+    model_prompt = ModelInitService()._generate_system_prompt(cfg)
+    for prompt in (mcp_prompt, model_prompt):
+        assert 'PASS 1 — GROUND + REALITY CHECK' in prompt
+        assert 'PASS 2 — DIVERGE + CHALLENGE' in prompt
+        assert 'REALITY GATE' in prompt
+        assert 'What would prove me wrong?' in prompt
+
+
+@pytest.mark.asyncio
+async def test_legacy_triforce_init_inherits_shared_reflection_protocol():
+    from app.routes.triforce import InitRequest, triforce_init
+
+    payload = await triforce_init(InitRequest(request='systemprompt', llm_id='prompt-audit'))
+    assert 'PASS 1 — GROUND + REALITY CHECK' in payload['systemprompt']
+    assert 'PASS 2 — DIVERGE + CHALLENGE' in payload['systemprompt']

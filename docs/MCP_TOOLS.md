@@ -283,33 +283,44 @@ curl -N "https://api.ailinux.me/v1/mcp/sse" \
   -H "Authorization: Basic <credentials>"
 ```
 
-## Semantic inventory discovery
+## Tool fabric, scopes and semantic discovery
 
-TriForce keeps **authorization inventories** (`admin`, `filesystem`, `device`, …) separate from **semantic discovery profiles**. The semantic profiles are intentionally overlapping and exist only to reduce model context:
+The canonical registry has two independent axes. `x_scope` says **who owns / may expose** a tool; `x_task_inventory` and `x_inventory_groups` say **what job it is useful for**. Neither grants authority by itself.
 
-- `debug` — logs, MCP analytics, bounded status and failure evidence
-- `code` — source search/read/edit and Git
-- `files` — general file/directory operations
-- `vision` — screen/browser observation and screenshots
-- `system` — host/device/process/service/application/container operations
-- `research` — current web/document research plus scoped memory recall
-- `automation` — execution/integration primitives
-- `communication` — mail, notifications, forum and publishing
-- `collaboration` — agents, AI and group orchestration
+Canonical scopes:
 
-Clients should start with the smallest relevant profile and expand only when needed. `x_inventory_groups` and `x_usage_hint` are discovery metadata; they never grant access or weaken per-tool RBAC, local approval, capability grants, or destructive-action policy.
+- `global` — portable AI primitives and portable workspace/code semantics shared by MCP consumers (`chat`, `models`, `specialist`, `search`, `crawl`, memory search/store, file/code/Git semantics).
+- `aihelper` — explicitly shared AILinux Helper capabilities. Canonical model-facing names use the `aihelper_*` namespace; the bridge translates them to legacy Android/Linux/Windows/macOS wire names for rolling compatibility.
+- `triforce_auth` — account/integration capabilities such as mail, Flarum, WordPress, notifications, Nova account bridge and n8n; authenticated TriForce access is required.
+- `triforce_admin` — TriForce engine administration: agents/group chat, mesh/remote nodes, services/containers/config/debug, model-runtime administration, vault and other engine-owned controls.
+
+Task-oriented discovery profiles include `code`, `files`, `vision`, `system`, `research`, `automation`, `communication`, `collaboration`, `aihelper`, `workspace`, `models`, `network`, `security`, and `admin`. `tools/list` preserves the requested profile instead of re-expanding a small inventory after workspace overlay. The default core therefore stays focused on global AI/workspace primitives plus the Helper bootstrap/device schemas; TriForce admin/auth tools are selected explicitly when the caller has the required authority.
+
+Every canonical tool is decorated with `x_scope`, `x_namespace`, `x_access`, `x_task_inventory`, `x_inventory_groups`, `x_usage_hint`, `x_display_name`, and `x_tooltip`. The inventory catalog includes compact per-tool rows so clients can render scrollable task groups and show the usage tooltip while the AI/user changes the active tool set.
+
+The legacy comparison is explicit rather than implicit: every v5 definition not retained as a canonical schema has a `MERGE`, `INTERNAL_ONLY`, or `REMOVE` outcome in `tool_registry_audit.LEGACY_CONSOLIDATION`. Examples: `image_search` collapses into `search(mode=images)`, `dev_*` analysis/refactor tools collapse into `specialist` plus typed code tools, `doc_*` collapses into file/code/search primitives, old agent-chat tools collapse into group-chat tools, and legacy `init` is replaced by MCP `initialize`. `current_time` stays a standalone global primitive because it is deterministic, inexpensive, and not semantically equivalent to web search.
 
 ### AI change discipline
 
 For state-changing development work the common policy is: persistent `.workspacebackup` first, coherent architecture inspection, evidence-based root-cause analysis, smallest correct patch, focused regression tests plus relevant logs/reproducer, documentation update, then a reusable feature-memory summary. Version-sensitive framework/API/security assumptions are verified against current primary documentation. Existing authoritative documentation is updated in place; when no project change log exists, `docs/AI_CHANGELOG.md` is the fallback record.
 
+All MCP/agent initialization prompts also apply a two-pass evidence-reflection loop after decision-relevant observations such as code/file reads, search results, logs, tests, diffs, screenshots and tool failures. Pass 1 grounds the current facts and tries to falsify assumptions; pass 2 deliberately explores genuinely different mechanisms/layers before a reality gate selects the smallest evidence-backed next move. The loop is internal and must not expose private chain-of-thought; operator-facing output stays concise and evidence-based.
+
+### Tool-surface invariants
+
+The canonical registry is the schema source of truth. `tools/list` may intentionally narrow it by task profile, ownership scope, authentication, share grants and client capability. `aihelper_pair` is the single model-facing Helper/share lifecycle control and stays in the default core profile so static or cached MCP clients can discover pairing before a local executor is attached. It supports `status`, `pair`, `reconnect` and explicit `disconnect`/revocation. The historical `workspace_status` and `workspace_pair` names remain compatibility aliases for cached/older clients, but are no longer duplicate canonical schemas. Execution authority remains separately enforced by the workspace lease and share manifest.
+
+### Tool ownership and task inventories
+
+Canonical tools carry two independent classifications. `x_scope` says **who owns/authorizes the tool** (`global`, `aihelper`, `triforce_auth`, `triforce_admin`); `x_task_inventory` says **what the AI would use it for** (`research`, `code`, `files`, `vision`, `device`, `workspace`, `communication`, `collaboration`, `models`, `network`, `security`, `admin`, etc.). `x_tooltip` combines the display name, task inventory, ownership/access policy, effect hint and a bounded description so clients can render a scrollable tool picker without loading every full schema. Public Local-MCP exposes global AI tools plus explicitly shared `aihelper_*` tools. Mail/Flarum/WordPress/Nova/n8n/notification integrations stay `triforce_auth`; group chat, agents, model-runtime control, mesh/remote, browser automation, config/vault and engine operations stay `triforce_admin`.
+
 ## Session Docker compute sandbox
 
-`compute_execute` may be granted by AILinux Helper as a **separate remote-compute capability**. It never turns the TriForce host into a shell target and does not expose Android Termux.
+`aihelper_compute_execute` may be granted by AILinux Helper as a **separate remote-compute capability**. The Helper wire capability remains `compute_execute` for cross-version compatibility. It never turns the TriForce host into a shell target and does not expose Android Termux.
 
 For the `triforce_docker` runtime TriForce creates an ephemeral, per-session Docker execution environment with these invariants:
 
-- explicit Helper opt-in is required (`compute_execute` + compute `execute` grant),
+- explicit Helper opt-in is required (`aihelper_compute_execute`, translated to wire `compute_execute`, plus compute `execute` grant),
 - the container has public Internet egress but traffic to the TriForce host, RFC1918/private networks, link-local and other reserved destinations is rejected,
 - Docker host networking, published ports, devices, privileged mode and `/var/run/docker.sock` are never exposed,
 - all Linux capabilities are dropped, `no-new-privileges` is enabled, the root filesystem is read-only, and CPU/memory/PID limits apply,

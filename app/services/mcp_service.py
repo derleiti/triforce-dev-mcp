@@ -210,8 +210,14 @@ def _create_backup(file_path: Path) -> Optional[Path]:
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    rel_path = file_path.relative_to(BACKEND_ROOT)
-    backup_name = f"{rel_path.as_posix().replace('/', '_')}_{timestamp}.bak"
+    try:
+        rel_path = file_path.relative_to(BACKEND_ROOT)
+        backup_stem = rel_path.as_posix().replace('/', '_')
+    except ValueError:
+        import hashlib
+        parent_tag = hashlib.sha256(str(file_path.parent).encode("utf-8")).hexdigest()[:12]
+        backup_stem = f"external_{parent_tag}_{file_path.name}"
+    backup_name = f"{backup_stem}_{timestamp}.bak"
     backup_path = BACKUP_DIR / backup_name
 
     import shutil
@@ -1163,17 +1169,19 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
     """Edit a file in the codebase with safety checks."""
     file_path = params.get("path")
     mode = params.get("mode")
+    root_value = params.get("root")
 
     if not file_path:
         raise ValueError("'path' parameter is required")
     if not mode:
         raise ValueError("'mode' parameter is required")
 
-    safe_path = _safe_path(file_path)
-    if not safe_path:
-        raise ValueError(f"Invalid path: {file_path}")
+    try:
+        safe_path = _resolve_code_path(str(file_path), str(root_value) if root_value else None)
+    except ValueError as exc:
+        raise ValueError(f"Invalid path: {file_path}: {exc}") from exc
 
-    if _is_edit_forbidden_path(file_path):
+    if _is_edit_forbidden_path(str(safe_path)):
         raise ValueError(f"Editing forbidden for security-sensitive files: {file_path}")
 
     if not safe_path.exists():
@@ -1208,11 +1216,12 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
         new_content = original_content.replace(old_text, new_text, 1)
 
     elif mode == "insert":
-        line_number = params.get("line_number")
+        # Canonical V5 schema uses `line`; keep `line_number` for older callers.
+        line_number = params.get("line_number") or params.get("line")
         new_text = params.get("new_text", "")
 
         if not line_number or line_number < 1:
-            raise ValueError("'line_number' (>= 1) required for insert mode")
+            raise ValueError("'line' (>= 1) required for insert mode")
 
         lines = original_lines.copy()
         insert_idx = min(line_number - 1, len(lines))
@@ -1236,12 +1245,15 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
         if not new_content.endswith("\n"):
             new_content += "\n"
 
-    elif mode == "delete_lines":
-        start_line = params.get("start_line")
-        end_line = params.get("end_line")
+    elif mode in {"delete", "delete_lines"}:
+        # Canonical V5 schema deletes one line via `line`. Legacy callers may
+        # still provide delete_lines + start_line/end_line or line_number.
+        single_line = params.get("line") or params.get("line_number")
+        start_line = params.get("start_line") or single_line
+        end_line = params.get("end_line") or single_line
 
         if not start_line or not end_line:
-            raise ValueError("'start_line' and 'end_line' required for delete_lines mode")
+            raise ValueError("'line' (or start_line/end_line) required for delete mode")
         if start_line < 1 or end_line < start_line:
             raise ValueError("Invalid line range")
 
@@ -1277,7 +1289,13 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
     else:
         if create_backup:
             backup_path = _create_backup(safe_path)
-            result["backup"] = str(backup_path.relative_to(BACKEND_ROOT)) if backup_path else None
+            if backup_path:
+                try:
+                    result["backup"] = str(backup_path.relative_to(BACKEND_ROOT))
+                except ValueError:
+                    result["backup"] = str(backup_path)
+            else:
+                result["backup"] = None
 
         safe_path.write_text(new_content, encoding="utf-8")
 
