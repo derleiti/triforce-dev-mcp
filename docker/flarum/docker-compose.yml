@@ -12,6 +12,7 @@ services:
     image: ${FLARUM_IMAGE:-mondedie/flarum:latest}
     container_name: ${FLARUM_CONTAINER_NAME:-flarum}
     logging: *default_logging
+    command: ["/usr/local/bin/ailinux-startup"]
     depends_on:
       flarum_db:
         condition: service_healthy
@@ -41,7 +42,8 @@ services:
     volumes:
       - ${FLARUM_ASSETS_PATH:-./flarum/assets}:/flarum/app/public/assets:rw
       - ${FLARUM_EXTENSIONS_PATH:-./flarum/extensions}:/flarum/app/extensions:rw
-      - ./extensions.list:/flarum/app/extensions/list:ro
+      - ./extensions.list:/etc/flarum/extensions.list:ro
+      - ./startup-wrapper.sh:/usr/local/bin/ailinux-startup:ro
       - ./custom-vhost-flarum.conf:/etc/nginx/flarum/custom-vhost-flarum.conf:ro
       - ${FLARUM_STORAGE_PATH:-./flarum/storage}:/flarum/app/storage:rw
     networks:

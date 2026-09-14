@@ -276,6 +276,7 @@ docker/flarum/*
 !docker/flarum/README.md
 !docker/flarum/extensions.list
 !docker/flarum/custom-vhost-flarum.conf
+!docker/flarum/startup-wrapper.sh
 
 !docker/mailserver/
 docker/mailserver/*
