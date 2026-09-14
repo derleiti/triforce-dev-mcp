@@ -586,12 +586,53 @@ async def _claim_workspace_for_session(
     return _workspace_binding_response(binding, token=str(binding.get("resume_token") or ""))
 
 
+_DEVICE_COMPAT_ALIAS_PREFIX = "@device "
+_DEVICE_COMPAT_ALIAS_TOOLS = frozenset({
+    "app_ops", "computer_input", "computer_observe", "computer_screenshot",
+    "vision_start", "vision_status", "vision_observe", "vision_stop",
+})
+
+
+def _device_tool_from_shell_alias(name: str, arguments: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    """Translate a reserved shell compatibility alias into a native device tool.
+
+    Some MCP hosts cache their tool schema for the lifetime of a conversation. A
+    newly-added device tool can therefore be unavailable to the model even though
+    the active Helper advertises it. ``shell`` is an older stable schema, so a
+    command beginning with ``@device`` is intercepted here and is never executed
+    as a host shell command. The translated tool still passes through the normal
+    lease, capability and share-manifest authorization below.
+    """
+    if name != "shell":
+        return name, arguments
+    command = str(arguments.get("command") or "")
+    if not command.startswith(_DEVICE_COMPAT_ALIAS_PREFIX):
+        return name, arguments
+    payload = command[len(_DEVICE_COMPAT_ALIAS_PREFIX):].strip()
+    tool, sep, raw_args = payload.partition(" ")
+    tool = tool.strip()
+    if tool not in _DEVICE_COMPAT_ALIAS_TOOLS:
+        raise ValueError(f"unsupported @device tool: {tool or '<missing>'}")
+    parsed: Dict[str, Any] = {}
+    if sep and raw_args.strip():
+        value = json.loads(raw_args)
+        if not isinstance(value, dict):
+            raise ValueError("@device arguments must be a JSON object")
+        parsed = value
+    return tool, parsed
+
+
 async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     sid = session_id(request)
     arguments = dict(arguments or {})
     workspace_token = str(arguments.pop("workspace_token", "") or "").strip()
     workspace_id = str(arguments.pop("workspace_id", "") or "").strip().upper()
     workspace_context = str(arguments.pop("workspace_context", "") or "").strip()[:256]
+
+    try:
+        name, arguments = _device_tool_from_shell_alias(name, arguments)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return _tool_error("DEVICE_COMPAT_ALIAS_INVALID", str(exc), tool=name)
 
     if name == "workspace_pair":
         code = str(arguments.get("code") or "").strip().upper()

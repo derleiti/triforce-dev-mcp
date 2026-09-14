@@ -1140,3 +1140,48 @@ async def test_live_vision_requires_active_display_grant():
     assert result['isError'] is True
     assert result['structuredContent']['code'] == 'WORKSPACE_DISPLAY_GRANT_REQUIRED'
     assert conn.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cached_shell_schema_can_bridge_to_device_tool_without_shell_capability():
+    conn = DummyConnection('android-compat')
+    conn.share_manifest = {
+        'grants': [{'resource': 'device', 'action': 'control'}],
+        'resources': {'device': {'enabled': True, 'control': True}},
+    }
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['app_ops'])
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(
+        req,
+        'shell',
+        {'command': '@device app_ops {"action":"launch","app":"Claude"}'},
+    )
+    assert result['isError'] is False
+    assert conn.calls[-1][1]['tool'] == 'app_ops'
+    assert conn.calls[-1][1]['arguments'] == {'action': 'launch', 'app': 'Claude'}
+
+
+@pytest.mark.asyncio
+async def test_cached_shell_device_alias_still_enforces_live_capability_gate():
+    conn = DummyConnection('android-compat-no-vision')
+    conn.share_manifest = {
+        'grants': [{'resource': 'display', 'action': 'observe'}],
+        'resources': {'display': {'enabled': True, 'observe': True}},
+    }
+    sessions.bind_workspace('session-A', conn, mode='write', capabilities=['app_ops'])
+    req = DummyRequest('session-A')
+    result = await call_public_local_tool(
+        req,
+        'shell',
+        {'command': '@device vision_status {}'},
+    )
+    assert result['isError'] is True
+    assert result['structuredContent']['code'] == 'WORKSPACE_TOOL_UNAVAILABLE'
+    assert conn.calls == []
+
+
+def test_cached_shell_device_alias_rejects_unknown_target():
+    from app.services.mcp_workspace_bridge import _device_tool_from_shell_alias
+
+    with pytest.raises(ValueError):
+        _device_tool_from_shell_alias('shell', {'command': '@device shell {"command":"id"}'})
