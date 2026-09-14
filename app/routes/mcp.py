@@ -4398,23 +4398,33 @@ async def mcp_sse_connect(request: Request):
             # Send initial ping
             yield f": ping - {dt_datetime.now().isoformat()}\n\n"
 
-            # Keep connection alive and send queued responses
+            # Keep connection alive and send queued responses. Poll the ASGI
+            # disconnect state at a cadence shorter than Uvicorn's graceful
+            # shutdown timeout so persistent SSE clients cannot hold restarts
+            # open until forced cancellation. Keepalive traffic remains 15 s.
             ping_counter = 0
+            loop = asyncio.get_running_loop()
+            next_ping = loop.time() + 15.0
             while True:
                 try:
-                    # Check for queued responses (non-blocking with timeout)
+                    if await request.is_disconnected():
+                        break
+                    wait_timeout = min(1.0, max(0.05, next_ping - loop.time()))
                     try:
                         response = await asyncio.wait_for(
                             session["queue"].get(),
-                            timeout=15.0
+                            timeout=wait_timeout,
                         )
                         # Send response as SSE message
                         yield f"event: message\ndata: {json.dumps(response)}\n\n"
                         mcp_logger.debug(f"SSE_RESPONSE | Session: {session_id} | Response sent")
                     except asyncio.TimeoutError:
-                        # Send keepalive ping
-                        ping_counter += 1
-                        yield f": ping - {dt_datetime.now().isoformat()} - {ping_counter}\n\n"
+                        if await request.is_disconnected():
+                            break
+                        if loop.time() >= next_ping:
+                            ping_counter += 1
+                            yield f": ping - {dt_datetime.now().isoformat()} - {ping_counter}\n\n"
+                            next_ping = loop.time() + 15.0
 
                 except Exception as e:
                     mcp_logger.error(f"SSE_ERROR | Session: {session_id} | Error: {e}")
