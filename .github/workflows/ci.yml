@@ -17,8 +17,17 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      AILINUX_HELPER_SOURCE: ${{ github.workspace }}/ailinux-helper
+      AILINUX_HELPER_RELEASE_MANIFEST: ${{ github.workspace }}/ailinux-helper/release.json
     steps:
       - uses: actions/checkout@v7
+      - name: Checkout pinned AILinux Helper WebMCP source
+        uses: actions/checkout@v7
+        with:
+          repository: derleiti/ailinux-helper
+          ref: d5309f195553ae3ababa83e8a77b1dfa63b96e75
+          path: ailinux-helper
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'

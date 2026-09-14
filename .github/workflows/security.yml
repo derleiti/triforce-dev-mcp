@@ -36,9 +36,9 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v7
-      # JavaScript is intentionally not listed yet: WebMCP is currently embedded
-      # as a Python string in app/routes/mcp.py, so CodeQL cannot analyze it as JS.
-      # Add javascript only after WebMCP is extracted into real .js source files.
+      # WebMCP JavaScript is canonical in derleiti/ailinux-helper/apps/web and is
+      # scanned by that repository's JavaScript CodeQL workflow. TriForce keeps
+      # this workflow Python-only to avoid duplicate or misleading JS coverage.
       - uses: github/codeql-action/init@v4
         with:
           languages: python

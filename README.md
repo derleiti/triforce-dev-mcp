@@ -62,7 +62,7 @@ Development verification:
 
 As of **14 September 2026**, GitHub currently returns `startup_failure` for repository-authored TriForce workflows before creating any jobs, including a minimal one-step smoke workflow. Workflow YAML parses locally and repository Actions are enabled; other AILinux repositories on the same account run normally. This is tracked as a GitHub/repository Actions startup blocker rather than being hidden by a fake CI workaround.
 
-CodeQL currently scans Python only. WebMCP JavaScript still lives inside `app/routes/mcp.py` as an embedded string, so adding `javascript` to the CodeQL language list today would create misleading coverage. JavaScript scanning is gated on extracting WebMCP into real source files under `ailinux-helper/apps/web/`.
+TriForce CodeQL scans Python. WebMCP JavaScript is now canonical in `derleiti/ailinux-helper/apps/web/` and is scanned there by a dedicated `javascript-typescript` CodeQL workflow; TriForce CI pins the exact Helper source revision used by its WebMCP contract tests.
 
 ## Security
 
