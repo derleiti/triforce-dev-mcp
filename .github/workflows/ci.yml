@@ -20,8 +20,6 @@ jobs:
     env:
       AILINUX_HELPER_SOURCE: ${{ github.workspace }}/ailinux-helper
       AILINUX_HELPER_RELEASE_MANIFEST: ${{ github.workspace }}/ailinux-helper/release.json
-      TRIFORCE_STATE_DIR: ${{ runner.temp }}/triforce-state
-      TRIFORCE_LOG_DIR: ${{ runner.temp }}/triforce-logs
     steps:
       - uses: actions/checkout@v7
       - name: Checkout pinned AILinux Helper WebMCP source
@@ -30,6 +28,12 @@ jobs:
           repository: derleiti/ailinux-helper
           ref: a030114de94aa2f987cb6ef36e1bfe73c9ebf92a
           path: ailinux-helper
+      - name: Configure writable CI runtime state
+        shell: bash
+        run: |
+          echo "TRIFORCE_STATE_DIR=$RUNNER_TEMP/triforce-state" >> "$GITHUB_ENV"
+          echo "TRIFORCE_LOG_DIR=$RUNNER_TEMP/triforce-logs" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/triforce-state" "$RUNNER_TEMP/triforce-logs"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
