@@ -4195,6 +4195,9 @@ MCP_REQUEST_BODY_TIMEOUT_SECONDS = float(os.getenv("MCP_REQUEST_BODY_TIMEOUT_SEC
 
 # In-memory session store with response queues
 _mcp_sessions: Dict[str, Dict[str, TypingAny]] = {}
+# Private queue sentinel used to wake a legacy SSE generator immediately when
+# a client explicitly terminates its transport. It is never serialized.
+_LEGACY_SSE_CLOSE = object()
 
 
 def _get_session(session_id: str) -> Dict[str, TypingAny]:
@@ -4231,6 +4234,47 @@ def _restore_session_request_state(session: Dict[str, TypingAny], request: Reque
     request.state.mcp_authority_source = session.get("authority_source")
     request.state.mcp_auth_client_id = session.get("auth_client_id")
     request.state.mcp_workspace_subject = session.get("workspace_subject")
+
+
+def _legacy_sse_session_matches_request(session: Dict[str, TypingAny], request: Request) -> bool:
+    """Match an authenticated DELETE to its legacy SSE session without guessing.
+
+    A few legacy MCP clients terminate ``/sse`` without echoing the session id.
+    In that case we only infer a session from authenticated identity fields that
+    were captured on the original GET. The caller must still resolve to exactly
+    one live session before it may be closed.
+    """
+    state = request.state
+    comparisons = (
+        ("auth_client_id", "mcp_auth_client_id"),
+        ("workspace_subject", "mcp_workspace_subject"),
+        ("auth_user", "mcp_auth_user"),
+    )
+    matched = False
+    for session_key, state_key in comparisons:
+        expected = session.get(session_key)
+        if expected in (None, ""):
+            continue
+        actual = getattr(state, state_key, None)
+        if actual in (None, "") or str(actual) != str(expected):
+            return False
+        matched = True
+    return matched
+
+
+def _close_legacy_sse_session(session_id: str) -> bool:
+    """Wake and detach one legacy SSE transport, preserving workspace leases."""
+    session = _mcp_sessions.get(session_id)
+    if session is None:
+        return False
+    queue = session.get("queue")
+    if queue is not None:
+        try:
+            queue.put_nowait(_LEGACY_SSE_CLOSE)
+        except (AttributeError, asyncio.QueueFull):
+            pass
+    _clear_mcp_session(session_id, clear_workspace=False)
+    return True
 
 
 def _logical_transport_session_id(request: Request, explicit_session_id: str | None = None) -> str:
@@ -4414,6 +4458,52 @@ async def mcp_sse_post(request: Request):
     return await mcp_unified_endpoint(request)
 
 
+@router.delete("/mcp/sse", tags=["MCP"], summary="Terminate legacy SSE transport")
+@router.delete("/mcp/sse/", tags=["MCP"], summary="Terminate legacy SSE transport")
+@router.delete("/sse", tags=["MCP"], summary="Terminate legacy SSE transport (alias)")
+@router.delete("/sse/", tags=["MCP"], summary="Terminate legacy SSE transport (alias)")
+async def mcp_sse_delete(request: Request):
+    """Idempotently terminate a Cursor-compatible legacy SSE transport."""
+    await require_mcp_auth(request)
+    session_id = str(
+        request.query_params.get("session_id")
+        or request.headers.get("Mcp-Session-Id")
+        or ""
+    ).strip()
+
+    if session_id:
+        session = _mcp_sessions.get(session_id)
+        if session is not None and not _legacy_sse_session_matches_request(session, request):
+            # Older token-auth sessions may not have identity metadata. Their
+            # high-entropy session id remains a capability, matching /messages.
+            has_owner = any(session.get(key) not in (None, "") for key in (
+                "auth_client_id", "workspace_subject", "auth_user"
+            ))
+            if has_owner:
+                raise HTTPException(status_code=403, detail="MCP session ownership mismatch")
+    else:
+        matches = [
+            sid for sid, session in _mcp_sessions.items()
+            if _legacy_sse_session_matches_request(session, request)
+        ]
+        if len(matches) > 1:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "Multiple legacy SSE sessions match; provide Mcp-Session-Id"},
+            )
+        if len(matches) == 1:
+            session_id = matches[0]
+
+    closed = bool(session_id) and _close_legacy_sse_session(session_id)
+    mcp_logger.info(
+        "SSE_DELETE | Session: %s | closed=%s",
+        session_id if session_id else "none",
+        closed,
+    )
+    headers = {"Mcp-Session-Id": session_id} if session_id else None
+    return Response(status_code=204, headers=headers)
+
+
 @router.get("/mcp/sse", tags=["MCP"], summary="SSE endpoint for Cursor/MCP clients")
 @router.get("/mcp/sse/", tags=["MCP"], summary="SSE endpoint for Cursor/MCP clients")
 @router.get("/sse", tags=["MCP"], summary="SSE endpoint (alias)")
@@ -4481,6 +4571,9 @@ async def mcp_sse_connect(request: Request):
                             session["queue"].get(),
                             timeout=wait_timeout,
                         )
+                        if response is _LEGACY_SSE_CLOSE:
+                            mcp_logger.info(f"SSE_DELETE_CLOSE | Session: {session_id}")
+                            break
                         # Send response as SSE message
                         yield f"event: message\ndata: {json.dumps(response)}\n\n"
                         mcp_logger.debug(f"SSE_RESPONSE | Session: {session_id} | Response sent")
@@ -4512,7 +4605,9 @@ async def mcp_sse_connect(request: Request):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id",
+            "Access-Control-Expose-Headers": "Mcp-Session-Id",
+            "Mcp-Session-Id": session_id,
         }
     )
 
