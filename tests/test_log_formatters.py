@@ -193,3 +193,81 @@ def test_multifile_writer_redacts_result_preview_and_error_text(tmp_path):
     assert "RESULT_SECRET_SENTINEL" not in raw
     assert "CONTEXT_SECRET_SENTINEL" not in raw
     assert "[REDACTED]" in raw
+
+
+
+def test_redact_sensitive_hides_legacy_session_capabilities():
+    from app.utils.log_formatters import redact_sensitive
+
+    for raw in (
+        "SSE_CONNECT | Session: SESSION_CAPABILITY_SENTINEL | ok",
+        "Mcp-Session-Id: SESSION_HEADER_SENTINEL",
+        "/v1/mcp/messages?session_id=SESSION_QUERY_SENTINEL",
+    ):
+        safe = redact_sensitive(raw)
+        assert "SENTINEL" not in safe
+        assert "[REDACTED]" in safe
+
+
+def test_central_log_entry_serialization_is_defense_in_depth_safe():
+    import json
+
+    from app.utils.triforce_logging import LogCategory, LogLevel, TriForceLogEntry
+
+    entry = TriForceLogEntry(
+        timestamp="2026-09-14T21:00:00+00:00",
+        trace_id="trace-safe",
+        category=LogCategory.ERROR,
+        level=LogLevel.ERROR,
+        source="regression-test",
+        message="workspace_token=MESSAGE_SECRET_SENTINEL",
+        session_id="SESSION_SECRET_SENTINEL",
+        tool_params={"nested": {"api_key": "PARAM_SECRET_SENTINEL"}},
+        error_message="resume_token=ERROR_SECRET_SENTINEL",
+        stack_trace="Authorization: Bearer STACK_SECRET_SENTINEL",
+        metadata={"workspace_context": "META_SECRET_SENTINEL"},
+    )
+    payload = entry.to_dict()
+    raw = json.dumps(payload)
+
+    for sentinel in (
+        "MESSAGE_SECRET_SENTINEL",
+        "SESSION_SECRET_SENTINEL",
+        "PARAM_SECRET_SENTINEL",
+        "ERROR_SECRET_SENTINEL",
+        "STACK_SECRET_SENTINEL",
+        "META_SECRET_SENTINEL",
+    ):
+        assert sentinel not in raw
+    assert payload["session_id"] == "[REDACTED]"
+    assert payload["tool_params"]["nested"]["api_key"] == "[REDACTED]"
+    assert payload["metadata"]["workspace_context"] == "[REDACTED]"
+
+
+def test_audit_entry_serialization_redacts_params_metadata_errors_and_session():
+    import json
+
+    from app.services.triforce.audit_logger import AuditEntry, AuditLevel
+
+    entry = AuditEntry(
+        timestamp="2026-09-14T21:00:00Z",
+        trace_id="trace-audit",
+        session_id="AUDIT_SESSION_SENTINEL",
+        llm_id="tester",
+        action="tool_call",
+        level=AuditLevel.ERROR,
+        params={"workspace_token": "AUDIT_PARAM_SENTINEL"},
+        error_message="password=AUDIT_ERROR_SENTINEL",
+        metadata={"workspace_context": "AUDIT_META_SENTINEL"},
+    )
+    payload = entry.to_dict()
+    raw = json.dumps(payload)
+
+    for sentinel in (
+        "AUDIT_SESSION_SENTINEL",
+        "AUDIT_PARAM_SENTINEL",
+        "AUDIT_ERROR_SENTINEL",
+        "AUDIT_META_SENTINEL",
+    ):
+        assert sentinel not in raw
+    assert payload["session_id"] == "[REDACTED]"

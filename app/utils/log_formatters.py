@@ -76,9 +76,16 @@ def _paint(text: str, style: str, enabled: bool) -> str:
 def redact_sensitive(value: Any) -> str:
     """Redact credentials from arbitrary log text without mutating application data."""
     text = str(value)
-    key = r"(?:pair_code|handoff_code|resume_token|workspace_token|workspace_context|access_token|refresh_token|session_token|api_key|apikey|password|passwd|secret|credential|token)"
+    key = r"(?:pair_code|handoff_code|resume_token|workspace_token|workspace_context|access_token|refresh_token|session_token|session_id|mcp_session_id|mcp-session-id|api_key|apikey|password|passwd|secret|credential|token)"
     # Authorization schemes need to be handled before generic key/value masking.
     text = re.sub(r"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+", r"\1[REDACTED]", text)
+    # Session identifiers can be capabilities for legacy MCP transports.  Keep
+    # them out of operator logs even when emitted as a human-readable label.
+    text = re.sub(
+        r"(?i)(\b(?:mcp[-_ ]?)?session(?:_id)?\b\s*[:=]\s*)(?!\[REDACTED\])[^\s,;|]+",
+        lambda m: f"{m.group(1)}[REDACTED]",
+        text,
+    )
     # URL query strings.
     text = re.sub(rf"(?i)([?&]{key}=)[^&#\s]+", lambda m: f"{m.group(1)}[REDACTED]", text)
     # Dict/JSON/logfmt values surrounded by quotes.

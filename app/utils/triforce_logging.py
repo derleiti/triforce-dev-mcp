@@ -106,12 +106,22 @@ class TriForceLogEntry:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary, excluding None values"""
+        """Convert to a log-safe dictionary, excluding ``None`` values."""
         data = asdict(self)
-        # Handle both Enum and string values for category/level
+        # Handle both Enum and string values for category/level.
         data["category"] = self.category.value if hasattr(self.category, 'value') else str(self.category)
         data["level"] = self.level.value if hasattr(self.level, 'value') else str(self.level)
-        # Remove None values for cleaner output
+        # Defense in depth: direct logger calls can bypass the Python logging
+        # formatter, so sanitize all free-text and structured payloads here too.
+        for field_name in ("message", "error_message", "stack_trace"):
+            if data.get(field_name) is not None:
+                data[field_name] = redact_sensitive(data[field_name])
+        for field_name in ("tool_params", "metadata"):
+            if data.get(field_name) is not None:
+                data[field_name] = sanitize_log_data(data[field_name])
+        # MCP session ids may be bearer-like capabilities on legacy transports.
+        if data.get("session_id") is not None:
+            data["session_id"] = "[REDACTED]"
         return {k: v for k, v in data.items() if v is not None}
 
     def to_json(self) -> str:

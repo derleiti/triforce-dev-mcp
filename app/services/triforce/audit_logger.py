@@ -23,7 +23,7 @@ from typing import Optional, Dict, Any, List, Set
 from pathlib import Path
 
 from app.paths import LOG_DIR
-from app.utils.log_formatters import sanitize_log_data
+from app.utils.log_formatters import redact_sensitive, sanitize_log_data
 import logging
 
 logger = logging.getLogger("ailinux.triforce.audit")
@@ -59,9 +59,17 @@ class AuditEntry:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
+        """Convert to a log-safe dictionary."""
         data = asdict(self)
         data["level"] = self.level.value
+        for field_name in ("error_message",):
+            if data.get(field_name) is not None:
+                data[field_name] = redact_sensitive(data[field_name])
+        for field_name in ("params", "metadata"):
+            if data.get(field_name) is not None:
+                data[field_name] = sanitize_log_data(data[field_name])
+        if data.get("session_id") not in (None, "unknown"):
+            data["session_id"] = "[REDACTED]"
         return data
 
     def to_json(self) -> str:
