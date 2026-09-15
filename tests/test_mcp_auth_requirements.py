@@ -5,10 +5,10 @@ from starlette.requests import Request
 from app.utils import mcp_auth
 
 
-def _build_request(path: str, client_host: str, headers: dict[str, str] | None = None) -> Request:
+def _build_request(path: str, client_host: str, headers: dict[str, str] | None = None, *, method: str = 'POST') -> Request:
     raw_headers = [(k.lower().encode('latin-1'), v.encode('latin-1')) for k, v in (headers or {}).items()]
     return Request({
-        'type': 'http', 'http_version': '1.1', 'method': 'POST', 'scheme': 'https',
+        'type': 'http', 'http_version': '1.1', 'method': method, 'scheme': 'https',
         'path': path, 'raw_path': path.encode('ascii'), 'query_string': b'',
         'headers': raw_headers, 'client': (client_host, 12345), 'server': ('testserver', 443), 'state': {},
     })
@@ -32,6 +32,25 @@ async def test_public_guest_does_not_depend_on_proxy_or_docker_source(monkeypatc
     request = _build_request('/v1/mcp', '172.18.0.5')
     assert await mcp_auth.require_mcp_auth(request) == 'public_guest'
     assert request.state.mcp_auth_full_access is False
+
+
+@pytest.mark.asyncio
+async def test_public_guest_cannot_delete_legacy_sse_transport(monkeypatch):
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_USER', 'user')
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_PASS', 'pass')
+    request = _build_request('/v1/mcp/sse', '203.0.113.10', method='DELETE')
+    with pytest.raises(HTTPException) as exc_info:
+        await mcp_auth.require_mcp_auth(request)
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_public_guest_can_still_get_legacy_sse_transport(monkeypatch):
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_USER', 'user')
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_PASS', 'pass')
+    request = _build_request('/v1/mcp/sse', '203.0.113.10', method='GET')
+    assert await mcp_auth.require_mcp_auth(request) == 'public_guest'
+
 
 
 @pytest.mark.asyncio

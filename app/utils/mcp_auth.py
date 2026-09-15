@@ -529,7 +529,14 @@ async def require_mcp_auth(request: Request) -> str:
     # the normal authentication branches below must validate it.
     x_mcp_token = request.headers.get("X-MCP-Token", "").strip()
     has_credentials = bool(auth_header.strip() or query_token or x_mcp_token)
-    if not has_credentials and _is_public_guest_mcp_path(request.url.path):
+    # Public guest is intentionally non-destructive.  In particular, DELETE on
+    # the legacy SSE transport tears down server-side session state and must
+    # require a real credential even though GET/POST on that transport are public.
+    if (
+        not has_credentials
+        and request.method.upper() != "DELETE"
+        and _is_public_guest_mcp_path(request.url.path)
+    ):
         request.state.mcp_auth_user = "public_guest"
         request.state.mcp_auth_method = "public_guest"
         request.state.mcp_auth_full_access = False
