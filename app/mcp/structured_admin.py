@@ -182,6 +182,15 @@ async def handle_service_control(a):
     if svc not in SERVICES: return {"error":f"Not managed: {svc}. Allowed: {SERVICES}"}
     u=_unit(svc)
     if act=="status": return {"action":act,"service":svc,"unit":u,**(await _run(["systemctl","status",u,"--no-pager","-l"]))}
+    elif act=="restart" and svc == "triforce":
+        # Restarting our own systemd unit synchronously kills the MCP subprocess
+        # before it can return, which falsely records exit=-15/tool failure. Use
+        # the backend's deferred supervisor restart so the MCP response is sent
+        # first and systemd can then bring the service back via Restart=on-failure.
+        from app.services.system_control import system_control
+        delay = max(1, min(int(a.get("delay", 2) or 2), 10))
+        result = await system_control.restart_backend(delay)
+        return {"action":act,"service":svc,"unit":u,**result}
     elif act=="restart": return {"action":act,"service":svc,"unit":u,**(await _sudo(["systemctl","restart",u]))}
     elif act=="stop": return {"action":act,"service":svc,"unit":u,**(await _sudo(["systemctl","stop",u]))}
     elif act=="start": return {"action":act,"service":svc,"unit":u,**(await _sudo(["systemctl","start",u]))}
@@ -303,7 +312,7 @@ STRUCTURED_ADMIN_TOOLS = [
      "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["refresh_cache","list_upgradable","upgrade_all","install","search","info"]},"package":{"type":"string","description":"Package name (for install/search/info)"}},"required":["action"]},
      "annotations":{"title":"Package Manager","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False}},
     {"name":"service_control","description":"Manage systemd services: check status, start, stop, restart, view logs, enable or disable at boot.",
-     "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["status","start","stop","restart","logs","enable","disable"]},"service":{"type":"string","enum":SERVICES},"lines":{"type":"integer"}},"required":["action","service"]},
+     "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["status","start","stop","restart","logs","enable","disable"]},"service":{"type":"string","enum":SERVICES},"lines":{"type":"integer"},"delay":{"type":"integer","minimum":1,"maximum":10,"description":"Deferred seconds before restarting the local TriForce backend"}},"required":["action","service"]},
      "annotations":{"title":"Service Manager","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False}},
     {"name":"container_control","description":"Manage Docker containers: list, status, start, stop, restart, view logs, or get resource stats.",
      "inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list","status","start","stop","restart","logs","stats"]},"container":{"type":"string","enum":CONTAINERS},"lines":{"type":"integer"}},"required":["action"]},
