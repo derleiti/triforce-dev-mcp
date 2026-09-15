@@ -39,6 +39,8 @@ _PROVIDER_FALLBACK_MARKERS = (
     "login required",
     "login expired",
     "oauth expired",
+    "token expired",
+    "re-login",
     "authentication failed",
     "unauthorized",
     "unauthorised",
