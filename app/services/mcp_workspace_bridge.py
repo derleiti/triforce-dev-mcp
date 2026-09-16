@@ -842,22 +842,17 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             return _workspace_binding_response(binding, token=workspace_token)
         pair_session_id = affinity_sid or sid
         if pair_session_id:
-            from app.services.mcp_workspace_sessions import get_or_create_pair_code
-            code = get_or_create_pair_code(pair_session_id)
             return {
                 "content": [{"type": "text", "text": (
-                    "No local workspace is paired. Open the TriForce MCP setup page, choose the folder and mode, "
-                    f"then connect it with this pairing ID: {code}"
+                    "No local workspace is paired. Create a one-time Share ID in WebMCP or AILinux Helper, "
+                    "then pass that ID to aihelper_pair/workspace_pair. The Helper keeps a separate secure "
+                    "resume credential for reconnects; the Share ID is never reused."
                 )}],
                 "structuredContent": {
                     "ok": False, "code": "WORKSPACE_REQUIRED", "connected": False,
-                    "pair_code": code,
-                    # P0: never place a pairing credential in a URL. A query
-                    # parameter leaks into browser history, Referer, reverse
-                    # proxy and Cloudflare access logs. The code is handed over
-                    # by the user typing/pasting it into the page instead.
                     "setup_url": "https://api.ailinux.me/v1/mcp",
-                    "procedure": "Open setup_url -> choose folder/mode -> connect -> paste pair_code into the pairing field. Never append the pairing ID to the URL.",
+                    "pair_direction": "helper_to_ai",
+                    "procedure": "Create a Share ID in WebMCP/AILinux Helper -> send it to the AI -> pair once. Reconnects use the saved resume credential automatically.",
                 },
                 "isError": False,
             }

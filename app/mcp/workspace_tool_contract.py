@@ -64,7 +64,7 @@ AIHELPER_PAIR_TOOL = {
         'type': 'object',
         'properties': {
             'action': {'type': 'string', 'enum': ['status', 'pair', 'reconnect', 'disconnect'], 'default': 'status'},
-            'code': {'type': 'string', 'description': 'One-time AILinux Helper pairing code for action=pair, or for reconnect when a fresh pair is required.'},
+            'code': {'type': 'string', 'description': 'One-time AILinux Helper Share ID for action=pair. Reconnect normally uses the durable saved lease credential; use a new Share ID only to replace an expired or revoked lease.'},
             'workspace_context': {'type': 'string', 'description': 'Optional non-secret selector supplied by an authenticated bridge.'},
             'wait_seconds': {'type': 'number', 'minimum': 0, 'maximum': 25, 'default': 5},
         },

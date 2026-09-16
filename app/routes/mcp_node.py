@@ -695,8 +695,12 @@ async def websocket_connect(
                         task=legacy_share["task"],
                         capabilities=legacy_share["capabilities"],
                     )
-                    logger.info("Local workspace resumed | lease=%s client=%s mode=%s", str(binding.get("lease_id") or "")[:12], client_id, binding["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True, "resume_token": binding.get("resume_token", resume_token)}})
+                    waiting_for_session = bool(binding.get("waiting_for_session"))
+                    logger.info(
+                        "Local workspace resumed | lease=%s client=%s mode=%s waiting=%s",
+                        str(binding.get("lease_id") or "")[:12], client_id, binding["mode"], waiting_for_session,
+                    )
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting" if waiting_for_session else "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": waiting_for_session, "reconnected": True, "resume_token": binding.get("resume_token", resume_token)}})
                 elif workspace_pair_kind == "reconnect" and paired_mcp_session:
                     from app.services.mcp_workspace_sessions import reconnect_web_workspace
                     binding = reconnect_web_workspace(
@@ -726,7 +730,7 @@ async def websocket_connect(
                         capabilities=legacy_share["capabilities"],
                     )
                     logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting", "access_mode": waiting["mode"], "mode": waiting["mode"], "waiting_for_session": True}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting", "access_mode": waiting["mode"], "mode": waiting["mode"], "waiting_for_session": True, "resume_token": waiting.get("resume_token", "")}})
 
             elif data.get("method") == "workspace/tool_stage" and is_workspace_node:
                 params = data.get("params", {}) if isinstance(data.get("params"), dict) else {}

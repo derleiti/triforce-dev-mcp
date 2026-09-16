@@ -544,12 +544,11 @@ async def require_mcp_auth(request: Request) -> str:
     # the normal authentication branches below must validate it.
     x_mcp_token = request.headers.get("X-MCP-Token", "").strip()
     has_credentials = bool(auth_header.strip() or query_token or x_mcp_token)
-    # Public guest is intentionally non-destructive.  In particular, DELETE on
-    # the legacy SSE transport tears down server-side session state and must
-    # require a real credential even though GET/POST on that transport are public.
+    # Exact public MCP transport paths support the full transport lifecycle,
+    # including DELETE. The high-entropy Mcp-Session-Id remains the capability
+    # used by the delete route; service/admin paths are not in this allowlist.
     if (
         not has_credentials
-        and request.method.upper() != "DELETE"
         and _is_public_guest_mcp_path(request.url.path)
     ):
         request.state.mcp_auth_user = "public_guest"
@@ -629,13 +628,8 @@ async def require_mcp_auth(request: Request) -> str:
             logger.warning(f"AUTH_FAIL | IP: {client_ip} | Reason: invalid_basic")
             raise _unauthorized("Invalid credentials", "Basic")
     
-    # No auth provided. Credential-less DELETE on public MCP transports is an
-    # expected rejected cleanup attempt from some clients; keep the 401 security
-    # boundary but avoid promoting routine transport churn to a warning alert.
-    if request.method.upper() == "DELETE" and _is_public_guest_mcp_path(request.url.path):
-        logger.info("AUTH_REJECT | IP: %s | Reason: no_credentials_delete", client_ip)
-    else:
-        logger.warning("AUTH_FAIL | IP: %s | Reason: no_credentials", client_ip)
+    # No auth provided outside the exact public MCP transport allowlist.
+    logger.warning("AUTH_FAIL | IP: %s | Reason: no_credentials", client_ip)
     raise _unauthorized("Authentication required")
 
 

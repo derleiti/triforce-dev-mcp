@@ -36,15 +36,16 @@ class WorkspaceWindow(QMainWindow):
         title.setFont(QFont(title.font().family(), 20, 600))
         layout.addWidget(title)
         subtitle = QLabel(
-            "Pair one local folder with the current ChatGPT, Codex or Mistral TriForce MCP session. "
-            "No TriForce account or API key is required."
+            "Share one local folder with ChatGPT, Codex or Mistral through TriForce. "
+            "This Helper creates the one-time Share ID; reconnects use a separate saved credential automatically."
         )
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
-        layout.addWidget(QLabel("Pairing code from TriForce"))
+        layout.addWidget(QLabel("One-time Share ID"))
         self.pair = QLineEdit(pair_code.strip().upper())
-        self.pair.setPlaceholderText("ABCD-1234-EF56-789A-BCDE-F012")
+        self.pair.setPlaceholderText("Generated automatically when you start sharing")
+        self.pair.setReadOnly(not bool(pair_code.strip()))
         layout.addWidget(self.pair)
 
         row = QHBoxLayout()
@@ -79,12 +80,14 @@ class WorkspaceWindow(QMainWindow):
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setEnabled(False)
+        self.copy_share_btn = QPushButton("Copy Share ID")
         self.copy_btn = QPushButton("Copy MCP URL")
         self.analyze_btn.clicked.connect(self.analyze)
         self.start_btn.clicked.connect(self.start)
         self.stop_btn.clicked.connect(self.stop)
+        self.copy_share_btn.clicked.connect(self.copy_share_id)
         self.copy_btn.clicked.connect(self.copy_url)
-        for button in (self.analyze_btn, self.start_btn, self.stop_btn, self.copy_btn):
+        for button in (self.analyze_btn, self.start_btn, self.stop_btn, self.copy_share_btn, self.copy_btn):
             buttons.addWidget(button)
         layout.addLayout(buttons)
 
@@ -132,9 +135,6 @@ class WorkspaceWindow(QMainWindow):
         if self.proc is not None and self.proc.state() != QProcess.ProcessState.NotRunning:
             return
         pair = self.pair.text().strip().upper()
-        if len(pair) < 8:
-            QMessageBox.warning(self, "Pairing", "Enter the pairing code returned by TriForce workspace_status.")
-            return
         try:
             runtime = self.runtime()
             self.details.setPlainText(json.dumps(runtime.analyze(), ensure_ascii=False, indent=2))
@@ -145,9 +145,10 @@ class WorkspaceWindow(QMainWindow):
         args = [
             "-m", "local_workspace_client.client",
             "--workspace", str(runtime.root),
-            "--pair", pair,
             "--task", runtime.task,
         ]
+        if pair:
+            args.extend(["--pair", pair])
         args.append("--write" if runtime.writable else "--read-only")
         self.proc = QProcess(self)
         self.proc.setProgram(sys.executable)
@@ -179,7 +180,13 @@ class WorkspaceWindow(QMainWindow):
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if event.get("event") == "connected":
+            if event.get("event") == "pair_code_ready":
+                code = str(event.get("pair_code") or "")
+                if code:
+                    self.pair.setText(code)
+                    self.pair.setReadOnly(True)
+                    self.status.setText("Share ready · copy this one-time ID into your AI chat")
+            elif event.get("event") == "connected":
                 mode = "Write" if event.get("mode") == "write" else "Read only"
                 self.status.setText(f"Connected · registering {mode} workspace…")
                 analysis = event.get("analysis")
@@ -188,9 +195,10 @@ class WorkspaceWindow(QMainWindow):
             elif event.get("event") == "workspace_shared":
                 mode = "Write" if event.get("mode") == "write" else "Read only"
                 if event.get("waiting_for_session"):
-                    self.status.setText(f"Workspace ready · {mode} · paste the pairing ID into your AI chat")
+                    self.status.setText(f"Workspace ready · {mode} · send the one-time Share ID to your AI")
                 else:
-                    self.status.setText(f"Paired · {mode} · keep this window open")
+                    self.pair.clear()
+                    self.status.setText(f"Paired · {mode} · reconnects are automatic")
 
     def read_stderr(self) -> None:
         if not self.proc:
@@ -215,10 +223,19 @@ class WorkspaceWindow(QMainWindow):
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.pair.setEnabled(True)
+        self.pair.setReadOnly(True)
         self.folder.setEnabled(True)
         self.read_only.setEnabled(True)
         self.write.setEnabled(True)
         self.proc = None
+
+    def copy_share_id(self) -> None:
+        code = self.pair.text().strip()
+        if not code:
+            self.status.setText("No one-time Share ID is pending")
+            return
+        QApplication.clipboard().setText(code)
+        self.status.setText("One-time Share ID copied")
 
     def copy_url(self) -> None:
         QApplication.clipboard().setText(self.url.text())

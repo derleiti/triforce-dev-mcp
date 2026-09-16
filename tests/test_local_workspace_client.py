@@ -54,8 +54,8 @@ def test_transport_url_never_carries_a_workspace_credential():
     """P0 regression: a WebSocket upgrade is a logged HTTP request.
 
     Its query string reaches the uvicorn access log, the Apache reverse proxy
-    and the Cloudflare edge log. The pairing/resume credential therefore travels
-    in a header the server already understands (x-ailinux-pair-code).
+    and the Cloudflare edge log. The one-shot transport credential therefore
+    travels in the dedicated x-ailinux-socket-ticket header.
     """
     from local_workspace_client.client import node_headers
 
@@ -66,7 +66,7 @@ def test_transport_url_never_carries_a_workspace_credential():
         assert key not in url
 
     headers = node_headers(code)
-    assert headers['X-AILinux-Pair-Code'] == code
+    assert headers['X-AILinux-Socket-Ticket'] == code
     assert headers['X-AILinux-Machine-Id']
 
 

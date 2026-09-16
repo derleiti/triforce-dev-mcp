@@ -4672,6 +4672,12 @@ async def mcp_sse_delete(request: Request):
         or ""
     ).strip()
 
+    if getattr(request.state, "mcp_auth_method", None) == "public_guest" and not session_id:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Public guest DELETE requires Mcp-Session-Id"},
+        )
+
     if session_id:
         session = _mcp_sessions.get(session_id)
         if session is not None and not _legacy_sse_session_matches_request(session, request):
