@@ -112,25 +112,27 @@ class MCPMeshServer:
             "started_at": None,
         }
     
-    def _get_ssl_context(self) -> Optional[ssl.SSLContext]:
-        """Create SSL context (optional mTLS)"""
+    def _get_ssl_context(self) -> ssl.SSLContext:
+        """Create the mandatory mTLS context for the optional legacy mesh."""
         try:
             ca_cert = CERT_DIR / "ca.crt"
-            ca_key = CERT_DIR / "ca.key"
-            
-            if not ca_cert.exists() or not ca_key.exists():
-                logger.warning("No certificates - running without TLS")
-                return None
-            
+            server_cert = CERT_DIR / "server.crt"
+            server_key = CERT_DIR / "server.key"
+
+            required = (ca_cert, server_cert, server_key)
+            if not all(path.exists() for path in required):
+                raise RuntimeError("MCP mesh TLS credentials are incomplete")
+
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            ctx.load_cert_chain(str(ca_cert), str(ca_key))
-            ctx.verify_mode = ssl.CERT_OPTIONAL  # mTLS optional
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.load_cert_chain(str(server_cert), str(server_key))
             ctx.load_verify_locations(str(ca_cert))
+            ctx.verify_mode = ssl.CERT_REQUIRED
             
             return ctx
         except Exception as e:
             logger.error(f"SSL setup failed: {e}")
-            return None
+            raise RuntimeError("MCP mesh TLS initialization failed") from e
     
     # =========================================================================
     # Node Management

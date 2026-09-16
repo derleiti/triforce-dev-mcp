@@ -236,6 +236,12 @@ async def worker_websocket(
             await manager.unregister_client(session_id)
 
 
+def _require_distributed_session(authorization: str) -> dict:
+    """Require a verified AILinux client/user JWT for distributed REST access."""
+    payload = decode_authorization_header(authorization)
+    return build_verified_session(payload)
+
+
 def _require_community_task_owner(task_obj, authorization: str) -> None:
     if not task_obj or not getattr(task_obj, "allow_community", False):
         return
@@ -256,11 +262,10 @@ async def submit_task(task: TaskSubmission, authorization: str = Header(None)):
     Der Task wird an einen verfügbaren Worker zugewiesen.
     """
     manager = get_distributed_compute()
+    session = _require_distributed_session(authorization)
     owner_id = None
     if task.allow_community:
         community_federation_policy.ensure_enabled()
-        payload = decode_authorization_header(authorization)
-        session = build_verified_session(payload)
         community_federation_policy.validate_tier(session.get("tier", "guest"))
         owner_id = str(session.get("user_id") or session.get("client_id") or "")
         community_federation_policy.validate_community_task(task.task_type, task.input_data, task.model_id)
@@ -297,11 +302,10 @@ async def submit_batch_task(batch: BatchTaskSubmission, authorization: str = Hea
     Die Items werden in Batches aufgeteilt und parallel verarbeitet.
     """
     manager = get_distributed_compute()
+    session = _require_distributed_session(authorization)
     owner_id = None
     if batch.allow_community:
         community_federation_policy.ensure_enabled()
-        payload = decode_authorization_header(authorization)
-        session = build_verified_session(payload)
         community_federation_policy.validate_tier(session.get("tier", "guest"))
         owner_id = str(session.get("user_id") or session.get("client_id") or "")
         community_federation_policy.validate_community_task(batch.task_type + "_batch", batch.input_items, batch.model_id)
@@ -334,6 +338,7 @@ async def submit_batch_task(batch: BatchTaskSubmission, authorization: str = Hea
 @router.get("/task/{task_id}")
 async def get_task_status(task_id: str, authorization: str = Header(None)):
     """Gibt Status eines Tasks zurück."""
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
     task_obj = manager._task_queue.get(task_id)
     _require_community_task_owner(task_obj, authorization)
@@ -357,6 +362,7 @@ async def get_task_result(
 
     Mit `wait=true` blockiert der Request bis das Ergebnis verfügbar ist.
     """
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
     task_obj = manager._task_queue.get(task_id)
     _require_community_task_owner(task_obj, authorization)
@@ -395,6 +401,7 @@ async def get_task_result(
 @router.delete("/task/{task_id}")
 async def cancel_task(task_id: str, authorization: str = Header(None)):
     """Bricht einen Task ab."""
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
     task_obj = manager._task_queue.get(task_id)
     _require_community_task_owner(task_obj, authorization)
@@ -410,7 +417,7 @@ async def cancel_task(task_id: str, authorization: str = Header(None)):
 
 
 @router.get("/stats")
-async def get_stats():
+async def get_stats(authorization: str = Header(None)):
     """
     Gibt Statistiken über das Distributed Compute Network zurück.
 
@@ -420,13 +427,15 @@ async def get_stats():
     - Gesamt-Statistiken
     - Top Contributors
     """
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
     return JSONResponse(content=manager.get_stats())
 
 
 @router.get("/workers")
-async def get_workers():
+async def get_workers(authorization: str = Header(None)):
     """Liste aller verbundenen Workers."""
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
 
     workers = []
@@ -452,12 +461,13 @@ async def get_workers():
 
 
 @router.get("/credits/{session_id}")
-async def get_client_credits(session_id: str):
+async def get_client_credits(session_id: str, authorization: str = Header(None)):
     """
     Gibt Credits eines Workers zurück.
 
     Credits werden für erfolgreich abgeschlossene Tasks vergeben.
     """
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
     credits = manager.get_client_credits(session_id)
 
@@ -479,12 +489,14 @@ async def distributed_embed(
     texts: List[str],
     model_id: str = "embedding_small",
     priority: str = "normal",
+    authorization: str = Header(None),
 ):
     """
     Convenience-Endpoint für verteilte Embedding-Berechnung.
 
     Verteilt die Texte auf verfügbare Workers.
     """
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
 
     if len(texts) <= 10:
@@ -512,8 +524,10 @@ async def distributed_sentiment(
     texts: List[str],
     model_id: str = "sentiment",
     priority: str = "normal",
+    authorization: str = Header(None),
 ):
     """Convenience-Endpoint für verteilte Sentiment-Analyse."""
+    _require_distributed_session(authorization)
     manager = get_distributed_compute()
 
     task_ids = await manager.submit_batch_task(

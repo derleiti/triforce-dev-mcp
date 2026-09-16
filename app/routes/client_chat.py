@@ -5,7 +5,7 @@ Tier-basierter Chat:
 - Registered: Ollama + konfigurierte Free-Quota-Provider
 - Pro/Enterprise: alle konfigurierten Chat-Provider
 """
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List
@@ -35,7 +35,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # JWT Config - Import from auth module to share secret
-from .client_auth import decode_authorization_header
+from .client_auth import decode_authorization_header, require_admin
 
 
 
@@ -82,12 +82,9 @@ def get_user_and_tier_from_headers(
                 tier = tier_service.get_user_tier(email)
             return email, tier
     
-    # 2. X-User-ID Header
-    if x_user_id and x_user_id not in ("", "anonymous", "none", "null"):
-        tier = tier_service.get_user_tier(x_user_id)
-        return x_user_id, tier
-    
-    # 3. Guest
+    # X-User-ID is untrusted caller metadata, not authentication. Without a
+    # verified bearer JWT the caller is always a guest; otherwise an attacker
+    # could impersonate a known Pro/Enterprise user by sending only this header.
     return "anonymous", UserTier.GUEST
 
 
@@ -1304,7 +1301,7 @@ async def ollama_status():
 # ========= MODEL AVAILABILITY ROUTES =========
 
 @router.get("/models/availability")
-async def get_model_availability():
+async def get_model_availability(_admin: dict = Depends(require_admin)):
     """
     Zeige Model-Availability Status
     - Excluded Models (Quota/Rate-Limit)  
@@ -1314,14 +1311,14 @@ async def get_model_availability():
 
 
 @router.post("/models/availability/reset/{model_id:path}")
-async def reset_model_availability(model_id: str):
+async def reset_model_availability(model_id: str, _admin: dict = Depends(require_admin)):
     """Reset Availability-Status für ein Model (Admin)"""
     availability_service.reset_model(model_id)
     return {"reset": model_id, "status": "ok"}
 
 
 @router.post("/models/availability/exclude")
-async def exclude_model(model_id: str, reason: str = "manual"):
+async def exclude_model(model_id: str, reason: str = "manual", _admin: dict = Depends(require_admin)):
     """Manuell ein Model excluden (Admin)"""
     availability_service.add_exclusion(model_id, reason)
     return {"excluded": model_id, "reason": reason}
@@ -1330,14 +1327,14 @@ async def exclude_model(model_id: str, reason: str = "manual"):
 # ========= TOKEN MANAGEMENT ROUTES =========
 
 @router.post("/tokens/reset/{user_id}")
-async def reset_user_tokens(user_id: str):
+async def reset_user_tokens(user_id: str, _admin: dict = Depends(require_admin)):
     """Reset Token-Usage für einen User (Admin)"""
     result = tier_service.reset_token_usage(user_id)
     return result
 
 
 @router.get("/tokens/usage/{user_id}")
-async def get_user_token_usage(user_id: str):
+async def get_user_token_usage(user_id: str, _admin: dict = Depends(require_admin)):
     """Hole Token-Verbrauch für einen User"""
     return tier_service.get_token_usage(user_id)
 
