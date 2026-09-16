@@ -284,7 +284,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.29-browser'" in html
+    assert "EXECUTOR_VERSION='2.90.30-browser'" in html
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -326,7 +326,7 @@ def test_browser_python_runtime_is_isolated_and_does_not_impersonate_docker_comp
     html = _workspace_setup_contract_source()
     assert 'id="webRuntimePanel"' in html
     assert 'Pyodide 314.0.6' in html
-    assert "new Worker('/v1/mcp/web/pyodide-worker.js')" in html
+    assert "new Worker('/v1/mcp/web/pyodide-worker.js?v='+encodeURIComponent(WEBMCP_BUILD))" in html
     assert "/v1/mcp/pyodide/v314.0.6/" in html
     assert "cdn.jsdelivr.net" not in html
     assert "runPythonAsync" in html
@@ -363,15 +363,16 @@ def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
 
 
 def test_mobile_workspace_install_surface_and_pwa_contract():
-    from app.routes.mcp import _workspace_setup_contract_source
+    from app.routes.mcp import _webmcp_build_key, _workspace_setup_contract_source
     html = _workspace_setup_contract_source()
+    build = _webmcp_build_key()
     assert 'id="helperPanel"' in html
     assert '/v1/mcp/workspace/android.apk' in html
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=29029' in html
-    assert "/v1/mcp/sw.js?v=29029" in html
+    assert f'/v1/mcp/manifest.webmanifest?v={build}' in html
+    assert "/v1/mcp/sw.js?v='+encodeURIComponent(WEBMCP_BUILD)" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
     assert 'native APK selected for foreground workspace' in html
@@ -383,13 +384,15 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     manifest_response = await workspace_pwa_manifest()
     manifest = __import__('json').loads(manifest_response.body)
     assert manifest['name'] == 'AILinux Helper'
-    assert manifest['start_url'] == '/v1/mcp'
+    assert manifest['start_url'].startswith('/v1/mcp?app=')
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v29029" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.29')" in worker.body
-    assert b'ailinux-helper-v29029' in worker.body
-    assert b'caches.delete' in worker.body
+    worker_path = getattr(worker, 'path', '')
+    assert str(worker_path).endswith('/apps/web/sw.js')
+    worker_source = __import__('pathlib').Path(worker_path).read_text(encoding='utf-8')
+    assert "const CACHE='ailinux-helper-'+BUILD" in worker_source
+    assert "const SHELL='/v1/mcp?app='+encodeURIComponent(BUILD)" in worker_source
+    assert 'caches.delete' in worker_source
 
 
 
@@ -655,6 +658,28 @@ async def test_paired_device_schema_stays_discoverable_when_runtime_capability_t
         if name not in {'aihelper_app_ops', 'aihelper_input'}:
             assert by_name[name]['x_requires_workspace'] is True
 
+
+
+
+@pytest.mark.asyncio
+async def test_public_local_mcp_advertises_legacy_pair_and_device_aliases_before_pairing():
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'legacy-local-discovery'))
+    by_name = {tool['name']: tool for tool in result['tools']}
+
+    for name in {
+        'workspace_status', 'workspace_pair', 'computer_observe', 'computer_screenshot',
+        'vision_start', 'vision_status', 'vision_observe', 'vision_stop', 'app_ops', 'computer_input',
+    }:
+        assert name in by_name
+        assert by_name[name]['x_execution'] == 'local_workspace'
+
+    assert by_name['workspace_pair']['x_compat_alias_for'] == 'aihelper_pair'
+    assert by_name['computer_observe']['x_compat_alias_for'] == 'aihelper_observe'
+    assert by_name['computer_input']['x_compat_alias_for'] == 'aihelper_input'
+    assert by_name['app_ops']['x_compat_alias_for'] == 'aihelper_app_ops'
+    assert by_name['computer_observe']['x_requires_workspace'] is True
+    assert by_name['computer_input']['x_requires_workspace'] is True
+    assert by_name['app_ops']['x_requires_workspace'] is True
 
 def test_shared_reflection_protocol_reaches_mcp_and_tristar_model_init():
     from app.mcp.agent_instructions import build_mcp_instructions

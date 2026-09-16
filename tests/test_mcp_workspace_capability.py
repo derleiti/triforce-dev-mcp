@@ -1324,3 +1324,58 @@ def test_workspace_socket_ticket_subprotocol_parser_ignores_base_protocol():
     headers = {"sec-websocket-protocol": "ailinux-workspace-v1, ailinux-ticket.ABCD-1234-EF56"}
     assert _workspace_ticket_from_subprotocol(headers) == "ABCD-1234-EF56"
     assert _workspace_ticket_from_subprotocol({"sec-websocket-protocol": "ailinux-workspace-v1"}) == ""
+
+
+
+def test_workspace_transport_ticket_accepts_native_header():
+    from app.routes.mcp_node import _workspace_transport_ticket
+
+    headers = {"x-ailinux-socket-ticket": "abcd-1234-ef56"}
+    assert _workspace_transport_ticket(headers) == "ABCD-1234-EF56"
+
+
+def test_workspace_transport_ticket_prefers_browser_subprotocol():
+    from app.routes.mcp_node import _workspace_transport_ticket
+
+    headers = {
+        "sec-websocket-protocol": "ailinux-workspace-v1, ailinux-ticket.BROWSER-1234",
+        "x-ailinux-socket-ticket": "native-5678",
+    }
+    assert _workspace_transport_ticket(headers) == "BROWSER-1234"
+
+
+def test_webmcp_setup_html_uses_content_fingerprint_for_mutable_assets(tmp_path, monkeypatch):
+    from app.routes.mcp import _webmcp_build_key, _workspace_setup_html
+
+    web = tmp_path / "apps" / "web"
+    web.mkdir(parents=True)
+    (web / "index.html").write_text(
+        '<html><head><link rel="stylesheet" href="/v1/mcp/web/styles.css?v=old">'
+        '<link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=old"></head>'
+        '<body><script src="/v1/mcp/web/app.js?v=old"></script></body></html>',
+        encoding="utf-8",
+    )
+    (web / "styles.css").write_text("body{}", encoding="utf-8")
+    (web / "app.js").write_text("console.log('one')", encoding="utf-8")
+    (web / "pyodide-worker.js").write_text("self.onmessage=()=>{}", encoding="utf-8")
+    (web / "sw.js").write_text("self.addEventListener('fetch',()=>{})", encoding="utf-8")
+    monkeypatch.setenv("AILINUX_HELPER_SOURCE", str(tmp_path))
+
+    first = _webmcp_build_key()
+    html = _workspace_setup_html()
+    assert f'/v1/mcp/web/app.js?v={first}' in html
+    assert f'/v1/mcp/web/styles.css?v={first}' in html
+    assert f'/v1/mcp/manifest.webmanifest?v={first}' in html
+    assert f'<meta name="ailinux-webmcp-build" content="{first}">' in html
+
+    (web / "app.js").write_text("console.log('two')", encoding="utf-8")
+    assert _webmcp_build_key() != first
+
+
+def test_webmcp_mutable_asset_headers_disable_browser_and_cdn_caches():
+    from app.routes.mcp import _webmcp_no_store_headers
+
+    headers = _webmcp_no_store_headers()
+    assert "no-store" in headers["Cache-Control"]
+    assert headers["CDN-Cache-Control"] == "no-store"
+    assert headers["Cloudflare-CDN-Cache-Control"] == "no-store"

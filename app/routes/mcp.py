@@ -2,6 +2,7 @@ from __future__ import annotations
 from .widget_handlers import handle_weather, handle_crypto_prices, handle_stock_indices, handle_market_overview, handle_google_deep_search, handle_current_time, handle_list_timezones
 
 import base64
+import hashlib
 import inspect
 import logging
 import os
@@ -200,13 +201,56 @@ def _helper_release_catalog() -> dict:
     return catalog
 
 
+def _webmcp_build_key() -> str:
+    """Fingerprint the browser executor bundle for cache-safe public asset URLs."""
+    root = _helper_web_root()
+    digest = hashlib.sha256()
+    for name in ("index.html", "styles.css", "app.js", "pyodide-worker.js", "sw.js"):
+        path = root / name
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
 def _workspace_setup_html() -> str:
-    """Load the canonical WebMCP document from AILinux Helper source."""
+    """Load WebMCP and bind mutable browser assets to their content fingerprint."""
     path = _helper_web_root() / "index.html"
     try:
-        return path.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8")
+        build = _webmcp_build_key()
+        for asset in ("/v1/mcp/web/styles.css", "/v1/mcp/web/app.js", "/v1/mcp/manifest.webmanifest"):
+            content = re.sub(re.escape(asset) + r"\?v=[^\"'\s>]+", f"{asset}?v={build}", content)
+        marker = '<meta name="ailinux-webmcp-build"'
+        if marker not in content:
+            content = content.replace("</head>", f'<meta name="ailinux-webmcp-build" content="{build}"></head>', 1)
+        return content
     except Exception as exc:
         raise RuntimeError(f"WebMCP index unavailable: {path}") from exc
+
+
+def _webmcp_handoff_build_key() -> str:
+    """Fingerprint the browser-to-native handoff document and assets."""
+    root = _helper_web_root()
+    digest = hashlib.sha256()
+    for name in ("handoff.html", "handoff.css", "handoff.js"):
+        path = root / name
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def _webmcp_no_store_headers() -> Dict[str, str]:
+    """Keep mutable WebMCP control assets out of browser and CDN caches."""
+    return {
+        "Cache-Control": "no-store, max-age=0, must-revalidate",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+        "Pragma": "no-cache",
+    }
 
 
 def _workspace_setup_contract_source() -> str:
@@ -324,6 +368,28 @@ def _finish_tools_list(
         try:
             from app.services.mcp_workspace_bridge import merge_workspace_tools
             filtered_tools = merge_workspace_tools(filtered_tools, request)
+            # Re-apply server-tool authorization after the workspace/public
+            # overlay, but do not feed explicitly leased local-workspace tools
+            # back through the server RBAC filter. Local tools are authorized by
+            # the workspace bridge from the live capability + share manifest;
+            # filtering them here makes a valid Helper lease undiscoverable.
+            local_workspace_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") == "local_workspace"
+            ]
+            server_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") != "local_workspace"
+            ]
+            allowed_server_names = {
+                str(tool.get("name") or "")
+                for tool in _filter_tools_for_client(server_tools, request)
+            }
+            filtered_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") == "local_workspace"
+                or str(tool.get("name") or "") in allowed_server_names
+            ]
             # Workspace/public overlays may only narrow or decorate the requested
             # discovery view. They must never inflate a semantic inventory back
             # into the full public catalogue.
@@ -474,7 +540,11 @@ async def browser_workspace_handoff_landing() -> HTMLResponse:
     path = _helper_web_root() / "handoff.html"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="Workspace handoff page unavailable")
-    return HTMLResponse(path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
+    content = path.read_text(encoding="utf-8")
+    build = _webmcp_handoff_build_key()
+    for asset in ("/v1/mcp/web/handoff.css", "/v1/mcp/web/handoff.js"):
+        content = re.sub(re.escape(asset) + r"\?v=[^\"'\s>]+", f"{asset}?v={build}", content)
+    return HTMLResponse(content, headers=_webmcp_no_store_headers())
 
 
 @public_router.head("/mcp/workspace/android.apk", tags=["MCP"], include_in_schema=False)
@@ -489,7 +559,7 @@ async def webmcp_stylesheet() -> Response:
     if not path.is_file():
         raise HTTPException(status_code=503, detail="WebMCP stylesheet unavailable")
     content = _helper_design_css() + "\n" + path.read_text(encoding="utf-8")
-    return Response(content=content, media_type="text/css", headers={"Cache-Control": "no-store"})
+    return Response(content=content, media_type="text/css", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/handoff.css", tags=["MCP"], include_in_schema=False)
@@ -497,7 +567,7 @@ async def webmcp_handoff_stylesheet() -> Response:
     path = _helper_web_root() / "handoff.css"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="Workspace handoff stylesheet unavailable")
-    return FileResponse(path, media_type="text/css", headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(path, media_type="text/css", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/handoff.js", tags=["MCP"], include_in_schema=False)
@@ -505,7 +575,7 @@ async def webmcp_handoff_script() -> Response:
     path = _helper_web_root() / "handoff.js"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="Workspace handoff script unavailable")
-    return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/app.js", tags=["MCP"], include_in_schema=False)
@@ -513,7 +583,7 @@ async def webmcp_script() -> Response:
     path = _helper_web_root() / "app.js"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="WebMCP script unavailable")
-    return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "no-store"})
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/pyodide-worker.js", tags=["MCP"], include_in_schema=False)
@@ -521,7 +591,7 @@ async def webmcp_pyodide_worker() -> Response:
     path = _helper_web_root() / "pyodide-worker.js"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="WebMCP worker unavailable")
-    return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/pyodide/{version}/{filename}", tags=["MCP"], include_in_schema=False)
@@ -582,24 +652,29 @@ async def download_desktop_workspace_helper(platform: str) -> Response:
 
 @public_router.get("/mcp/manifest.webmanifest", tags=["MCP"], summary="AILinux workspace PWA manifest")
 async def workspace_pwa_manifest() -> JSONResponse:
+    build = _webmcp_build_key()
     return JSONResponse({
         "name": "AILinux Helper",
         "short_name": "AILinux Helper",
         "id": "/v1/mcp",
-        "start_url": "/v1/mcp",
+        "start_url": f"/v1/mcp?app={build}",
         "scope": "/v1/mcp",
         "display": "standalone",
         "background_color": "#0d1117",
         "theme_color": "#0d1117",
         "description": "AILinux cross-platform local MCP companion and workspace executor",
-        "icons": [{"src": "/v1/mcp/helper/icon.png?v=29029", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
-    }, media_type="application/manifest+json", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store"})
+        "icons": [{"src": f"/v1/mcp/helper/icon.png?v={build}", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+    }, media_type="application/manifest+json", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/sw.js", tags=["MCP"], summary="AILinux workspace PWA service worker")
 async def workspace_pwa_service_worker() -> Response:
-    script = """'use strict';const CACHE='ailinux-helper-v29029';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.29')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.29'))))});"""
-    return Response(script, media_type="application/javascript", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store", "Service-Worker-Allowed": "/v1/mcp"})
+    path = _helper_web_root() / "sw.js"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="WebMCP service worker unavailable")
+    headers = _webmcp_no_store_headers()
+    headers["Service-Worker-Allowed"] = "/v1/mcp"
+    return FileResponse(path, media_type="application/javascript", headers=headers)
 
 
 @public_router.get("/.well-known/mcp")
@@ -4369,8 +4444,9 @@ async def mcp_health_or_sse(request: Request):
     await require_mcp_auth(request)
 
     accept_header = request.headers.get("Accept", "")
-    if "text/html" in accept_header and "text/event-stream" not in accept_header:
-        return HTMLResponse(_workspace_setup_html(), headers={"Cache-Control": "no-store"})
+    app_shell_request = bool(request.query_params.get("app"))
+    if ("text/html" in accept_header or app_shell_request) and "text/event-stream" not in accept_header:
+        return HTMLResponse(_workspace_setup_html(), headers=_webmcp_no_store_headers())
     client_ip = request.client.host if request.client else "unknown"
 
     if "text/event-stream" in accept_header:

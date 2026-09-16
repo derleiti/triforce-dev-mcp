@@ -18,7 +18,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request
 
-from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES, AIHELPER_CANONICAL_TO_WIRE
+from app.mcp.workspace_tool_contract import (
+    WORKSPACE_CONTROL_TOOLS,
+    WORKSPACE_TOOL_NAMES,
+    AIHELPER_CANONICAL_TO_WIRE,
+    AIHELPER_LEGACY_ALIASES,
+)
 from .share_manifest import (
     CLIPBOARD_READ_TOOLS,
     CLIPBOARD_WRITE_TOOLS,
@@ -139,6 +144,39 @@ def canonical_workspace_tools() -> List[Dict[str, Any]]:
         cloned["x_workspace_contract_fingerprint"] = contract_fp
         tools.append(cloned)
     return tools
+
+
+def legacy_workspace_alias_tools() -> List[Dict[str, Any]]:
+    """Return stable legacy Local-MCP schemas alongside canonical aihelper names.
+
+    Some MCP hosts cache an older tool namespace for the lifetime of a chat and
+    do not refresh when canonical ``aihelper_*`` tools appear. Advertising the
+    legacy wire names as first-class compatibility schemas lets those clients
+    pair and control a Helper directly through the normal MCP tool surface. The
+    call path still canonicalizes every alias and enforces the same live lease,
+    capability and share-manifest checks as the canonical tool.
+    """
+    canonical = {
+        str(tool.get("name") or ""): deepcopy(tool)
+        for tool in canonical_workspace_tools()
+        if isinstance(tool, dict) and str(tool.get("name") or "")
+    }
+    controls = {
+        str(tool.get("name") or ""): deepcopy(tool)
+        for tool in WORKSPACE_CONTROL_TOOLS
+        if isinstance(tool, dict) and str(tool.get("name") or "")
+    }
+    aliases: List[Dict[str, Any]] = []
+    for legacy_name, canonical_name in AIHELPER_LEGACY_ALIASES.items():
+        source = controls.get(legacy_name) if legacy_name in {"workspace_status", "workspace_pair"} else canonical.get(canonical_name)
+        if not source:
+            continue
+        cloned = deepcopy(source)
+        cloned["name"] = legacy_name
+        cloned["x_execution"] = "local_workspace"
+        cloned["x_compat_alias_for"] = canonical_name
+        aliases.append(cloned)
+    return aliases
 
 
 def is_public_guest(request: Request | None) -> bool:
@@ -308,6 +346,21 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
         if authenticated_bridge and not visible_now:
             cloned["x_requires_workspace"] = True
         merged[name] = cloned
+
+    # Keep the shipped Local-MCP vocabulary discoverable as explicit aliases.
+    # This is intentionally a discovery-only compatibility layer: tools/call
+    # routes these names through the same workspace bridge and therefore the
+    # same lease/capability/share-manifest authorization as canonical names.
+    if is_public_guest(request) or authenticated_bridge:
+        for alias in legacy_workspace_alias_tools():
+            alias_name = str(alias.get("name") or "")
+            canonical_name = str(alias.get("x_compat_alias_for") or "")
+            visible_now = alias_name in CONTROL_TOOLS or _local_tool_visible(canonical_name, binding)
+            if not visible_now and alias_name not in {"workspace_status", "workspace_pair", "computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "app_ops", "computer_input"}:
+                continue
+            if not visible_now:
+                alias["x_requires_workspace"] = True
+            merged[alias_name] = alias
     return list(merged.values())
 
 

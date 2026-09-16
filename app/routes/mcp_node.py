@@ -413,6 +413,20 @@ def _workspace_ticket_from_subprotocol(headers: Any) -> str:
     return ""
 
 
+def _workspace_transport_ticket(headers: Any) -> str:
+    """Return the one-shot workspace transport credential from supported channels.
+
+    Browsers carry the ticket as a WebSocket subprotocol because browser JavaScript
+    cannot set arbitrary upgrade headers. Native Helpers use a dedicated header so
+    the durable Join ID or resume credential never needs to be sent on the upgrade.
+    """
+    headers = headers or {}
+    return (
+        _workspace_ticket_from_subprotocol(headers)
+        or str(headers.get("x-ailinux-socket-ticket") or "").strip().upper()
+    )
+
+
 @router.websocket("/connect")
 async def websocket_connect(
     websocket: WebSocket,
@@ -449,7 +463,7 @@ async def websocket_connect(
     # Native clients keep workspace credentials out of URLs. Query parameters
     # remain a compatibility fallback for older/browser clients; log formatters
     # redact them while those clients are upgraded.
-    protocol_ticket = _workspace_ticket_from_subprotocol(request_headers)
+    protocol_ticket = _workspace_transport_ticket(request_headers)
     pair_code = str(
         request_headers.get("x-ailinux-pair-code")
         or websocket.query_params.get("pair_code")
