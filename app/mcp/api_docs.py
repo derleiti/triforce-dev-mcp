@@ -1863,7 +1863,7 @@ Returns base64-encoded PNG image.
         },
         "mistral": {
             "description": "Mistral AI API",
-            "models": ["large", "small", "codestral"],
+            "models": ["large", "small"],
             "capabilities": ["chat", "code"]
         },
         "anthropic": {

@@ -347,7 +347,6 @@ $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'dashboa
                                         </optgroup>
                                         <optgroup label="Groq">
                                             <option value="groq/llama-3.3-70b-versatile" <?php selected($settings['default_model'] ?? '', 'groq/llama-3.3-70b-versatile'); ?>>Llama 3.3 70B</option>
-                                            <option value="groq/mixtral-8x7b-32768" <?php selected($settings['default_model'] ?? '', 'groq/mixtral-8x7b-32768'); ?>>Mixtral 8x7B</option>
                                         </optgroup>
                                         <optgroup label="Anthropic">
                                             <option value="anthropic/claude-sonnet-4-20250514" <?php selected($settings['default_model'] ?? '', 'anthropic/claude-sonnet-4-20250514'); ?>>Claude Sonnet 4</option>

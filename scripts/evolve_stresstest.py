@@ -70,7 +70,6 @@ async def test_multi_model_stress() -> Dict[str, Any]:
     models = [
         ("gemini/gemini-2.5-flash", "Gemini Flash"),
         ("gemini/gemini-2.5-pro", "Gemini Pro"),
-        ("mistral/codestral-latest", "Codestral"),
         ("mistral/mistral-large-latest", "Mistral Large"),
         ("gpt-oss:20b-cloud", "GPT-OSS 20B"),
     ]

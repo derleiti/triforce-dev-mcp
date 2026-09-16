@@ -1269,8 +1269,8 @@ async def handle_models_list(_: Dict[str, Any]) -> Dict[str, Any]:
         "video_gen": [],       # Veo 3.1, Sora
         "audio": [],           # Whisper / Voxtral STT, Gemini TTS, Live API, native-audio
         "audio_gen": [],       # Lyria 3, Suno-style music generators
-        "embedding": [],       # gemini-embedding-001, mistral-embed, codestral-embed, BGE
-        "code": [],             # Codestral, DeepSeek-Coder, qwen-coder, codex
+        "embedding": [],       # gemini-embedding-001, mistral-embed, BGE
+        "code": [],             # DeepSeek-Coder, qwen-coder, codex
         "reasoning": [],       # o1/o3, DeepSeek-R1, Magistral, thinking variants
         "function_calling": [], # Models advertising native tool use
         "moderation": [],      # llama-guard, mistral-moderation

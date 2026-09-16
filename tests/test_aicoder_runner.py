@@ -232,7 +232,7 @@ def test_apply_profile_state_updates_only_profile_owned_keys(tmp_path: Path):
     cfg.mkdir(parents=True)
     (cfg / "state.json").write_text(json.dumps({"keep_me": 1, "approval_mode": "ask"}))
     apply_profile_state(home, {
-        "model": "mistral/codestral-latest",
+        "model": "mistral/mistral-medium-latest",
         "approval_mode": "autopilot",
         "enabled_tools": ["code_read"],
         "workspace": "/tmp/project",
@@ -241,7 +241,7 @@ def test_apply_profile_state_updates_only_profile_owned_keys(tmp_path: Path):
     })
     state = json.loads((cfg / "state.json").read_text())
     assert state["keep_me"] == 1
-    assert state["selected_model"] == "mistral/codestral-latest"
+    assert state["selected_model"] == "mistral/mistral-medium-latest"
     assert state["approval_mode"] == "autopilot"
     assert state["enabled_tools"] == ["code_read"]
     assert state["workspace_root"] == "/tmp/project"
@@ -311,7 +311,7 @@ def _configure_idle_provider_test(monkeypatch, tmp_path: Path, *, profile_cursor
         "codex-mcp": "account:chatgpt/gpt-5.6-terra",
         "claude-mcp": "account:claude/sonnet",
         "gemini-mcp": "account:gemini/gemini-3.8-flash-high",
-        "opencode-mcp": "mistral/codestral-latest",
+        "opencode-mcp": "mistral/mistral-medium-latest",
     }
     monkeypatch.setattr(idle_worker, "create_snapshot", create_snapshot)
     monkeypatch.setattr(idle_worker, "prepare_instance_home", prepare_home)
@@ -348,7 +348,7 @@ def test_idle_auto_rotation_skips_exhausted_gemini_without_launching_provider(tm
     monkeypatch.setattr(idle_worker, "AICoderRunner", FakeRunner)
     outcome = asyncio.run(idle_worker.run_idle_once(workspace=tmp_path, timeout=5))
 
-    assert calls == ["mistral/codestral-latest"]
+    assert calls == ["mistral/mistral-medium-latest"]
     assert outcome["status"] == "success"
     assert outcome["profile_id"] == "opencode-mcp"
     assert outcome["attempted_profiles"] == ["gemini-mcp", "opencode-mcp"]
@@ -445,7 +445,7 @@ def test_idle_auto_rotation_falls_back_after_cli_token_expired(tmp_path: Path, m
                     profile_id=kwargs["profile_id"], status="error", model=kwargs["model"],
                     error="Gemini login required",
                 )
-            if kwargs["model"] == "mistral/codestral-latest":
+            if kwargs["model"] == "mistral/mistral-medium-latest":
                 return AICoderRunResult(
                     profile_id=kwargs["profile_id"], status="error", model=kwargs["model"],
                     error="Token expired. Please re-login: aicoder setup",
@@ -461,7 +461,7 @@ def test_idle_auto_rotation_falls_back_after_cli_token_expired(tmp_path: Path, m
     assert calls == [
         "account:claude/sonnet",
         "account:gemini/gemini-3.8-flash-high",
-        "mistral/codestral-latest",
+        "mistral/mistral-medium-latest",
         "account:chatgpt/gpt-5.6-terra",
     ]
     assert outcome["status"] == "success"

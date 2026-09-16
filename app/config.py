@@ -236,7 +236,6 @@ class Settings(BaseSettings):
     # Mistral
     mistral_api_key: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
     mistral_organisation_id: str | None = Field(default=None, validation_alias="MISTRAL_ORG_ID")
-    codestral_api_key: str | None = Field(default=None, validation_alias="CODESTRAL_API_KEY")
     # Native Mistral Agents / Conversations API
     mistral_agent_id: Optional[str] = Field(
         default="ag:75b2b27f:20251006:untitled-agent:8f02c404",

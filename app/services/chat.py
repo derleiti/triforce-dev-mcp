@@ -63,8 +63,6 @@ STRUCTURE_PROMPT = (
 
 MISTRAL_MODEL_ALIASES = {
     # Legacy aliases
-    "mistral/open-mixtral-8x7b": "open-mixtral-8x7b",
-    "mistral/mixtral-8x7b": "open-mixtral-8x7b",
     # Current generation (map to latest versions)
     "mistral/large": "mistral-medium-3.5",
     "mistral/medium": "mistral-medium-latest",
@@ -76,8 +74,6 @@ MISTRAL_MODEL_ALIASES = {
     "small": "mistral-small-latest",
     "tiny": "ministral-3b-latest",
     # Specialist models
-    "mistral/codestral": "codestral-latest",
-    "codestral": "codestral-latest",
     # Ministral models
     "mistral/ministral-8b": "ministral-8b-latest",
     "mistral/ministral-3b": "ministral-3b-latest",

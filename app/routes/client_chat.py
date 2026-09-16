@@ -215,7 +215,6 @@ NVIDIA_AICODER_FREE_MODELS = {
     "nvidia/nvidia/nemotron-3-nano-30b-a3b",
     "nvidia/nvidia/nemotron-nano-3-30b-a3b",
     "nvidia/nvidia/nvidia-nemotron-nano-9b-v2",
-    "nvidia/mistralai/codestral-22b-instruct-v0.1",
     "nvidia/ibm/granite-34b-code-instruct",
     "nvidia/ibm/granite-8b-code-instruct",
     "nvidia/google/codegemma-7b",

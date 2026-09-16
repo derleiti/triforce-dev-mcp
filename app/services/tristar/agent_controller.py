@@ -376,7 +376,7 @@ BUILTIN_AICODER_PROFILE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "claude-mcp": {"model": "account:claude/sonnet", "approval_mode": "autopilot"},
     "codex-mcp": {"model": "account:chatgpt/gpt-5.6-terra", "approval_mode": "autopilot"},
     "gemini-mcp": {"model": "account:gemini/gemini-3.8-flash-high", "approval_mode": "autopilot"},
-    "opencode-mcp": {"model": "mistral/codestral-latest", "approval_mode": "autopilot"},
+    "opencode-mcp": {"model": "mistral/mistral-medium-latest", "approval_mode": "autopilot"},
     "mistral-mcp": {"model": "mistral/mistral-medium-latest", "approval_mode": "autopilot"},
 }
 

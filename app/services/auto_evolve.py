@@ -376,7 +376,7 @@ Antworte im JSON-Format:
                     # Route to appropriate model based on agent type
                     model = {
                         "claude-mcp": "gemini/gemini-2.5-flash",
-                        "codex-mcp": "mistral/codestral-latest",
+                        "codex-mcp": "mistral/mistral-medium-latest",
                         "gemini-mcp": "gemini/gemini-2.5-pro",
                         "opencode-mcp": "gemini/gemini-2.0-flash",
                     }.get(agent_id, "gemini/gemini-2.5-flash")

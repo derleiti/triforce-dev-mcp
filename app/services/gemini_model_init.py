@@ -76,12 +76,6 @@ CLOUD_MODELS = {
         "capabilities": ["code", "review", "multilingual"],
         "system_prompt_key": "mistral-reviewer",
     },
-    "mistral/codestral": {
-        "role": "worker",
-        "provider": "mistral",
-        "capabilities": ["code", "completion"],
-        "system_prompt_key": None,
-    },
     "anthropic/claude-sonnet-4": {
         "role": "worker",
         "provider": "anthropic",

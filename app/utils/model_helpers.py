@@ -19,7 +19,7 @@ def strip_provider_prefix(model_id: str) -> str:
     Examples:
         ollama/kimi-k2:1t-cloud -> kimi-k2:1t-cloud
         gemini/gemini-2.5-flash -> gemini-2.5-flash
-        mistral/codestral-latest -> codestral-latest
+        mistral/mistral-medium-latest -> mistral-medium-latest
         cloudflare/@cf/meta/llama -> @cf/meta/llama
     """
     for prefix in PROVIDER_PREFIXES:

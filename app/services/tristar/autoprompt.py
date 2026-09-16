@@ -169,7 +169,7 @@ CODING-MODUS AKTIV:
 - Automatische Code-Reviews durch Reviewer-LLMs
 - Tests werden automatisch generiert
 - Sandbox-Execution für Code-Snippets""",
-                worker_models=["claude", "deepseek", "qwen-coder", "codestral"],
+                worker_models=["claude", "deepseek", "qwen-coder"],
                 reviewer_models=["mistral", "cogito"],
                 require_review=True,
                 sandbox_exec=True,

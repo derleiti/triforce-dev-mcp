@@ -170,7 +170,7 @@ X-User-ID: user@example.com
 | **OpenRouter** | claude-3-opus, gpt-4-turbo, llama-3.1-405b |
 | **Anthropic** | claude-3-sonnet, claude-3-haiku |
 | **Google** | gemini-pro, gemini-ultra |
-| **Mistral** | mistral-large, codestral |
+| **Mistral** | mistral-large, mistral-medium |
 | **DeepSeek** | deepseek-coder-v2, deepseek-chat |
 
 ---

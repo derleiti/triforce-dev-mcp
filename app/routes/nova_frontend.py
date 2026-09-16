@@ -246,7 +246,7 @@ def _categorize(model: Dict[str, Any]) -> Dict[str, Any]:
         caps["embedding"] = True
     if "ocr" in caps_set or "document ai" in blob or "ocr" in blob:
         caps["ocr"] = True
-    if "code" in caps_set or any(x in blob for x in ["codex", "codestral", "devstral", "coder", "qwen3-coder"]):
+    if "code" in caps_set or any(x in blob for x in ["codex", "devstral", "coder", "qwen3-coder"]):
         caps["code"] = True
     if "reasoning" in caps_set or any(x in blob for x in ["reasoning", "thinking", "gpt-oss", "magistral", " o3", "/o3", "o4-mini"]):
         caps["reasoning"] = True
