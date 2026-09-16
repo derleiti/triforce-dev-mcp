@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from httpx import Response
+from httpx import Response, ResponseNotRead
 
 
 def extract_http_error(response: Response | None, *, default_message: str = "Upstream request failed", default_code: str = "upstream_error") -> Tuple[str, str]:
@@ -15,8 +15,17 @@ def extract_http_error(response: Response | None, *, default_message: str = "Ups
 
     try:
         data = response.json()
+    except ResponseNotRead:
+        status = getattr(response, "status_code", None)
+        reason = getattr(response, "reason_phrase", "") or ""
+        if status:
+            message = f"HTTP {status}{f' {reason}' if reason else ''}"
+        return message, code
     except ValueError:
-        text = (response.text or "").strip()
+        try:
+            text = (response.text or "").strip()
+        except ResponseNotRead:
+            text = ""
         if text:
             message = text
         return message, code

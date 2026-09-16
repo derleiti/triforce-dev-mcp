@@ -27,7 +27,7 @@ from ..routes.admin_crawler import (
 )
 from ..mcp.api_docs import get_api_docs, get_endpoint_for_task
 from ..mcp.translation import BidirectionalTranslator, APIToMCPTranslator, MCPToAPITranslator
-from ..mcp.specialists import specialist_router, SPECIALISTS
+from ..mcp.specialists import specialist_router, SPECIALISTS, SpecialistCapability
 from ..mcp.context import context_manager, prompt_library, workflow_manager
 from .compatibility_layer import compatibility_layer
 from .system_control import system_control
@@ -630,7 +630,21 @@ async def handle_specialists_invoke(params: Dict[str, Any]) -> Dict[str, Any]:
         if not specialist:
             raise ValueError(f"Specialist '{specialist_id}' not found")
     elif task:
-        specialist = specialist_router.get_best_specialist(task)
+        routing_description = f"{task}: {message}"
+        specialist = specialist_router.get_best_specialist(routing_description)
+        if not specialist:
+            capability_map = {
+                "code": SpecialistCapability.CODE_GENERATION,
+                "math": SpecialistCapability.MATH,
+                "creative": SpecialistCapability.CREATIVE_WRITING,
+                "analysis": SpecialistCapability.DATA_ANALYSIS,
+                "research": SpecialistCapability.REASONING,
+                "vision": SpecialistCapability.VISION,
+                "debug": SpecialistCapability.DEBUGGING,
+            }
+            capability = capability_map.get(str(task).lower())
+            if capability:
+                specialist = specialist_router.get_specialist_for_capability(capability)
         if not specialist:
             raise ValueError("No suitable specialist found for task")
     else:

@@ -18,3 +18,12 @@
 - Web Helper: browser/PWA executor/cache assets advanced to 2.90.29 with matching regression expectations.
 - Verification: 101 focused TriForce MCP/workspace tests passed; Python compile and `git diff --check` passed; code audit reports no error/critical bug/security findings in the audited MCP routes after fixes.
 - Recovery: `/home/zombie/workspace/.workspacebackup/retry-20260914-183651/`.
+
+## 2026-09-16 — MCP functional audit fixes
+
+- Fixed WordPress permanent-delete success detection for the WordPress REST `deleted/previous` response shape.
+- Added enum-to-capability fallback for `specialist` so simple `math`, `code`, `debug`, `vision`, `research`, `analysis`, and `creative` requests do not fail before provider invocation.
+- Hardened upstream HTTP error extraction for unread HTTPX streaming responses; preserves status/reason instead of raising `ResponseNotRead`.
+- Changed the v4 MCP chat default from retired `gemini-2.0-flash` to configurable `TRIFORCE_DEFAULT_CHAT_MODEL`, defaulting to the currently working Groq compound-mini route.
+- Recovery: `/home/zombie/workspace/.workspacebackup/mcp-tool-fixes-20260916/backup.md`.
+- Verification: `tests/test_mcp_tool_audit_fixes.py` plus focused MCP/auth tests.

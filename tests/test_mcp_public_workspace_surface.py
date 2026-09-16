@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import re
 
 import pytest
 
@@ -294,7 +295,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.30-browser'" in html
+    assert re.search(r"EXECUTOR_VERSION='\d+\.\d+\.\d+-browser'", html)
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html

@@ -106,8 +106,14 @@ async def handle_wp_delete_post(arguments: Dict[str, Any]) -> str:
         return json.dumps({"error": "post_id required"})
     
     result = await _wp_api("DELETE", f"posts/{post_id}?force=true")
-    return json.dumps({"success": "id" in result if isinstance(result, dict) else False, 
-                       "deleted_id": post_id})
+    success = False
+    if isinstance(result, dict):
+        success = bool(result.get("deleted"))
+        if not success and result.get("id") is not None:
+            success = str(result.get("id")) == str(post_id)
+        if not success and isinstance(result.get("previous"), dict):
+            success = str(result["previous"].get("id")) == str(post_id)
+    return json.dumps({"success": success, "deleted_id": post_id})
 
 
 async def handle_wp_create_page(arguments: Dict[str, Any]) -> str:

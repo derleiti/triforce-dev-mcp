@@ -123,7 +123,9 @@ class HandlerRegistry:
                 if not message:
                     return {"error": "message parameter required"}
                 
-                model = params.get("model", "gemini-2.0-flash")
+                model = params.get("model") or os.environ.get(
+                    "TRIFORCE_DEFAULT_CHAT_MODEL", "groq/groq/compound-mini"
+                )
                 system_prompt = params.get("system_prompt", "")
                 temperature = params.get("temperature", 0.7)
                 
