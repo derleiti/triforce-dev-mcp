@@ -110,8 +110,14 @@ def _merge_user(payload: UserUpsertPayload) -> Dict[str, Any]:
     name = payload.name or current.get("name") or email.split("@", 1)[0]
     tier = payload.tier or current.get("tier") or "free"
 
+    source = str(payload.source or "").strip().lower()
+    wordpress_snapshot = source.startswith("wordpress")
+
+    # WordPress sends the complete current entitlement snapshot. Treat it as
+    # authoritative so stale purchases/refunds/legacy placeholders disappear.
+    # Other callers retain merge semantics for backward compatibility.
     entitlements = {}
-    if isinstance(current.get("nova_entitlements"), dict):
+    if not wordpress_snapshot and isinstance(current.get("nova_entitlements"), dict):
         entitlements.update(current["nova_entitlements"])
 
     entitlements.update(normalize_entitlements(payload.entitlements))
@@ -120,7 +126,7 @@ def _merge_user(payload: UserUpsertPayload) -> Dict[str, Any]:
     # Rohe Produkt-IDs/Slugs aus 'extra' auf kanonische Schluessel abbilden.
     # Fuer WordPress ist 'extra' die autoritative Kauf-/Refund-Liste: auch eine
     # explizit leere Liste muss bestehende Entitlements entfernen.
-    if payload.source == "wordpress" and payload.extra is not None:
+    if wordpress_snapshot and payload.extra is not None:
         entitlements = normalize_entitlements(payload.extra)
     elif payload.extra:
         entitlements.update(normalize_entitlements(payload.extra))
