@@ -41,6 +41,15 @@ total_gz=0
 total_xz=0
 total_repos=0
 
+# apt-mirror may create zero-byte .deb placeholders when an upstream Packages
+# record contains a malformed Filename. A Debian package can never legitimately
+# be empty, so these files are safe to remove before publishing metadata.
+zero_debs=$(find "$MIRROR_ROOT" -type f -name '*.deb' -size 0c -print 2>/dev/null | wc -l)
+if [[ "$zero_debs" -gt 0 ]]; then
+    find "$MIRROR_ROOT" -type f -name '*.deb' -size 0c -delete
+    log_warn "Removed $zero_debs zero-byte .deb placeholder(s) from mirror"
+fi
+
 # Find all Packages files dynamically
 log "Searching for Packages files..."
 
@@ -53,12 +62,32 @@ while IFS= read -r -d '' pkg_file; do
         continue
     fi
 
-    ((total_repos++))
+    # APT aborts the complete package-list merge when even one stanza lacks a
+    # Package: field. Some third-party repositories have shipped malformed
+    # trailing records (notably NVIDIA CUDA). Never publish those records into
+    # the AILinux mirror. Keep valid stanzas byte-for-byte at field level and
+    # replace the index atomically before recompressing/signing.
+    sanitized="${pkg_file}.sanitized.$$"
+    bad_stanzas=$(awk 'BEGIN { RS=""; bad=0 } { if ($0 !~ /(^|\n)Package:[[:space:]]*[^[:space:]]/) bad++ } END { print bad }' "$pkg_file")
+    if [[ "$bad_stanzas" -gt 0 ]]; then
+        awk 'BEGIN { RS=""; ORS="\n\n" } /(^|\n)Package:[[:space:]]*[^[:space:]]/ { print }' "$pkg_file" > "$sanitized"
+        if [[ ! -s "$sanitized" ]]; then
+            rm -f "$sanitized"
+            log_warn "Refusing to replace ${rel_path}: sanitizing removed every stanza"
+            continue
+        fi
+        mv "$sanitized" "$pkg_file"
+        log_warn "Removed $bad_stanzas malformed package stanza(s): $rel_path"
+    else
+        rm -f "$sanitized"
+    fi
+
+    ((total_repos+=1))
 
     # Regenerate .gz
     if gzip -9 -c "$pkg_file" > "${pkg_file}.gz.new" 2>/dev/null; then
         mv "${pkg_file}.gz.new" "${pkg_file}.gz"
-        ((total_gz++))
+        ((total_gz+=1))
     else
         rm -f "${pkg_file}.gz.new"
         log_warn "Failed to compress: ${rel_path}.gz"
@@ -67,7 +96,7 @@ while IFS= read -r -d '' pkg_file; do
     # Regenerate .xz
     if xz -9 -c "$pkg_file" > "${pkg_file}.xz.new" 2>/dev/null; then
         mv "${pkg_file}.xz.new" "${pkg_file}.xz"
-        ((total_xz++))
+        ((total_xz+=1))
     else
         rm -f "${pkg_file}.xz.new"
         log_warn "Failed to compress: ${rel_path}.xz"
@@ -89,7 +118,7 @@ while IFS= read -r -d '' src_file; do
         continue
     fi
 
-    ((total_sources++))
+    ((total_sources+=1))
 
     # Regenerate .gz
     if gzip -9 -c "$src_file" > "${src_file}.gz.new" 2>/dev/null; then
@@ -116,7 +145,7 @@ while IFS= read -r -d '' contents_file; do
         continue
     fi
 
-    ((total_contents++))
+    ((total_contents+=1))
 
     # Regenerate .gz only (Contents usually only has .gz)
     if gzip -9 -c "$contents_file" > "${contents_file}.gz.new" 2>/dev/null; then
