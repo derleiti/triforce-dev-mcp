@@ -59,3 +59,27 @@ def test_extract_http_error_handles_unread_stream():
     message, code = extract_http_error(response, default_message="fallback", default_code="upstream")
     assert message == "HTTP 402 Payment Required"
     assert code == "upstream"
+
+@pytest.mark.asyncio
+async def test_route_llm_default_uses_configurable_live_default(monkeypatch):
+    from app.routes import mcp as mcp_route
+
+    class Model:
+        id = "groq/groq/compound-mini"
+        provider = "groq"
+        capabilities = ["chat"]
+
+    async def fake_get_model(model_id):
+        assert model_id == "groq/groq/compound-mini"
+        return Model()
+
+    async def fake_stream_chat(model, model_id, messages, **kwargs):
+        assert model_id == "groq/groq/compound-mini"
+        yield "OK"
+
+    monkeypatch.delenv("TRIFORCE_DEFAULT_CHAT_MODEL", raising=False)
+    monkeypatch.setattr(mcp_route.registry, "get_model", fake_get_model)
+    monkeypatch.setattr(mcp_route.chat_service, "stream_chat", fake_stream_chat)
+    result = await mcp_route.handle_llm_invoke({"message": "ping"})
+    assert result["model"] == "groq/groq/compound-mini"
+    assert result["response"] == "OK"
