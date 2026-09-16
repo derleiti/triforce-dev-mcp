@@ -287,6 +287,67 @@ def _build_tool_result(result: Any, *, is_error: bool = False) -> Dict[str, Any]
     }
 
 
+def _is_dual_surface_tool(tool_name: str) -> bool:
+    """True for tools that exist BOTH server-side (v4) and on a paired workspace.
+
+    For these eight names (shell, git, code_*, file_ops, file_read) the target
+    machine depends solely on whether this MCP session holds a workspace lease.
+    The name alone does not reveal it, so results get tagged with
+    ``execution_target``. Derived at call time from the live registries, so the
+    set cannot drift out of sync with a hand-maintained list.
+    """
+    try:
+        from ..services.mcp_workspace_bridge import LOCAL_TOOL_NAMES
+        from ..mcp.handlers_v4 import get_tool_handler as _get_v4_handler
+    except Exception:  # pragma: no cover - transparency must never break a call
+        return False
+    return tool_name in LOCAL_TOOL_NAMES and _get_v4_handler(tool_name) is not None
+
+
+def _tag_execution_target(result: Any, tool_name: str, target: str) -> Any:
+    """Tag a raw handler result before serialization (server-side path).
+
+    Applied pre-serialization so the text block and structuredContent produced
+    by _build_tool_result stay byte-identical in meaning.
+    """
+    if not isinstance(result, dict) or "execution_target" in result:
+        return result
+    if _is_dual_surface_tool(tool_name):
+        result["execution_target"] = target
+    return result
+
+
+def _tag_local_execution_target(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
+    """Tag an already-built MCP result coming back from the workspace bridge.
+
+    The bridge returns a finished MCP envelope, so both representations are
+    updated together. Non-JSON text blocks (e.g. screenshot payloads) and image
+    blocks are left untouched.
+    """
+    if not isinstance(result, dict) or not _is_dual_surface_tool(tool_name):
+        return result
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict) or "execution_target" in structured:
+        return result
+    structured["execution_target"] = "local_workspace"
+    content = result.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "text"):
+                continue
+            try:
+                parsed = json.loads(block.get("text") or "")
+            except (ValueError, TypeError):
+                break
+            if isinstance(parsed, dict):
+                parsed["execution_target"] = "local_workspace"
+                block["text"] = json.dumps(
+                    parsed, separators=(",", ":"), ensure_ascii=False, default=str
+                )
+            break
+    return result
+
+
 def _maybe_block_write_tool(
     tool_name: str,
     arguments: Dict[str, Any],
@@ -2827,9 +2888,10 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     if request is not None and tool_name:
         from app.services.mcp_workspace_bridge import call_workspace_tool, should_route_tool_locally
         if should_route_tool_locally(request, str(tool_name)):
-            return await call_workspace_tool(
+            local_result = await call_workspace_tool(
                 request, str(tool_name), arguments if isinstance(arguments, dict) else {}
             )
+            return _tag_local_execution_target(local_result, str(tool_name))
 
     # Resolve unified registry aliases before legacy/v4 normalization.
     from ..mcp.tool_registry_unified import resolve_tool_name_for_call
@@ -2949,12 +3011,39 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     if not handler and "_" in tool_name:
         handler = tool_map.get(tool_name.replace("_", "."))
 
-    # Try v4 handlers first
+    # Workspace-only tools have no server-side v4 handler by design. Detect
+    # this before entering handlers_v4 so an expected unpaired-workspace state
+    # does not get logged as a backend ERROR.
     if not handler:
+        from ..services.mcp_workspace_bridge import LOCAL_TOOL_NAMES
+        from ..mcp.handlers_v4 import get_tool_handler as _get_v4_handler
+
+        if tool_name in LOCAL_TOOL_NAMES and _get_v4_handler(tool_name) is None:
+            mcp_logger.info(
+                f"workspace tool '{tool_name}' called without a paired workspace lease"
+            )
+            return _build_tool_result(
+                {
+                    "error": (
+                        f"'{tool_name}' executes on your paired local workspace, but this "
+                        "MCP session has no active workspace lease. Pair a workspace or "
+                        "AILinux Helper for THIS session first (workspace_status / "
+                        "aihelper_pair), then retry. A lease paired on a different MCP "
+                        "endpoint or session does not apply here."
+                    ),
+                    "tool_name": tool_name,
+                    "source": "workspace_bridge",
+                    "code": "workspace_not_paired",
+                },
+                is_error=True,
+            )
+
         try:
             v4_result = await call_v4_tool(tool_name, arguments)
             if v4_result is not None:
-                return _build_tool_result(v4_result)
+                return _build_tool_result(
+                    _tag_execution_target(v4_result, tool_name, "server")
+                )
         except Exception as e:
             mcp_logger.error(f"v4 handler failed for {tool_name}: {e}")
             return _build_tool_result(
@@ -2966,7 +3055,7 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
         raise ValueError(f"Unknown tool: {tool_name}")
 
     result = await _call_tool_handler(handler, arguments, request)
-    return _build_tool_result(result)
+    return _build_tool_result(_tag_execution_target(result, tool_name, "server"))
 
 
 # ============================================================================

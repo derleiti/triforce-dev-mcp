@@ -1415,3 +1415,18 @@ def test_workspace_inventory_refresh_only_fires_for_successful_state_changes():
     assert mcp_route._workspace_call_changes_tool_inventory("workspace_status", {}, ok) is False
     assert mcp_route._workspace_call_changes_tool_inventory("aihelper_pair", {"action": "disconnect"}, ok) is True
     assert mcp_route._workspace_call_changes_tool_inventory("workspace_pair", {}, error) is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_only_tool_without_lease_skips_v4_error_path(monkeypatch):
+    from app.routes import mcp as mcp_route
+
+    async def forbidden_v4(*_args, **_kwargs):
+        raise AssertionError("workspace-only tool must not enter v4 dispatch")
+
+    monkeypatch.setattr(mcp_route, "call_v4_tool", forbidden_v4)
+    result = await mcp_route.handle_tools_call({"name": "file_tree", "arguments": {"path": "."}})
+
+    assert result["isError"] is True
+    assert result["structuredContent"]["code"] == "workspace_not_paired"
+    assert result["structuredContent"]["source"] == "workspace_bridge"
