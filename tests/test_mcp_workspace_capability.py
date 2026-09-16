@@ -1303,6 +1303,14 @@ async def test_cached_shell_device_alias_still_enforces_live_capability_gate():
     assert conn.calls == []
 
 
+def test_cached_shell_device_info_alias_is_read_only_compatible():
+    from app.services.mcp_workspace_bridge import _device_tool_from_shell_alias
+
+    tool, arguments = _device_tool_from_shell_alias('shell', {'command': '@device device_info {}'})
+    assert tool == 'device_info'
+    assert arguments == {}
+
+
 def test_cached_shell_device_alias_rejects_unknown_target():
     from app.services.mcp_workspace_bridge import _device_tool_from_shell_alias
 

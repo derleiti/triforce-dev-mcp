@@ -626,7 +626,7 @@ async def _claim_workspace_for_session(
 _DEVICE_COMPAT_ALIAS_PREFIX = "@device "
 _DEVICE_COMPAT_ALIAS_TOOLS = frozenset({
     "app_ops", "computer_input", "computer_observe", "computer_screenshot",
-    "vision_start", "vision_status", "vision_observe", "vision_stop",
+    "vision_start", "vision_status", "vision_observe", "vision_stop", "device_info",
 })
 
 
