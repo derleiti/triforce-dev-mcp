@@ -29,9 +29,11 @@ from .mcp_auth import (
 logger = logging.getLogger("ailinux.auth.middleware")
 
 # Protected path prefixes
-PROTECTED_PREFIXES = ["/v1/", "/v1/mcp", "/mcp"]
+PROTECTED_PREFIXES = ["/v1/", "/v1/mcp", "/mcp", "/docs", "/redoc", "/openapi.json"]
 
-# Public paths (no auth required)
+# Public paths (no account auth required). Keep capability-bearing workspace
+# endpoints explicit: their pair/resume/handoff credentials are the authorization
+# material and must work before a user has an MCP account session.
 PUBLIC_PATHS = [
     "/.well-known/",
     "/authorize",
@@ -39,18 +41,47 @@ PUBLIC_PATHS = [
     "/auth/",
     "/v1/auth/",  # Client auth endpoints (login, register)
     "/health",
-    "/docs",
-    "/openapi.json",
-    "/redoc",
     "/robots.txt",
     "/tristar/login",
     "/tristar/logout",
     "/static/",
     "/v1/distributed",
     "/v1/mcp/node/support",  # Support-Calls (KI-Support für alle)
-    "/v1/mcp/workspace/pair-ticket",  # Browser-only one-time workspace ticket
     "/v1/client/",  # Client-API (Free-Tier ohne Auth)
 ]
+
+PUBLIC_EXACT_PATHS = {
+    "/v1/mcp/workspace/pair-ticket",
+    "/v1/mcp/workspace/socket-ticket",
+    "/v1/mcp/workspace/resume-ticket",
+    "/v1/mcp/workspace/handoff-ticket",
+    "/v1/mcp/workspace/handoff",
+    "/v1/mcp/workspace/android.apk",
+    "/v1/mcp/manifest.webmanifest",
+    "/v1/mcp/sw.js",
+    # Public read-only search surface used by search.ailinux.me.
+    "/v1/search/curated",
+    "/v1/search/curated/stream",
+    "/v1/search/health",
+    "/v1/search/widget/weather",
+    "/v1/search/widget/crypto",
+    "/v1/search/widget/geo",
+}
+
+PUBLIC_ASSET_PREFIXES = (
+    "/v1/mcp/web/",
+    "/v1/mcp/pyodide/",
+    "/v1/mcp/helper/",
+    "/v1/mcp/workspace/desktop/",
+)
+
+
+def _is_public_path(path: str) -> bool:
+    if path in PUBLIC_EXACT_PATHS:
+        return True
+    if any(path.startswith(prefix) for prefix in PUBLIC_ASSET_PREFIXES):
+        return True
+    return any(path.startswith(public) or path == public.rstrip("/") for public in PUBLIC_PATHS)
 
 # Port that requires authentication (set by Apache for external requests)
 AUTH_REQUIRED_PORT = 9100
@@ -67,11 +98,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable):
         path = request.url.path
 
-        # Skip auth for public paths
-        for public in PUBLIC_PATHS:
-            if path.startswith(public) or path == public.rstrip("/"):
-                logger.info(f"AUTH_SKIP | Path: {path} | Matched: {public}")
-                return await call_next(request)
+        # Skip account auth for explicitly public/capability-authenticated paths.
+        if _is_public_path(path):
+            logger.info("AUTH_SKIP | Path: %s | Matched: public_route", path)
+            return await call_next(request)
 
         # Check if path needs protection
         needs_auth = False
@@ -97,12 +127,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass
 
-        # Only require auth if X-Forwarded-Port is 9100 (external)
-        if forwarded_port != AUTH_REQUIRED_PORT:
-            logger.debug(f"AUTH_OK | IP: {client_ip} | X-Fwd-Port: {forwarded_port_str or 'none'} | Method: port_bypass")
+        # Headerless direct access is trusted only from the host itself.
+        # Docker application containers must not inherit admin access merely by
+        # reaching the backend bridge address after a container compromise.
+        trusted_internal_clients = {"127.0.0.1", "::1", "172.17.0.1"}
+        if forwarded_port != AUTH_REQUIRED_PORT and client_ip in trusted_internal_clients:
+            logger.debug(
+                "AUTH_OK | IP: %s | X-Fwd-Port: %s | Method: trusted_host_bypass",
+                client_ip,
+                forwarded_port_str or "none",
+            )
             return await call_next(request)
 
-        # External request (port 9100) → requires authentication
+        # External proxy traffic and untrusted direct Docker peers require auth.
         logger.debug(f"AUTH_CHECK | IP: {client_ip} | X-Fwd-Port: {forwarded_port} | Path: {path}")
         
         auth_header = request.headers.get("Authorization", "")

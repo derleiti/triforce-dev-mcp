@@ -66,7 +66,7 @@ def test_launcher_bounds_graceful_shutdown_below_systemd_outer_timeout(tmp_path:
     monkeypatch.delenv("TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT", raising=False)
     argv, _env = build_server_process(config_path=cfg, environ={}, python="/x/python")
     timeout = argv[argv.index("--timeout-graceful-shutdown") + 1]
-    assert timeout == "5"
+    assert timeout == "30"
     # systemd TimeoutStopSec is 45s; Uvicorn must finish before the outer kill.
     assert int(timeout) < 45
 

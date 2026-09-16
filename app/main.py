@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pathlib import Path
 from .utils.rate_limit_compat import FastAPILimiter
+from .utils.auth_middleware import AuthMiddleware
 from typing import Optional
 
 # Unified logging für alle Komponenten
@@ -93,6 +94,7 @@ from .routes.distributed_compute import router as distributed_compute_router
 from .routes.tristar_gui import router as tristar_gui_router
 from .routes.client_chat import router as client_chat_router
 from .routes.client_auth import router as client_auth_router
+from .routes.user_api import webhook_router as user_webhook_router
 from .routes.client_update import router as client_update_router
 from .routes.client_logs import router as client_logs_router
 from .routes.client_ocr import router as client_ocr_router
@@ -416,6 +418,10 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
+    # Enforce the /v1 and /mcp trust boundary. This middleware existed but was
+    # previously never registered, leaving protected routes reachable.
+    app.add_middleware(AuthMiddleware)
+
     # =========================================================================
     # Primary Routes (/v1 prefix)
     # Note: MCP health check is now handled by mcp_router with transport detection
@@ -481,6 +487,7 @@ def create_app() -> FastAPI:
     app.include_router(vision_router, tags=["Vision"])
     app.include_router(client_chat_router, prefix="/v1", tags=["Client Chat"])
     app.include_router(client_auth_router, prefix="/v1", tags=["Client Auth"])
+    app.include_router(user_webhook_router, prefix="/v1", tags=["User Webhooks"])
     app.include_router(client_update_router, prefix="/v1", tags=["Client Update"])
     app.include_router(client_logs_router, tags=["Client Logs"])
     app.include_router(client_ocr_router, prefix="/v1", tags=["Client OCR"])

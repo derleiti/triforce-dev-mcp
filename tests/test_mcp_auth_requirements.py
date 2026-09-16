@@ -35,6 +35,19 @@ async def test_public_guest_does_not_depend_on_proxy_or_docker_source(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_public_guest_delete_rejection_is_not_warning_noise(monkeypatch, caplog):
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_USER', 'user')
+    monkeypatch.setattr(mcp_auth, 'MCP_AUTH_PASS', 'pass')
+    request = _build_request('/v1/mcp', '203.0.113.10', method='DELETE')
+    with caplog.at_level('INFO', logger='ailinux.auth'):
+        with pytest.raises(HTTPException) as exc_info:
+            await mcp_auth.require_mcp_auth(request)
+    assert exc_info.value.status_code == 401
+    assert any('AUTH_REJECT' in record.getMessage() for record in caplog.records)
+    assert not any(record.levelname == 'WARNING' and 'no_credentials' in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_public_guest_cannot_delete_legacy_sse_transport(monkeypatch):
     monkeypatch.setattr(mcp_auth, 'MCP_AUTH_USER', 'user')
     monkeypatch.setattr(mcp_auth, 'MCP_AUTH_PASS', 'pass')

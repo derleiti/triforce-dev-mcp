@@ -461,6 +461,41 @@ class TestMcpRuntimeSecurity:
         assert "group_chat_create" not in external_names
         assert "agent_start" not in external_names
 
+    @pytest.mark.asyncio
+    async def test_public_guest_tools_list_does_not_restore_memory_store_via_workspace_overlay(self):
+        from app.routes import mcp as route_mcp
+
+        guest = _mock_mcp_request(host="203.0.113.10")
+        guest.state.mcp_auth_method = "public_guest"
+        guest.state.mcp_auth_user = ""
+        guest.state.mcp_auth_full_access = False
+        payload = await route_mcp.handle_tools_list({}, request=guest)
+        names = {tool["name"] for tool in payload["tools"]}
+
+        assert "memory_search" in names
+        assert "memory_store" not in names
+        assert "tristar_memory_store" not in names
+
+    def test_public_guest_catalog_hides_shared_memory_writes(self):
+        from app.utils.mcp_security import filter_tools_for_external
+
+        guest = _mock_mcp_request(host="203.0.113.10")
+        guest.state.mcp_auth_method = "public_guest"
+        guest.state.mcp_auth_user = ""
+        authenticated = _mock_mcp_request(host="203.0.113.10")
+        authenticated.state.mcp_auth_method = "bearer"
+        authenticated.state.mcp_auth_user = "operator@example"
+        tools = [
+            {"name": "memory_store", "x_scope": "global"},
+            {"name": "tristar_memory_store", "x_scope": "global"},
+            {"name": "memory_search", "x_scope": "global"},
+        ]
+
+        assert [t["name"] for t in filter_tools_for_external(tools, guest)] == ["memory_search"]
+        assert {t["name"] for t in filter_tools_for_external(tools, authenticated)} == {
+            "memory_store", "tristar_memory_store", "memory_search"
+        }
+
     def test_name_only_scope_resolution_cannot_downgrade_admin_or_auth_tools(self):
         """Server-side authorization often has only the tool name, not tools/list metadata."""
         from app.utils.mcp_security import is_tool_allowed
@@ -480,12 +515,16 @@ class TestMcpRuntimeSecurity:
         assert is_tool_allowed("n8n_mcp_call", guest, {}) is False
         assert is_tool_allowed("group_chat_create", guest, {}) is False
         assert is_tool_allowed("status", guest, {}) is True
+        assert is_tool_allowed("memory_store", guest, {"content": "poison"}) is False
+        assert is_tool_allowed("tristar_memory_store", guest, {"content": "poison"}) is False
         assert is_tool_allowed("shell", guest, {}) is False
 
         assert is_tool_allowed("mail_inbox", authenticated, {}) is True
         assert is_tool_allowed("n8n_mcp_call", authenticated, {}) is True
         assert is_tool_allowed("group_chat_create", authenticated, {}) is False
         assert is_tool_allowed("status", authenticated, {}) is True
+        assert is_tool_allowed("memory_store", authenticated, {"content": "trusted"}) is True
+        assert is_tool_allowed("tristar_memory_store", authenticated, {"content": "trusted"}) is True
 
     @pytest.mark.asyncio
     async def test_external_tools_call_blocks_privileged_tools(self):
@@ -501,6 +540,179 @@ class TestMcpRuntimeSecurity:
         assert result["isError"] is True
         assert payload["code"] == "MCP_TOOL_FORBIDDEN"
         assert payload["tool_name"] == "agent_start"
+
+
+
+class TestGlobalAuthMiddlewareRegistration:
+    def test_main_registers_auth_middleware(self):
+        from app.main import create_app
+        from app.utils.auth_middleware import AuthMiddleware
+        app = create_app()
+        assert any(m.cls is AuthMiddleware for m in app.user_middleware)
+
+    @pytest.mark.asyncio
+    async def test_untrusted_direct_container_cannot_bypass_protected_v1(self, monkeypatch):
+        from fastapi import FastAPI
+        from fastapi.responses import Response
+        from app.utils import auth_middleware
+
+        from starlette.requests import Request
+        middleware = auth_middleware.AuthMiddleware(FastAPI())
+        request = Request({
+            "type": "http", "http_version": "1.1", "method": "GET",
+            "scheme": "http", "path": "/v1/admin/config-sanity",
+            "raw_path": b"/v1/admin/config-sanity", "query_string": b"",
+            "headers": [], "client": ("172.18.0.42", 12345),
+            "server": ("backend", 9000), "state": {},
+        })
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_USER", "test-user")
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_PASS", "test-pass")
+
+        async def call_next(_request):
+            return Response(status_code=204)
+
+        response = await middleware.dispatch(request, call_next)
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"])
+    async def test_external_api_documentation_requires_auth(self, monkeypatch, path):
+        from fastapi import FastAPI
+        from fastapi.responses import Response
+        from app.utils import auth_middleware
+        from starlette.requests import Request
+
+        middleware = auth_middleware.AuthMiddleware(FastAPI())
+        request = Request({
+            "type": "http", "http_version": "1.1", "method": "GET",
+            "scheme": "https", "path": path,
+            "raw_path": path.encode(), "query_string": b"",
+            "headers": [(b"x-forwarded-port", b"9100")],
+            "client": ("203.0.113.10", 12345),
+            "server": ("backend", 9000), "state": {},
+        })
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_USER", "test-user")
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_PASS", "test-pass")
+
+        async def call_next(_request):
+            return Response(status_code=204)
+
+        response = await middleware.dispatch(request, call_next)
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", [
+        "/v1/mcp/workspace/pair-ticket",
+        "/v1/mcp/workspace/socket-ticket",
+        "/v1/mcp/workspace/resume-ticket",
+        "/v1/mcp/workspace/handoff-ticket",
+        "/v1/mcp/workspace/handoff",
+        "/v1/mcp/workspace/android.apk",
+        "/v1/mcp/helper/releases",
+        "/v1/mcp/helper/icon.png",
+        "/v1/mcp/web/app.js",
+        "/v1/mcp/manifest.webmanifest",
+        "/v1/mcp/sw.js",
+    ])
+    async def test_public_webmcp_bootstrap_and_resume_routes_bypass_account_auth(self, monkeypatch, path):
+        from fastapi import FastAPI
+        from fastapi.responses import Response
+        from app.utils import auth_middleware
+        from starlette.requests import Request
+
+        middleware = auth_middleware.AuthMiddleware(FastAPI())
+        request = Request({
+            "type": "http", "http_version": "1.1", "method": "GET",
+            "scheme": "https", "path": path,
+            "raw_path": path.encode(), "query_string": b"",
+            "headers": [(b"x-forwarded-port", b"9100")],
+            "client": ("203.0.113.10", 12345),
+            "server": ("backend", 9000), "state": {},
+        })
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_USER", "test-user")
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_PASS", "test-pass")
+
+        async def call_next(_request):
+            return Response(status_code=204)
+
+        response = await middleware.dispatch(request, call_next)
+        assert response.status_code == 204
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", [
+        "/v1/mcp/workspace/resume-ticket-extra",
+        "/v1/mcp/workspace/handoff-admin",
+        "/v1/mcp/node/connect",
+    ])
+    async def test_webmcp_public_allowlist_does_not_open_neighboring_sensitive_routes(self, monkeypatch, path):
+        from fastapi import FastAPI
+        from fastapi.responses import Response
+        from app.utils import auth_middleware
+        from starlette.requests import Request
+
+        middleware = auth_middleware.AuthMiddleware(FastAPI())
+        request = Request({
+            "type": "http", "http_version": "1.1", "method": "GET",
+            "scheme": "https", "path": path,
+            "raw_path": path.encode(), "query_string": b"",
+            "headers": [(b"x-forwarded-port", b"9100")],
+            "client": ("203.0.113.10", 12345),
+            "server": ("backend", 9000), "state": {},
+        })
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_USER", "test-user")
+        monkeypatch.setattr(auth_middleware, "MCP_AUTH_PASS", "test-pass")
+
+        async def call_next(_request):
+            return Response(status_code=204)
+
+        response = await middleware.dispatch(request, call_next)
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_host_bridge_keeps_internal_protected_route_bypass(self, monkeypatch):
+        from fastapi import FastAPI
+        from fastapi.responses import Response
+        from app.utils import auth_middleware
+
+        from starlette.requests import Request
+        middleware = auth_middleware.AuthMiddleware(FastAPI())
+        request = Request({
+            "type": "http", "http_version": "1.1", "method": "GET",
+            "scheme": "http", "path": "/v1/admin/config-sanity",
+            "raw_path": b"/v1/admin/config-sanity", "query_string": b"",
+            "headers": [], "client": ("172.17.0.1", 12345),
+            "server": ("backend", 9000), "state": {},
+        })
+
+        async def call_next(_request):
+            return Response(status_code=204)
+
+        response = await middleware.dispatch(request, call_next)
+        assert response.status_code == 204
+
+class TestDistributedAndClientRouteAuth:
+    def test_distributed_rest_requires_client_jwt(self):
+        from app.routes.distributed_compute import _require_distributed_session
+        with pytest.raises(HTTPException) as exc:
+            _require_distributed_session(None)
+        assert exc.value.status_code == 401
+
+    def test_sensitive_client_routes_declare_admin_dependency(self):
+        from app.routes.client_chat import router
+        protected = {
+            "/client/models/availability",
+            "/client/models/availability/reset/{model_id:path}",
+            "/client/models/availability/exclude",
+            "/client/tokens/reset/{user_id}",
+            "/client/tokens/usage/{user_id}",
+        }
+        found = {}
+        for route in router.routes:
+            if getattr(route, "path", None) in protected:
+                found[route.path] = {dep.call for dep in route.dependant.dependencies}
+        from app.routes.client_auth import require_admin
+        assert set(found) == protected
+        assert all(require_admin in calls for calls in found.values())
 
 
 # =============================================================================
@@ -720,3 +932,115 @@ def test_no_unused_python_jose_or_ecdsa_dependency():
     assert "python-jose" not in requirements
     assert "python-jose==" not in lock
     assert "ecdsa==" not in lock
+
+
+# =============================================================================
+# WordPress -> TriForce webhook contract
+# =============================================================================
+
+class TestWordPressWebhookContract:
+    @staticmethod
+    def _request(body: bytes):
+        from starlette.requests import Request
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            if sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        scope = {
+            "type": "http", "http_version": "1.1", "method": "POST",
+            "scheme": "https", "path": "/v1/webhook/user-created",
+            "raw_path": b"/v1/webhook/user-created", "query_string": b"",
+            "headers": [], "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 443), "state": {},
+        }
+        return Request(scope, receive=receive)
+
+    def test_only_hardened_webhooks_are_exported(self):
+        from app.routes import user_api
+        paths = {route.path for route in user_api.webhook_router.routes}
+        assert paths == {
+            "/webhook/user-created",
+            "/webhook/payment-success",
+            "/webhook/subscription-cancelled",
+        }
+        assert not any(path.startswith("/users/") for path in paths)
+
+    @pytest.mark.asyncio
+    async def test_webhook_signature_fails_closed_without_secret(self, monkeypatch):
+        from app.routes import user_api
+        monkeypatch.delenv("AILINUX_WEBHOOK_SECRET", raising=False)
+        monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
+        assert await user_api.verify_webhook_signature(self._request(b"{}"), "deadbeef") is False
+
+    @pytest.mark.asyncio
+    async def test_webhook_signature_accepts_legacy_webhook_secret(self, monkeypatch):
+        import hashlib
+        import hmac
+        from app.routes import user_api
+        secret = "legacy-test-secret"
+        body = b'{"event":"payment_success","user_id":"wp_test","data":{}}'
+        signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        monkeypatch.delenv("AILINUX_WEBHOOK_SECRET", raising=False)
+        monkeypatch.setenv("WEBHOOK_SECRET", secret)
+        assert await user_api.verify_webhook_signature(self._request(body), signature) is True
+
+    @pytest.mark.asyncio
+    async def test_webhook_signature_accepts_matching_hmac(self, monkeypatch):
+        import hashlib
+        import hmac
+        from app.routes import user_api
+        secret = "test-secret"
+        body = b'{"event":"user_created","user_id":"wp_test","data":{}}'
+        signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        monkeypatch.setenv("AILINUX_WEBHOOK_SECRET", secret)
+        assert await user_api.verify_webhook_signature(self._request(body), signature) is True
+
+    @pytest.mark.asyncio
+    async def test_webhook_dependency_rejects_invalid_signature(self, monkeypatch):
+        from app.routes import user_api
+        monkeypatch.setenv("AILINUX_WEBHOOK_SECRET", "test-secret")
+        with pytest.raises(HTTPException) as exc_info:
+            await user_api.require_webhook_signature(self._request(b"{}"), "bad")
+        assert exc_info.value.status_code == 401
+
+    def test_main_mounts_only_webhook_router(self):
+        import inspect
+        from app import main
+        source = inspect.getsource(main.create_app)
+        assert 'include_router(user_webhook_router, prefix="/v1"' in source
+        assert 'include_router(user_api_router' not in source
+
+
+def test_stack_control_removes_legacy_wordpress_webroot_secret():
+    script = Path("scripts/docker/stack-control.sh").read_text()
+    assert "remove_legacy_wordpress_webroot_secrets" in script
+    assert "nova-ai-frontend/config/triforce.env" in script
+    assert 'rm -f -- "$legacy_env"' in script
+
+
+def test_oauth_state_files_are_private(monkeypatch, tmp_path):
+    """Bearer tokens and one-time auth codes must never be group/world-readable."""
+    from app.utils import mcp_auth
+
+    auth_dir = tmp_path / "auth"
+    token_file = auth_dir / "tokens.json"
+    code_file = auth_dir / "auth_codes.json"
+    monkeypatch.setattr(mcp_auth, "_AUTH_DIR", auth_dir)
+    monkeypatch.setattr(mcp_auth, "_TOKEN_FILE", token_file)
+    monkeypatch.setattr(mcp_auth, "_AUTH_CODES_FILE", code_file)
+    monkeypatch.setattr(mcp_auth, "_PERSISTENT_TOKENS", {"secret-token": {"user": "test"}})
+    monkeypatch.setattr(mcp_auth, "_AUTH_CODES", {
+        "secret-code": {"expires_at": "2999-01-01T00:00:00+00:00"}
+    })
+
+    mcp_auth._save_persistent_tokens()
+    mcp_auth._save_auth_codes()
+
+    assert auth_dir.stat().st_mode & 0o777 == 0o700
+    assert token_file.stat().st_mode & 0o777 == 0o600
+    assert code_file.stat().st_mode & 0o777 == 0o600

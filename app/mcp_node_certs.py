@@ -1,92 +1,46 @@
-"""
-AILinux MCP Node - Embedded Certificates
-=========================================
+"""TLS credentials for the legacy MCP mesh client.
 
-Zertifikate für mTLS-Authentifizierung.
-NICHT COMMITTEN - enthält private Keys!
-
-Verwendung:
-    from app.mcp_node_certs import get_ssl_context
-    
-    ssl_ctx = get_ssl_context()
-    async with websockets.connect("wss://api.ailinux.me:44433/mcp", ssl=ssl_ctx) as ws:
-        ...
+Private keys must never be embedded in source code. Configure filesystem paths
+with MCP_CLIENT_CERT_FILE, MCP_CLIENT_KEY_FILE and MCP_CA_CERT_FILE.
 """
 
-import ssl
-import tempfile
-import base64
+from __future__ import annotations
+
 import os
-
-# === EMBEDDED CERTIFICATES (Base64) ===
-# Client Certificate + Key (für mTLS Auth)
-_CLIENT_CERT_B64 = """LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2d0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktrd2dnU2xBZ0VBQW9JQkFRRGoyd1pXcW5HOXdJdEwKUjFwRGt4RGU2eEpTN1FYSk9VVW9GY0dNSjc0bXMxVG9hOW1iR1JITHZRd0Iwc0dENi9qOXBmS0swL2VUR1Q3TApNWndNdnVubmwwZGVQZFBsTFlnSHhVWEkyR0U3WWRoYTBwZklXdzUvaGFFTTJNTDdwamlCVGZqWVNHbzNkdWlpCis5dElXS0RVRW0ya0x6T1B3R1BQbTVYc3YvYjY0enlxZjVHaHpta2xDMDlzNnhFZUU2cXpXQ0Fxcnd5MTY3a0sKUjRhWDVnQlZKeHVDVDZzcnR1UUNYMzJJVVhmMDNjd25qR0U1SmZwaEpkanA2ZHRnU2FueitjVllMNWVZVjNmcwpkQzJhUkhFTXVnR2hhSHFONncyS3hnVVMyeHVLTElES2hETG5xVzZlWWdNTjd5T1dyS1lBYmFiekV1YUQrRWlwCkVOSXBNcU5wQWdNQkFBRUNnZ0VBS2Y3aFlUSFMrdVUxQnkva2ZCWHNBeG9TYTRSU0Q2OWxocWpUM25Bb3hOdEMKcC8vUXdKeFRRbGpha0s5MmlVa0J3RVpJdUx1dW9zY0JZdFFHN2ZaMkNBQkM0Q1RISEROVEloT0M5Q3lsWnh0MgprKzdDbU9QbmZTdDA3bmc1SDhhWUhZVHdlM1NGVnltc1lQWElpY0lFQ25KSEVQNitJeDJUaDkwbU9kZDd2dXV2CjVxdXdybzRONWhIY2I0VzlldE1qekJOZWpxOTI3S1o3TVVKVWpZSWZ6RzIvWkY1RXA3NGc0N1U1SE1USUpobGYKbFYxUmVVeXdiVEhCQ1JUWWxUa2RLRmFlY2IzM0dteVRGWlBzU1ZOZDczSm5XeGtwMXliakJCbGFsMlY2SERZNApSTXFvVzZ0eHRidHJjakFleVlSVEtuNUMvTUw4d25zYjNVSTJ2YkV4YlFLQmdRRDBlcjVxQzJ6N0MwLy9oTFd2ClJseUJBclR0S3MybTJUU21pbEZNS3JMMzV5MEcwNE1EOFJjTjYyTUtIY0YrT3lUbWx3MHk0Q2p4UDR1RUxrR3IKY0pmRWZGc0p4MFJLU2JMNzJ5ajZwcTg3WWg3MVN4d1RUTHBqNENuYVZtRCtRQXdkSGZMVEJxcXZsVm54cDZzNgppZ3lCVTR5UUNDa05aTEN5cGtnVHp2ODJqd0tCZ1FEdWw3MXdNVFQ2SUJoTXd5TUhQNUs5SEF0UG5DbkRCeGdaCjBUVXk4dFZKUlZ1anduN2toWEZ0L1VFa3p3Q0puTjNOU0NvWFliSVVOOVRTTHNOWCtFNVhTaVNUZ0l5QlgwUHEKTldMN09rcnc1WDc5NUxza2JJUVpab2NWN2VEWjY4a3dGbzlGN2tSQS9mSEVyNnNxeDJ6blFtOVZDVU4zTjlNcApQSWtlcUxSQ2h3S0JnUURQb1dzVUR1NFlhMndlbXl2ZVZ3aDYvTHlCNitkS2U0L3VuT3djbnVydUJhVEU5bDkvCnVvS1U3TU5wTlFvKzFhWXFQRUVXWXpBQ2E3Qm1xdzVVdHNQK09JcnN6QkpnY1NVVUp2WXZvZDZTdFd1TGNhVy8KY2x1ZU5TUDJiWVBraXFwL0ZBOUZUNVVvbDlRU213NmVJZDRxKzdVV0lnZ1RldDlpYWp3dXJvOHJXd0tCZ1FEQwpoQ2RIcm5aWWJZNGlGdjBaemJTZVJKemNISjdYaDVNWWlUMXIraG4xRUh5enQ3K29JenJreHhJekppaDBDTld6CnBOL2NEQ1FZNDZPNGI3T0dwc09IMnNTVEZMeDRST2lqcXo2MVAwTVZ2cVNYN2NDODQxT1hPY1ZzRlhHNWVNZWYKVXVVZnlDOFJKWGZVT0x1OXRyU01uZGNTWnVqLzZ4MVdneW52T3U4clJRS0JnUURQb3FVSzRmb1JoOWo0Qk1CdQpSV3lBMW55czJMTVhjUjFGVExlRGtlb2JzOWhEbEI1WldxMmZ1TGphYlpKQWkvd1NPVHZLb0dtQjBZQ1hFcHE2CklBblZnSVFZS0V3Z1RFZmJQQ0FYWmhVejBVb2M3TVlqRGpHZ1BHWGZNYVNsa3VMZnJrZWxRQWplOEVIS21vOTkKa25yeGRNWHFkMmFqRGlldnlJTFVRU3plYlE9PQotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCi0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLQpNSUlGRHpDQ0F2ZWdBd0lCQWdJVVBOL0lZSUhDMTdDempyb0YwaVR2Rzd1R1pHTXdEUVlKS29aSWh2Y05BUUVMCkJRQXdhREVMTUFrR0ExVUVCaE1DUkVVeEVEQU9CZ05WQkFnTUIwSmhkbUZ5YVdFeERqQU1CZ05WQkFjTUJVWjEKY25Sb01SQXdEZ1lEVlFRS0RBZEJTVXhwYm5WNE1Rd3dDZ1lEVlFRTERBTk5RMUF4RnpBVkJnTlZCQU1NRGtGSgpUR2x1ZFhnZ1RVTlFJRU5CTUI0WERUSTFNVEl4T0RFMU1qa3pNVm9YRFRJMk1USXhPREUxTWprek1Wb3dnWXd4CkN6QUpCZ05WQkFZVEFrUkZNUkF3RGdZRFZRUUlEQWRDWVhaaGNtbGhNUTR3REFZRFZRUUhEQVZHZFhKMGFERVEKTUE0R0ExVUVDZ3dIUVVsTWFXNTFlREVUTUJFR0ExVUVDd3dLVFVOUUlFTnNhV1Z1ZERFVk1CTUdBMVVFQXd3TQpZV2xzYVc1MWVDMXViMlJsTVIwd0d3WUpLb1pJaHZjTkFRa0JGZzVoY0hCQVlXbHNhVzUxZUM1dFpUQ0NBU0l3CkRRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFPUGJCbGFxY2IzQWkwdEhXa09URU43ckVsTHQKQmNrNVJTZ1Z3WXdudmlhelZPaHIyWnNaRWN1OURBSFN3WVByK1AybDhvclQ5NU1aUHNzeG5BeSs2ZWVYUjE0OQowK1V0aUFmRlJjallZVHRoMkZyU2w4aGJEbitGb1F6WXd2dW1PSUZOK05oSWFqZDI2S0w3MjBoWW9OUVNiYVF2Ck00L0FZOCtibGV5Lzl2cmpQS3Ava2FIT2FTVUxUMnpyRVI0VHFyTllJQ3F2RExYcnVRcEhocGZtQUZVbkc0SlAKcXl1MjVBSmZmWWhSZC9UZHpDZU1ZVGtsK21FbDJPbnAyMkJKcWZQNXhWZ3ZsNWhYZCt4MExacEVjUXk2QWFGbwplbzNyRFlyR0JSTGJHNG9zZ01xRU11ZXBicDVpQXczdkk1YXNwZ0J0cHZNUzVvUDRTS2tRMGlreW8ya0NBd0VBCkFhT0JpekNCaURBSkJnTlZIUk1FQWpBQU1Bc0dBMVVkRHdRRUF3SUZvREFUQmdOVkhTVUVEREFLQmdnckJnRUYKQlFjREFqQVpCZ05WSFJFRUVqQVFnUTVoY0hCQVlXbHNhVzUxZUM1dFpUQWRCZ05WSFE0RUZnUVVUYU5Obnk4UApWTTltdThVaFZEYURJRUl1ZWd3d0h3WURWUjBqQkJnd0ZvQVVsLzliVjBhb1VGdkEzSnBiZTVtaWhMbC9aYkl3CkRRWUpLb1pJaHZjTkFRRUxCUUFEZ2dJQkFFc1gwUWtKUWNpQVZNT0J0UEE2Z3h2dExWL05ZNkVqaHVld1pkS3oKeEFTMmZyUlVaNXlKZG0vQTdjdEYvdzUxTS9lZGJLYmM0dStkMnpxWndGYlR2Yk5kTEFGdTlYWHhnc1M2QXVIaApITGNkY1h0SDFvTEtMaTcxT1ZLenVkcE80ZVNtdkJKOVdIZFdXTkRQQTcwOXBhc3JlRXNTRjJXZnI5SXQyclVWClUwaGNML0s3cng3aG1GVFRuV1dCNXpKNytLSTFCelAxem5BVnJ3WVBlb2RLdXNKNDBhV2dxQUdEcTc0L0JFaWwKbHhYN09vTEwrRHZnd0ZBcEt6SHBWOXRod2lQT3RLNkFBN0t5ZUhEWUVQSkxCWTdRRXJFT2VldjhDcXlFYUpGcAo4T3l5MEFDQWFvOGgwVkYwUk4xL2NaQ3FWY2d0OEdZVittMDlkYWd1UmJoczhYNHh3SmNwKzRnM2xPS2prRjNqCitCQkFTOEFnWThrM085c3F5R1dxR3YrMU9nSnBoS2RlZ2VtT1hqWjN6WVJrbFc0OXE1enZWUGVXVGtlZkZJcisKcHRMUUo1UnBJSEdDWTNtK2ZrdEt0NnVYYnF4UGFZZ2JJQU8xUW5oN2VYRG81SkRjdExTdnpsVzRua3BRSW0zZAovZXpEYlpsWjF0OEJTTWV2eWlRNXlYdm11eGxhemh6ZVIrMHc0bTJHQ1Fud3N6OEsxNjE2cjMyRnVUSGNDY09jCkxFeDNVZ25uOHZwNHpwYjBHSDg1T0xZeHozQXk2RkU5T015Rk4zRlhyVGlKQUw2Q1FlWGlYQnVNWkRSNHF3KzYKOEhZVUNReEhGcFdIVjJrb1lqbzNoVStpWXJTYk9yWEpPMFhFT0dQRXNKTEtOV2V3WE5JdFI0dGpDZVZVSmdGUQpjVDl2Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"""
-
-# CA Certificate (Server-Verifikation)  
-_CA_CERT_B64 = """LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZzVENDQTVtZ0F3SUJBZ0lVZUR1Z3ZXWG1wNjRvVEdjak1tWlNsaUM2eUVzd0RRWUpLb1pJaHZjTkFRRUwKQlFBd2FERUxNQWtHQTFVRUJoTUNSRVV4RURBT0JnTlZCQWdNQjBKaGRtRnlhV0V4RGpBTUJnTlZCQWNNQlVaMQpjblJvTVJBd0RnWURWUVFLREFkQlNVeHBiblY0TVF3d0NnWURWUVFMREFOTlExQXhGekFWQmdOVkJBTU1Ea0ZKClRHbHVkWGdnVFVOUUlFTkJNQjRYRFRJMU1USXhPREUxTWpJeU5Gb1hEVE0xTVRJeE5qRTFNakl5TkZvd2FERUwKTUFrR0ExVUVCaE1DUkVVeEVEQU9CZ05WQkFnTUIwSmhkbUZ5YVdFeERqQU1CZ05WQkFjTUJVWjFjblJvTVJBdwpEZ1lEVlFRS0RBZEJTVXhwYm5WNE1Rd3dDZ1lEVlFRTERBTk5RMUF4RnpBVkJnTlZCQU1NRGtGSlRHbHVkWGdnClRVTlFJRU5CTUlJQ0lqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FnOEFNSUlDQ2dLQ0FnRUFranJ6UnZRUzZwbk0KaExHUUxaSkFXVW5DZkFwOEJiZUw5OTAzSTBTSjFBOTlpOUFBN3JuNDF0YmlkUi9oRkhjT3NBa2ltdEQzTll5awo3dmkva1VuLzcyR0JGU3lzb0xNelM2M0lKNXRZQytOeHoxZEkrMHdHazFlK3VNRS9maXdVdkxsdmNEQ0pwL0lNCmptZS9lQUl0bDVwUGh2SE5pWVl1RjBnWnZ0VUZ1MjBTMjV2WCtTd2VmbU5rSEtVM1VTZG9wZ3BTSjVZamVCbHQKMHYyR2cwd2hjMEhRN1B6Q2pUR3NITXVrd2VOUXA0RjAzbVRzZFJlK1NUQ2ZzK1hBbXdCNU93WFZ4SGFveUlDTwpRVEZmWlcxZXdGK0xoMlFNWk1BbzY2Mk9IMUZUanN1UWphNStvWXhMWWQ0U3o0K1pxWUhNWTNCVG1XRmxWdWZ2CkhRaGs2WWdrYjlHY1ZHSzIwdlJudTZMNUg2THFISzMrOFdUTzJ5SWtEOTdpVDdxZ05IRUtKTDByQ2I1MDRqUmUKQ3B6R0xiblJqODFWRmtuY2pWTzMyV2ZJM1doQzZKcHhLQ1hBQS83ZGcweG1yNHdUL3RjaE03OEpHV0pua1d0NgowdHR3QWoxbFZZZnhiLzR2Vk1ZTHBuaWFqelVkcGZ4bFMxVWgxUTlHbDJDakU3UEZOdkRzS3BQTitiSGlCMERoClh2NVp4RkdxMjdIODZjMnF4YWY1eWt2YTVhbW91MWVDbWxZbEtkcnhWWU5WYjVyUm9GTCtyaXRxWlVFM0J1azgKSmJkSzBhbnZnSEd2RVNiL0I4YThPM2l6cVBBZStiaXdiRy90NDhFZVF4UWo4TXVHZGw5ckFzeXVVRTBhb0tpMQpTTVVQNXA0MCtocUY5QXBNMVZKUEtXNWEwS1A0ZHRVQ0F3RUFBYU5UTUZFd0hRWURWUjBPQkJZRUZKZi9XMWRHCnFGQmJ3TnlhVzN1Wm9vUzVmMld5TUI4R0ExVWRJd1FZTUJhQUZKZi9XMWRHcUZCYndOeWFXM3Vab29TNWYyV3kKTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3RFFZSktvWklodmNOQVFFTEJRQURnZ0lCQUdwbjFzOStLZGRWWnhSKwpNOUxHT0pEc1BERk5iNi9pL0hHd2JDZGdjQTM1VDVMSVdCbytRbDRCWlZGOWswQno5aDl1TmJuRk9XcGZsTlRxCjVHVEhvdzIzaXdFa3ZGMWhySGVOcmlXTzB3aEkzb1FjWG1RUHd5UGdOaSt0dCtCVXRaQUJFSFVZRU1oRmYvcWUKZURkVS9XWHZFM3ZYemQvR016NnR2cUd0U3h4MXJ3eU9hdUZ3TTQxTGo4ZUE3RzdBU09NM2lPZHNGM3dxWXIvbgpIN2ZsdlFPZVlkWnBCYTg1U3BNTWVKQU1wcy9YNzNGQnF2UWVCdUM3ZFJlSlVkU05YQkxnWUplR0JiQU0xTmdlCjFMbDVaUlZqMC9BUDBuSEtaNEdGVGtKWDdXbldLK052czRodXZZRE44c0R6YzJvRUUwU1hMRTE3NG1GS3VGN3AKeS9Nb0JSRDVteGgzSzFOSjVubkx0aXMvSU8wdTU1RWpTZzR1MXhQRTd2QXQ5Y3RsaUhpQ3ZvRm95VTFIVDV4OApDcUNvYlYrR0tuRmxZUWlVSmFNQjRmZWpuUU5Ta2ZMdkdmOElWa1YydjRCNHZLOUtkNUY2Y1RTdHBsOFovZTBVCjJYckpSMEtmNmZWWi9QdEtLZ1lUSDBlUm9lckhWSjVXZG1ORXNORDd4eDhwZVAzU3lsZGVYMFBFRmVLcHNpaTMKU2VkWkhkOVg0aVRhbk1mcDh5Z2dhMjYwSXU2MHk3ZEU2L3IyTjJtcnlabXJ1V2ltcUdycXVyN1hJMC96ZHAwcQpRVUl4THdmS2lUUkphbi94YTA3MGs2WEhWODM3RlJWRGx2TkllY1lLeHRkNjVLaEY1TXJndGY1eHZ0MFg1ek1GCnNNU2ExQ3VZbE9OQVdWUUR0ZTU2NjZiMEZ2RjYKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="""
+import ssl
+from pathlib import Path
 
 
-def _decode_cert(b64_data: str) -> bytes:
-    """Dekodiert Base64 Zertifikat"""
-    return base64.b64decode(b64_data)
+def _required_path(env_name: str) -> Path:
+    raw = (os.getenv(env_name) or "").strip()
+    if not raw:
+        raise RuntimeError(f"{env_name} is required for MCP mesh mTLS")
+    path = Path(raw).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"{env_name} does not point to a readable file")
+    return path
 
 
 def get_ssl_context() -> ssl.SSLContext:
-    """
-    Erstellt SSL Context mit eingebetteten Zertifikaten.
-    
-    Returns:
-        ssl.SSLContext für mTLS WebSocket-Verbindung
-    """
-    # Temporäre Dateien für Zertifikate
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False) as f:
-        f.write(_decode_cert(_CLIENT_CERT_B64))
-        client_pem = f.name
-    
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.crt', delete=False) as f:
-        f.write(_decode_cert(_CA_CERT_B64))
-        ca_crt = f.name
-    
-    try:
-        # SSL Context erstellen
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.load_cert_chain(client_pem)
-        ctx.load_verify_locations(ca_crt)
-        ctx.check_hostname = True
-        ctx.verify_mode = ssl.CERT_REQUIRED
-        
-        return ctx
-    finally:
-        # Temp-Dateien löschen
-        try:
-            os.unlink(client_pem)
-            os.unlink(ca_crt)
-        except:
-            pass
+    """Build a fail-closed mTLS client context from filesystem credentials."""
+    cert_file = _required_path("MCP_CLIENT_CERT_FILE")
+    key_file = _required_path("MCP_CLIENT_KEY_FILE")
+    ca_file = _required_path("MCP_CA_CERT_FILE")
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(str(cert_file), str(key_file))
+    ctx.load_verify_locations(str(ca_file))
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
 
 
 def get_cert_info() -> dict:
-    """Gibt Zertifikat-Info zurück (ohne private Daten)"""
-    import base64
-    cert_data = base64.b64decode(_CLIENT_CERT_B64)
-    
-    # CN extrahieren (einfach)
-    if b"CN=ailinux-node" in cert_data:
-        cn = "ailinux-node"
-    else:
-        cn = "unknown"
-    
+    """Return non-secret configuration metadata only."""
     return {
-        "common_name": cn,
-        "issuer": "AILinux MCP CA",
-        "type": "mTLS Client Certificate"
+        "client_cert_configured": bool((os.getenv("MCP_CLIENT_CERT_FILE") or "").strip()),
+        "client_key_configured": bool((os.getenv("MCP_CLIENT_KEY_FILE") or "").strip()),
+        "ca_cert_configured": bool((os.getenv("MCP_CA_CERT_FILE") or "").strip()),
+        "type": "mTLS client certificate",
     }
-
-
-# === QUICK TEST ===
-if __name__ == "__main__":
-    print("Testing embedded certificates...")
-    ctx = get_ssl_context()
-    print(f"SSL Context created: {ctx}")
-    print(f"Cert info: {get_cert_info()}")
-    print("OK!")

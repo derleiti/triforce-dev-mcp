@@ -454,6 +454,8 @@ def filter_tools_for_external(
             result.append(tool)
             continue
         if name in EXTERNAL_TOOL_ALLOWLIST:
+            if public_guest and name in PUBLIC_GUEST_DENIED_TOOLS:
+                continue
             result.append(tool)
     return result
 
@@ -510,12 +512,23 @@ def is_tool_allowed(tool_name: str, request, arguments: Optional[Dict[str, Any]]
         return _is_authenticated_request(request)
     if name in PRIVILEGED_TOOLS:
         return False
+    if name in PUBLIC_GUEST_DENIED_TOOLS and not _is_authenticated_request(request):
+        return False
     if name in EXTERNAL_TOOL_ALLOWLIST:
         return _external_action_is_read_only(name, arguments)
     return False
 
 
 # Legacy-Alias: EXTERNAL_TOOL_ALLOWLIST == FULL fuer Backward-Compat
+# External tools that are useful for authenticated clients but must never be
+# writable by anonymous/public_guest callers.  Memory writes target the shared
+# TriStar store, so allowing them for guests would create a persistence /
+# memory-poisoning channel.
+PUBLIC_GUEST_DENIED_TOOLS: Set[str] = {
+    "memory_store",
+    "tristar_memory_store",
+}
+
 EXTERNAL_TOOL_ALLOWLIST: Set[str] = EXTERNAL_TOOL_ALLOWLIST_FULL
 
 
@@ -525,6 +538,7 @@ __all__ = [
     "EXTERNAL_TOOL_ALLOWLIST_REMOTE",
     "AI_CODER_TOOL_ALLOWLIST",
     "PRIVILEGED_TOOLS",
+    "PUBLIC_GUEST_DENIED_TOOLS",
     "client_ip",
     "is_ai_coder_request",
     "is_internal_full_request",

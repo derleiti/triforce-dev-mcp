@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     server_host: str = Field("127.0.0.1", validation_alias="TRIFORCE_BIND_HOST")
     server_port: int = Field(9100, ge=1, le=65535, validation_alias="TRIFORCE_API_PORT")
     server_keepalive: int = Field(75, ge=5, le=600, validation_alias="TRIFORCE_KEEPALIVE")
-    server_graceful_shutdown: int = Field(5, ge=1, le=40, validation_alias="TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT")
+    server_graceful_shutdown: int = Field(30, ge=1, le=40, validation_alias="TRIFORCE_GRACEFUL_SHUTDOWN_TIMEOUT")
     # Uvicorn only honors Forwarded/X-Forwarded-* from these direct peers.
     # Keep this list narrow: trusting arbitrary peers makes client IP spoofable.
     forwarded_allow_ips: str = Field("127.0.0.1", validation_alias="TRIFORCE_FORWARDED_ALLOW_IPS")
@@ -184,7 +184,7 @@ class Settings(BaseSettings):
     )
 
     # MCP Mesh WebSocket
-    mcp_ws_enabled: bool = Field(default=True, validation_alias="MCP_WS_ENABLED")
+    mcp_ws_enabled: bool = Field(default=False, validation_alias="MCP_WS_ENABLED")
     mcp_ws_host: str = Field(default="0.0.0.0", validation_alias="MCP_WS_HOST")
     mcp_ws_port: int = Field(default=44433, validation_alias="MCP_WS_PORT")
     mcp_ws_enable_ipv6: bool = Field(default=False, validation_alias="MCP_WS_ENABLE_IPV6")

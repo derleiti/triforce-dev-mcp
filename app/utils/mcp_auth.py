@@ -94,6 +94,21 @@ _PERSISTENT_TOKENS: Dict[str, Dict[str, Any]] = {}
 _AUTH_CODES: Dict[str, Dict[str, Any]] = {}
 _AUTH_CODE_TTL = 300  # 5 minutes
 
+
+def _ensure_private_auth_dir() -> None:
+    """Keep OAuth bearer/code storage inaccessible to other local users."""
+    _AUTH_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(_AUTH_DIR, 0o700)
+
+
+def _open_private_json(path: Path):
+    """Open a JSON state file for replacement with mode 0600 from first write."""
+    _ensure_private_auth_dir()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "w", encoding="utf-8")
+
+
 # Token expiration (default 365 days for long-lived tokens)
 _DEFAULT_TOKEN_EXPIRY_DAYS = 365
 
@@ -150,7 +165,7 @@ def _save_auth_codes():
     """Save auth codes to disk (multi-worker safe with file locking)."""
     import fcntl
     try:
-        _AUTH_DIR.mkdir(parents=True, exist_ok=True)
+        _ensure_private_auth_dir()
         # Load existing codes first to merge
         existing = {}
         if _AUTH_CODES_FILE.exists():
@@ -166,8 +181,8 @@ def _save_auth_codes():
             k: v for k, v in merged.items()
             if datetime.fromisoformat(v.get("expires_at", "2000-01-01T00:00:00+00:00").replace("Z", "+00:00")) > now
         }
-        # Write atomically
-        with open(_AUTH_CODES_FILE, 'w') as f:
+        # Keep authorization codes private even when the service umask changes.
+        with _open_private_json(_AUTH_CODES_FILE) as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             json.dump(merged, f, indent=2)
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
@@ -178,8 +193,8 @@ def _save_auth_codes():
 def _save_persistent_tokens():
     """Save tokens to disk."""
     try:
-        _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _TOKEN_FILE.write_text(json.dumps(_PERSISTENT_TOKENS, indent=2))
+        with _open_private_json(_TOKEN_FILE) as f:
+            json.dump(_PERSISTENT_TOKENS, f, indent=2)
     except Exception as e:
         logger.warning(f"Could not save tokens: {e}")
 
@@ -614,8 +629,13 @@ async def require_mcp_auth(request: Request) -> str:
             logger.warning(f"AUTH_FAIL | IP: {client_ip} | Reason: invalid_basic")
             raise _unauthorized("Invalid credentials", "Basic")
     
-    # No auth provided
-    logger.warning(f"AUTH_FAIL | IP: {client_ip} | Reason: no_credentials")
+    # No auth provided. Credential-less DELETE on public MCP transports is an
+    # expected rejected cleanup attempt from some clients; keep the 401 security
+    # boundary but avoid promoting routine transport churn to a warning alert.
+    if request.method.upper() == "DELETE" and _is_public_guest_mcp_path(request.url.path):
+        logger.info("AUTH_REJECT | IP: %s | Reason: no_credentials_delete", client_ip)
+    else:
+        logger.warning("AUTH_FAIL | IP: %s | Reason: no_credentials", client_ip)
     raise _unauthorized("Authentication required")
 
 

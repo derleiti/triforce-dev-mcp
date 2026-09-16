@@ -280,6 +280,9 @@ CORE_TOOL_NAMES = frozenset({
     "aihelper_clipboard_read", "aihelper_clipboard_write", "aihelper_compute_execute",
     "aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops",
     "aihelper_window_ops", "aihelper_input",
+    # Stable Local-MCP compatibility names for hosts that cache an older schema.
+    "workspace_status", "workspace_pair", "computer_observe", "computer_screenshot",
+    "vision_start", "vision_status", "vision_observe", "vision_stop", "app_ops", "computer_input",
 })
 
 
