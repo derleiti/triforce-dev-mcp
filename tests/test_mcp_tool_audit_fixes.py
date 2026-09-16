@@ -83,3 +83,28 @@ async def test_route_llm_default_uses_configurable_live_default(monkeypatch):
     result = await mcp_route.handle_llm_invoke({"message": "ping"})
     assert result["model"] == "groq/groq/compound-mini"
     assert result["response"] == "OK"
+
+@pytest.mark.asyncio
+async def test_specialist_provider_failure_falls_back_to_default(monkeypatch):
+    chosen = SimpleNamespace(
+        id="mistral/unavailable",
+        system_prompt_template="Be precise.",
+        to_dict=lambda: {"id": "mistral/unavailable"},
+    )
+    monkeypatch.setattr(mcp_service.specialist_router, "get_best_specialist", lambda *_a, **_k: chosen)
+    calls = []
+
+    async def fake_invoke(params):
+        calls.append(params["model"])
+        if len(calls) == 1:
+            raise RuntimeError("provider unavailable")
+        return {"response": "4", "model": params["model"]}
+
+    monkeypatch.delenv("TRIFORCE_SPECIALIST_FALLBACK_MODEL", raising=False)
+    monkeypatch.delenv("TRIFORCE_DEFAULT_CHAT_MODEL", raising=False)
+    monkeypatch.setattr(mcp_service, "handle_llm_invoke", fake_invoke)
+    result = await mcp_service.handle_specialists_invoke({"task": "math", "message": "2+2"})
+    assert calls == ["mistral/unavailable", "groq/groq/compound-mini"]
+    assert result["fallback_model"] == "groq/groq/compound-mini"
+    assert result["specialist_model_attempted"] == "mistral/unavailable"
+    assert result["response"] == "4"
