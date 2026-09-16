@@ -90,8 +90,9 @@ class UserUpsertPayload(BaseModel):
     source: Optional[str] = None
     customer_id: Optional[str] = None
     client_id: Optional[str] = None
-    nova_entitlements: Dict[str, bool] = Field(default_factory=dict)
-    entitlements: Dict[str, bool] = Field(default_factory=dict)
+    # Accept legacy list-shaped WordPress metadata as well as canonical maps.
+    nova_entitlements: Any = Field(default_factory=dict)
+    entitlements: Any = Field(default_factory=dict)
     # WordPress (EntitlementsService::sync_to_backend) schickt gekaufte Produkte als
     # Liste roher LemonSqueezy-Produkt-IDs, z.B. ["970007"]. Ohne dieses Feld hat
     # pydantic sie stillschweigend verworfen -> Kauf kam nie im Account an.
@@ -113,8 +114,8 @@ def _merge_user(payload: UserUpsertPayload) -> Dict[str, Any]:
     if isinstance(current.get("nova_entitlements"), dict):
         entitlements.update(current["nova_entitlements"])
 
-    entitlements.update({k: bool(v) for k, v in payload.entitlements.items()})
-    entitlements.update({k: bool(v) for k, v in payload.nova_entitlements.items()})
+    entitlements.update(normalize_entitlements(payload.entitlements))
+    entitlements.update(normalize_entitlements(payload.nova_entitlements))
 
     # Rohe Produkt-IDs/Slugs aus 'extra' auf kanonische Schluessel abbilden.
     # Fuer WordPress ist 'extra' die autoritative Kauf-/Refund-Liste: auch eine

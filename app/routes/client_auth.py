@@ -155,6 +155,10 @@ def normalize_entitlements(raw: Any) -> Dict[str, bool]:
     out: Dict[str, bool] = {}
 
     def canon(k: Any) -> str:
+        # bool is a subclass of int in Python; legacy list-shaped metadata may
+        # contain True/False placeholders. They are values, never entitlement IDs.
+        if isinstance(k, bool) or k is None:
+            return ""
         text = str(k).strip()
         return CANONICAL_ENTITLEMENTS.get(text, CANONICAL_ENTITLEMENTS.get(text.lower(), text))
 
@@ -984,6 +988,30 @@ async def google_login(request: GoogleLoginRequest):
     return response
 
 
+def _sync_wordpress_profile(email: str, existing: dict, wp_user: dict) -> dict:
+    """Merge authoritative WordPress account state into the local auth mirror."""
+    wp_entitlements = normalize_entitlements(
+        wp_user.get("nova_entitlements") if "nova_entitlements" in wp_user else wp_user.get("entitlements")
+    )
+    user = {
+        **existing,
+        "tier": wp_user.get("tier") or existing.get("tier") or "free",
+        "name": wp_user.get("name") or existing.get("name") or email.split("@", 1)[0],
+        "billing": existing.get("billing", False) or bool(wp_entitlements),
+        "nova_entitlements": wp_entitlements,
+        "entitlements": wp_entitlements,
+        "auth_provider": "wordpress",
+        "wordpress_roles": list(wp_user.get("wordpress_roles") or []),
+        "wordpress_can_admin": bool(wp_user.get("wordpress_can_admin", False)),
+        "authority_role": str(wp_user.get("authority_role") or ""),
+        "wordpress_authority_verified_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+    save_user_to_file(email, user)
+    USER_REGISTRY[email] = user
+    return user
+
+
 @router.post("/auth/login", response_model=UserLoginResponse)  # Compatibility: ai-coder expects /v1/auth/login
 @router.post("/login", response_model=UserLoginResponse)
 async def user_login(request: UserLoginRequest):
@@ -1028,29 +1056,24 @@ async def user_login(request: UserLoginRequest):
                 raise HTTPException(401, "Invalid email or password")
         else:
             existing = user if isinstance(user, dict) else {}
-            wp_entitlements = normalize_entitlements(
-                wp_user.get("nova_entitlements") if "nova_entitlements" in wp_user else wp_user.get("entitlements")
-            )
-            user = {
-                **existing,
-                "tier": wp_user.get("tier") or existing.get("tier") or "free",
-                "name": wp_user.get("name") or existing.get("name") or email.split("@", 1)[0],
-                "billing": existing.get("billing", False),
-                "nova_entitlements": wp_entitlements,
-                "entitlements": wp_entitlements,
-                "auth_provider": "wordpress",
-                "wordpress_roles": list(wp_user.get("wordpress_roles") or []),
-                "wordpress_can_admin": bool(wp_user.get("wordpress_can_admin", False)),
-                "authority_role": str(wp_user.get("authority_role") or ""),
-                "wordpress_authority_verified_at": datetime.now(timezone.utc).isoformat(),
-            }
-            save_user_to_file(email, user)
-            USER_REGISTRY[email] = user
+            user = _sync_wordpress_profile(email, existing, wp_user)
             logger.info(f"WordPress-authenticated user: {email}")
     else:
         # Existing local TriForce password hash.
         local_hash_ok = verify_secret(request.password, user["password_hash"])
         logger.info("COPA_LOGIN_DEBUG local_hash email=%s ok=%s", email, local_hash_ok)
+        if local_hash_ok and str(user.get("auth_provider") or "").lower() == "wordpress":
+            # WordPress owns password and subscription truth. A valid cached hash may
+            # keep login available during a short WP outage, but must not freeze an
+            # old tier forever. Refresh authoritative account state on every normal
+            # WordPress-backed password login.
+            wp_user = verify_wordpress_login(email, request.password)
+            if wp_user:
+                user = _sync_wordpress_profile(email, user, wp_user)
+                logger.info("WordPress account state refreshed for %s: tier=%s", email, normalize_tier(user.get("tier")))
+            else:
+                logger.warning("WordPress account refresh unavailable for %s; using cached local account state", email)
+
         if not local_hash_ok:
             logger.info("COPA_LOGIN_DEBUG wordpress_fallback_start email=%s", email)
             wp_user = verify_wordpress_login(email, request.password)
@@ -1063,20 +1086,7 @@ async def user_login(request: UserLoginRequest):
             if not wp_user:
                 logger.warning(f"Invalid password for: {email}")
                 raise HTTPException(401, "Invalid email or password")
-            user["auth_provider"] = "wordpress"
-            user["tier"] = wp_user.get("tier") or user.get("tier") or "free"
-            user["name"] = wp_user.get("name") or user.get("name") or email.split("@", 1)[0]
-            wp_entitlements = normalize_entitlements(
-                wp_user.get("nova_entitlements") if "nova_entitlements" in wp_user else wp_user.get("entitlements")
-            )
-            user["nova_entitlements"] = wp_entitlements
-            user["entitlements"] = wp_entitlements
-            user["wordpress_roles"] = list(wp_user.get("wordpress_roles") or [])
-            user["wordpress_can_admin"] = bool(wp_user.get("wordpress_can_admin", False))
-            user["authority_role"] = str(wp_user.get("authority_role") or "")
-            user["wordpress_authority_verified_at"] = datetime.now(timezone.utc).isoformat()
-            save_user_to_file(email, user)
-            USER_REGISTRY[email] = user
+            user = _sync_wordpress_profile(email, user, wp_user)
 
     response = issue_user_login_response(email, user)
     logger.info(

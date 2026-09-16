@@ -68,6 +68,16 @@ PUBLIC_EXACT_PATHS = {
     "/v1/search/widget/geo",
 }
 
+# Routes below do not use an account JWT. They authenticate inside the route
+# with the shared WordPress/TriForce internal key. They must bypass only this
+# account-auth middleware layer; the endpoint-specific secret check stays mandatory.
+INTERNAL_SECRET_PATHS = {
+    "/v1/admin/users/entitlements",
+    "/v1/users/entitlements",
+    "/v1/user/entitlements",
+}
+
+
 PUBLIC_ASSET_PREFIXES = (
     "/v1/mcp/web/",
     "/v1/mcp/pyodide/",
@@ -77,7 +87,7 @@ PUBLIC_ASSET_PREFIXES = (
 
 
 def _is_public_path(path: str) -> bool:
-    if path in PUBLIC_EXACT_PATHS:
+    if path in PUBLIC_EXACT_PATHS or path in INTERNAL_SECRET_PATHS:
         return True
     if any(path.startswith(prefix) for prefix in PUBLIC_ASSET_PREFIXES):
         return True

@@ -1044,3 +1044,45 @@ def test_oauth_state_files_are_private(monkeypatch, tmp_path):
     assert auth_dir.stat().st_mode & 0o777 == 0o700
     assert token_file.stat().st_mode & 0o777 == 0o600
     assert code_file.stat().st_mode & 0o777 == 0o600
+
+class TestInternalEntitlementSyncAuthBoundary:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", [
+        "/v1/admin/users/entitlements",
+        "/v1/users/entitlements",
+        "/v1/user/entitlements",
+    ])
+    async def test_internal_entitlement_routes_bypass_account_jwt_layer(self, path):
+        from fastapi import FastAPI
+        from fastapi.responses import Response
+        from starlette.requests import Request
+        from app.utils import auth_middleware
+
+        middleware = auth_middleware.AuthMiddleware(FastAPI())
+        request = Request({
+            "type": "http", "http_version": "1.1", "method": "POST",
+            "scheme": "http", "path": path, "raw_path": path.encode(),
+            "query_string": b"", "headers": [],
+            "client": ("172.18.0.42", 12345), "server": ("backend", 9000), "state": {},
+        })
+
+        async def call_next(_request):
+            return Response(status_code=204)
+
+        response = await middleware.dispatch(request, call_next)
+        assert response.status_code == 204
+
+    def test_internal_entitlement_route_still_requires_its_own_secret(self, monkeypatch):
+        from app.routes import admin_users
+
+        for key in (
+            "INTERNAL_API_KEY", "NOVA_AI_INTERNAL_KEY", "WEBHOOK_SECRET",
+            "TRIFORCE_ADMIN_SECRET", "MCP_ADMIN_TOKEN", "MCP_AUTH_TOKEN",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("NOVA_AI_INTERNAL_KEY", "shared-secret")
+
+        with pytest.raises(HTTPException) as exc:
+            admin_users._check_secret("wrong", None, None)
+        assert exc.value.status_code == 401
+        admin_users._check_secret("shared-secret", None, None)

@@ -147,3 +147,21 @@ def test_legacy_shop_permalink_redirects_to_canonical_shop() -> None:
     assert "$path === 'ailinux-shop'" in main
     assert "home_url('/shop/')" in main
     assert "wp_safe_redirect" in main
+
+
+def test_admin_user_merge_accepts_legacy_list_entitlements(tmp_path, monkeypatch):
+    from app.routes import admin_users
+    users_file = tmp_path / "users.json"
+    monkeypatch.setattr(admin_users, "USERS_FILE", users_file)
+    admin_users.USER_REGISTRY.pop("legacy-list@example.com", None)
+    merged = admin_users._merge_user(
+        admin_users.UserUpsertPayload(
+            email="legacy-list@example.com",
+            tier="paid",
+            nova_entitlements=[True, "copa_ocr", False, None],
+            source="wordpress_admin_or_webhook",
+        )
+    )
+    assert merged["tier"] == "paid"
+    assert merged["nova_entitlements"] == {"copa_ocr": True}
+    admin_users.USER_REGISTRY.pop("legacy-list@example.com", None)
