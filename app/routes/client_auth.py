@@ -1059,34 +1059,40 @@ async def user_login(request: UserLoginRequest):
             user = _sync_wordpress_profile(email, existing, wp_user)
             logger.info(f"WordPress-authenticated user: {email}")
     else:
-        # Existing local TriForce password hash.
-        local_hash_ok = verify_secret(request.password, user["password_hash"])
-        logger.info("COPA_LOGIN_DEBUG local_hash email=%s ok=%s", email, local_hash_ok)
-        if local_hash_ok and str(user.get("auth_provider") or "").lower() == "wordpress":
-            # WordPress owns password and subscription truth. A valid cached hash may
-            # keep login available during a short WP outage, but must not freeze an
-            # old tier forever. Refresh authoritative account state on every normal
-            # WordPress-backed password login.
+        auth_provider = str(user.get("auth_provider") or "").lower()
+        if auth_provider == "wordpress":
+            # WordPress is authoritative for WordPress-backed passwords. Never accept
+            # a cached TriForce hash here: after a WordPress password change that hash
+            # may represent the old password, and an outage is indistinguishable from
+            # an invalid credential in the validation bridge. Fail closed instead.
             wp_user = verify_wordpress_login(email, request.password)
-            if wp_user:
-                user = _sync_wordpress_profile(email, user, wp_user)
-                logger.info("WordPress account state refreshed for %s: tier=%s", email, normalize_tier(user.get("tier")))
-            else:
-                logger.warning("WordPress account refresh unavailable for %s; using cached local account state", email)
-
-        if not local_hash_ok:
-            logger.info("COPA_LOGIN_DEBUG wordpress_fallback_start email=%s", email)
-            wp_user = verify_wordpress_login(email, request.password)
-            logger.info(
-                "COPA_LOGIN_DEBUG wordpress_fallback_result email=%s ok=%s wp_keys=%s",
-                email,
-                bool(wp_user),
-                list(wp_user.keys()) if isinstance(wp_user, dict) else [],
-            )
             if not wp_user:
-                logger.warning(f"Invalid password for: {email}")
+                logger.warning("WordPress-backed login rejected for %s", email)
                 raise HTTPException(401, "Invalid email or password")
             user = _sync_wordpress_profile(email, user, wp_user)
+            logger.info(
+                "WordPress account state refreshed for %s: tier=%s",
+                email,
+                normalize_tier(user.get("tier")),
+            )
+        else:
+            # Existing local TriForce password hash. Unknown/local accounts may migrate
+            # to WordPress after a failed local password check if WordPress validates it.
+            local_hash_ok = verify_secret(request.password, user["password_hash"])
+            logger.info("COPA_LOGIN_DEBUG local_hash email=%s ok=%s", email, local_hash_ok)
+            if not local_hash_ok:
+                logger.info("COPA_LOGIN_DEBUG wordpress_fallback_start email=%s", email)
+                wp_user = verify_wordpress_login(email, request.password)
+                logger.info(
+                    "COPA_LOGIN_DEBUG wordpress_fallback_result email=%s ok=%s wp_keys=%s",
+                    email,
+                    bool(wp_user),
+                    list(wp_user.keys()) if isinstance(wp_user, dict) else [],
+                )
+                if not wp_user:
+                    logger.warning(f"Invalid password for: {email}")
+                    raise HTTPException(401, "Invalid email or password")
+                user = _sync_wordpress_profile(email, user, wp_user)
 
     response = issue_user_login_response(email, user)
     logger.info(

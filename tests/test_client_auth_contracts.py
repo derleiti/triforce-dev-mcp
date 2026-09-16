@@ -228,10 +228,10 @@ async def test_wordpress_backed_local_login_refreshes_authoritative_tier(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_wordpress_backed_local_login_uses_cached_state_during_wp_outage(monkeypatch):
-    email = "wp-offline@example.test"
+async def test_wordpress_backed_login_fails_closed_when_wordpress_rejects_cached_password(monkeypatch):
+    email = "wp-password-changed@example.test"
     client_auth.USER_REGISTRY[email] = {
-        "password_hash": client_auth.hash_secret("secret"),
+        "password_hash": client_auth.hash_secret("old-secret"),
         "tier": "pro",
         "name": "Cached Pro",
         "auth_provider": "wordpress",
@@ -239,8 +239,36 @@ async def test_wordpress_backed_local_login_uses_cached_state_during_wp_outage(m
     }
     monkeypatch.setattr(client_auth, "verify_wordpress_login", lambda *_args, **_kwargs: None)
 
+    with pytest.raises(client_auth.HTTPException) as exc:
+        await client_auth.user_login(
+            client_auth.UserLoginRequest(email=email, password="old-secret")
+        )
+
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_wordpress_backed_login_accepts_new_password_without_local_hash_sync(monkeypatch):
+    email = "wp-password-changed@example.test"
+    client_auth.USER_REGISTRY[email] = {
+        "password_hash": client_auth.hash_secret("old-secret"),
+        "tier": "free",
+        "name": "Cached User",
+        "auth_provider": "wordpress",
+        "nova_entitlements": {},
+    }
+    monkeypatch.setattr(client_auth, "save_user_to_file", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(client_auth, "verify_wordpress_login", lambda got_email, password: {
+        "email": got_email,
+        "name": "WordPress User",
+        "tier": "paid",
+        "wordpress_roles": ["subscriber"],
+        "wordpress_can_admin": False,
+        "nova_entitlements": {"copa_ocr": True},
+    } if password == "new-secret" else None)
+
     login = await client_auth.user_login(
-        client_auth.UserLoginRequest(email=email, password="secret")
+        client_auth.UserLoginRequest(email=email, password="new-secret")
     )
 
     assert login.tier == "pro"
