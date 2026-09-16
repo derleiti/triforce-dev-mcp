@@ -127,3 +127,23 @@ def test_workspace_node_supports_secret_free_native_handshake_and_hashed_identit
     assert 'request_headers.get("x-ailinux-machine-id")' in source
     assert 'hashlib.sha256(workspace_credential_id.encode("utf-8"))' in source
     assert "workspace_credential_id.replace('-', '')[:12]" not in source
+
+@pytest.mark.asyncio
+async def test_public_catalog_contains_every_canonical_non_admin_schema_except_guest_persistence_denies():
+    from app.mcp.tool_registry_unified import TOOL_SCOPE_TRIFORCE_ADMIN
+    from app.utils.mcp_security import PUBLIC_GUEST_DENIED_TOOLS
+
+    canonical = get_canonical_all_tools()
+    expected = {
+        tool['name'] for tool in canonical
+        if tool.get('x_scope') != TOOL_SCOPE_TRIFORCE_ADMIN
+        and tool['name'] not in PUBLIC_GUEST_DENIED_TOOLS
+    }
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'catalog-parity'))
+    actual = {tool['name'] for tool in result['tools']}
+
+    assert expected <= actual
+    assert not {
+        tool['name'] for tool in canonical
+        if tool.get('x_scope') == TOOL_SCOPE_TRIFORCE_ADMIN
+    } & actual

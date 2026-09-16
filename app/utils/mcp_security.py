@@ -429,13 +429,13 @@ def is_ai_coder_request(request) -> bool:
 def filter_tools_for_external(
     tools: List[Dict[str, Any]], request=None,
 ) -> List[Dict[str, Any]]:
-    """Default-deny external catalogue with explicit product-scope separation.
+    """Expose one complete non-admin catalogue to external MCP clients.
 
-    ``x_scope`` is discovery metadata, not authorization. It lets us keep the
-    model-facing surface coherent: public callers see global + explicitly shared
-    AILinux Helper tools, authenticated callers may additionally discover
-    TriForce account/integration tools, and engine-admin tools remain internal.
-    Existing per-tool allowlists/RBAC still gate server-side execution.
+    Discovery is intentionally broader than execution authority: ChatGPT/WebMCP
+    clients must be able to learn the same canonical non-admin vocabulary even
+    before account auth or a Helper share is attached.  ``is_tool_allowed`` and
+    the workspace share-manifest remain the authoritative execution gates.
+    TriForce engine/admin tools are the only canonical tools hidden here.
     """
     state = getattr(request, "state", None) if request is not None else None
     auth_method = str(getattr(state, "mcp_auth_method", "") or "")
@@ -446,17 +446,14 @@ def filter_tools_for_external(
         scope = str(tool.get("x_scope") or "global")
         if scope == "triforce_admin":
             continue
+        # Shared-memory writes remain undiscoverable to anonymous guests. This is
+        # a persistence/poisoning boundary, not merely an execution permission.
+        if public_guest and name in PUBLIC_GUEST_DENIED_TOOLS:
+            continue
+        cloned = dict(tool)
         if scope == "triforce_auth":
-            if not public_guest and auth_method and str(getattr(state, "mcp_auth_user", "") or "").strip():
-                result.append(tool)
-            continue
-        if scope == "aihelper":
-            result.append(tool)
-            continue
-        if name in EXTERNAL_TOOL_ALLOWLIST:
-            if public_guest and name in PUBLIC_GUEST_DENIED_TOOLS:
-                continue
-            result.append(tool)
+            cloned["x_requires_auth"] = True
+        result.append(cloned)
     return result
 
 

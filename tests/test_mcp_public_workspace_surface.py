@@ -37,10 +37,16 @@ async def test_public_guest_defaults_local_capabilities_off_until_share_exists()
     assert {'chat', 'search', 'models', 'memory_search', 'aihelper_pair'} <= names
     assert {'agent_start', 'memory_clear', 'service_control', 'group_chat_create'}.isdisjoint(names)
 
-    # Workspace/file resources stay hidden until explicitly shared.
-    assert {'shell', 'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
-            'workspace_info', 'file_read', 'file_tree', 'file_edit',
-            'directory_create', 'workspace_clear'}.isdisjoint(names)
+    # Static connectors discover the complete local contract before pairing.
+    # Every locked local tool is schema-visible but remains execution-gated.
+    for name in {'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
+                 'workspace_info', 'file_read', 'file_tree', 'file_edit',
+                 'directory_create', 'workspace_clear'}:
+        assert name in names
+        assert by_name[name]['x_execution'] == 'local_workspace'
+        assert by_name[name]['x_requires_workspace'] is True
+    # shell is TriForce admin scope and remains absent from public discovery.
+    assert 'shell' not in names
 
     # Static connectors discover canonical Helper vision/input schemas before pairing,
     # but execution remains locked until a share lease exists.
@@ -50,9 +56,13 @@ async def test_public_guest_defaults_local_capabilities_off_until_share_exists()
         assert by_name[name]['x_requires_workspace'] is True
 
     # Shared-service administration is intentionally absent from Local MCP.
-    assert not any(name.startswith('mail_') for name in names)
-    assert not any(name.startswith('wp_') for name in names)
-    assert not any(name.startswith('flarum_') for name in names)
+    assert any(name.startswith('mail_') for name in names)
+    by_name = {tool['name']: tool for tool in result['tools']}
+    assert all(tool.get('x_requires_auth') is True for name, tool in by_name.items() if name.startswith('mail_'))
+    assert any(name.startswith('wp_') for name in names)
+    assert all(tool.get('x_requires_auth') is True for name, tool in by_name.items() if name.startswith('wp_'))
+    assert any(name.startswith('flarum_') for name in names)
+    assert all(tool.get('x_requires_auth') is True for name, tool in by_name.items() if name.startswith('flarum_'))
 
     # Bootstrap tools remain canonical local contracts; server tools do not
     # silently become host-local execution.
@@ -456,8 +466,12 @@ async def test_paired_read_only_discovery_intersects_capabilities_and_grants(mon
     assert by_name['file_read']['x_execution'] == 'local_workspace'
     assert by_name['aihelper_observe']['x_execution'] == 'local_workspace'
     # Announced capability alone cannot bypass the read-only workspace grant.
-    assert 'file_edit' not in names
-    assert {'aihelper_clipboard_read', 'shell'}.isdisjoint(names)
+    # The schema remains visible for cached clients, but is marked locked.
+    assert 'file_edit' in names
+    assert by_name['file_edit']['x_requires_workspace'] is True
+    assert 'aihelper_clipboard_read' in names
+    assert by_name['aihelper_clipboard_read']['x_requires_workspace'] is True
+    assert 'shell' not in names
     assert 'aihelper_screenshot' in names
     assert by_name['aihelper_screenshot']['x_requires_workspace'] is True
 
@@ -479,7 +493,9 @@ async def test_native_only_discovery_needs_no_workspace_grant(monkeypatch):
 
     assert {'aihelper_compute_execute', 'aihelper_observe', 'aihelper_clipboard_read'} <= names
     assert by_name['aihelper_compute_execute']['x_execution'] == 'local_workspace'
-    assert {'workspace_info', 'file_read', 'file_edit'}.isdisjoint(names)
+    for name in {'workspace_info', 'file_read', 'file_edit'}:
+        assert name in names
+        assert by_name[name]['x_requires_workspace'] is True
 
 
 @pytest.mark.asyncio
@@ -494,9 +510,12 @@ async def test_write_workspace_discovery_exposes_only_announced_write_tools(monk
     monkeypatch.setattr(bridge, 'get_workspace_lease', lambda session_id: binding)
 
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'paired-write'))
-    names = {tool['name'] for tool in result['tools']}
+    by_name = {tool['name']: tool for tool in result['tools']}
+    names = set(by_name)
     assert {'file_read', 'file_edit'} <= names
-    assert {'directory_create', 'workspace_clear', 'aihelper_clipboard_write'}.isdisjoint(names)
+    for name in {'directory_create', 'workspace_clear', 'aihelper_clipboard_write'}:
+        assert name in names
+        assert by_name[name]['x_requires_workspace'] is True
 
 
 @pytest.mark.asyncio
@@ -733,11 +752,13 @@ async def test_full_access_client_discovers_execution_and_federation_tools():
 
 
 @pytest.mark.asyncio
-async def test_guest_discovery_stays_minimal_without_full_access():
-    """The counterpart: an unprivileged client must not gain execution tools."""
+async def test_guest_discovery_exposes_complete_non_admin_catalog_without_granting_admin_tools():
+    """Discovery is complete; call-time RBAC remains authoritative."""
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
     names = {tool['name'] for tool in result['tools']}
-    assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'remote_admin'}.isdisjoint(names)
+    assert {'binary_exec', 'task_runner'} <= names
+    assert {'shell', 'remote_exec', 'remote_admin'}.isdisjoint(names)
+    assert 'memory_store' not in names
 
 
 def test_federation_reaches_every_mesh_node_with_output():

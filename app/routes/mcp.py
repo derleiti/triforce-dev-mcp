@@ -2130,7 +2130,10 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
         # remote_exec, remote_admin) exist and are registered, but a client that
         # sends tools/list without an inventory parameter never learns they are
         # callable, and reports them as "deleted".
-        inventory = "all" if _request_has_full_access(request) else "core"
+        # External/public MCP clients also need the complete canonical non-admin
+        # vocabulary so separate TriForce MCP and WebMCP connectors can coexist in
+        # one AI session without schema drift. Authorization remains call-time.
+        inventory = "all" if request is not None else "core"
     # Check if client wants legacy (v3) tools
     use_legacy = inventory in {"legacy", "v3"} or params.get("legacy", False) or params.get("v3", False)
     

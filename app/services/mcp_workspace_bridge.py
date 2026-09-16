@@ -79,11 +79,12 @@ LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
 # Static MCP clients may cache tools/list before the user pairs a native Helper.
 # Keep the AI-facing vision/input schemas discoverable, but mark them locked;
 # execution still requires a live lease, advertised capability and manifest grant.
-DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset({
-    "aihelper_pair", "aihelper_observe", "aihelper_screenshot", "aihelper_vision_start",
-    "aihelper_vision_status", "aihelper_vision_observe", "aihelper_vision_stop",
-    "aihelper_input", "aihelper_app_ops",
-})
+# Static MCP clients (notably ChatGPT) may cache tools/list for the lifetime of a
+# connector session. Advertise the complete local contract even before pairing;
+# execution still requires a live lease, the advertised capability and a matching
+# share-manifest grant. This prevents pre-pair discovery from permanently hiding
+# file/code/device tools after the Helper comes online.
+DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset(LOCAL_TOOL_NAMES | AIHELPER_CANONICAL_TOOLS)
 WORKSPACE_EXECUTOR_WAIT_SECONDS = 25.0
 WORKSPACE_EXECUTOR_POLL_SECONDS = 0.25
 
@@ -290,7 +291,7 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
     binding = _share_binding(request)
     if is_public_guest(request):
         from app.mcp.tool_registry_unified import get_canonical_all_tools
-        from app.utils.mcp_security import PRIVILEGED_TOOLS
+        from app.utils.mcp_security import PRIVILEGED_TOOLS, PUBLIC_GUEST_DENIED_TOOLS
 
         merged: Dict[str, Dict[str, Any]] = {}
         for tool in get_canonical_all_tools():
@@ -300,12 +301,12 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             inventory = str(tool.get("x_inventory") or "misc")
             namespace = str(tool.get("x_namespace") or "global")
             access = str(tool.get("x_access") or "policy")
-            if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
+            if not name or name in PUBLIC_GUEST_DENIED_TOOLS:
                 continue
-            # Public/local MCP exposes only portable global AI tools plus the
-            # explicitly shared AILinux Helper surface. TriForce-owned account
-            # integrations and engine administration stay on authenticated/admin MCP.
-            if namespace == "triforce" or access in {"authenticated", "admin"}:
+            # Public/WebMCP mirrors the canonical non-admin catalogue. Discovery
+            # is not authority: account integrations stay marked as auth-required
+            # and tools/call still enforces RBAC. Only engine/admin scope is hidden.
+            if str(tool.get("x_scope") or "") == "triforce_admin" or access == "admin":
                 continue
             locked_local = name in LOCAL_TOOL_NAMES and not _local_tool_visible(name, binding)
             # Keep selected device/vision schemas stable across the full lease lifecycle.
@@ -320,6 +321,8 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             cloned = deepcopy(tool)
             execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
             cloned["x_execution"] = execution
+            if access == "authenticated":
+                cloned["x_requires_auth"] = True
             if locked_local:
                 cloned["x_requires_workspace"] = True
             if execution == "triforce_server" and name in PRIVILEGED_TOOLS:
@@ -356,8 +359,8 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             alias_name = str(alias.get("name") or "")
             canonical_name = str(alias.get("x_compat_alias_for") or "")
             visible_now = alias_name in CONTROL_TOOLS or _local_tool_visible(canonical_name, binding)
-            if not visible_now and alias_name not in {"workspace_status", "workspace_pair", "computer_observe", "computer_screenshot", "vision_start", "vision_status", "vision_observe", "vision_stop", "app_ops", "computer_input"}:
-                continue
+            # All shipped compatibility aliases remain discoverable so cached
+            # clients see the same device vocabulary as canonical aihelper_* tools.
             if not visible_now:
                 alias["x_requires_workspace"] = True
             merged[alias_name] = alias
