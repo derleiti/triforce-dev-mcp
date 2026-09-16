@@ -1379,3 +1379,39 @@ def test_webmcp_mutable_asset_headers_disable_browser_and_cdn_caches():
     assert "no-store" in headers["Cache-Control"]
     assert headers["CDN-Cache-Control"] == "no-store"
     assert headers["Cloudflare-CDN-Cache-Control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_successful_workspace_pair_queues_tools_list_changed_notification():
+    import asyncio
+    from app.routes import mcp as mcp_route
+
+    session_id = "tool-refresh-session"
+    previous = mcp_route._mcp_sessions.pop(session_id, None)
+    try:
+        mcp_route._mcp_sessions[session_id] = {
+            "created": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            "last_seen": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            "queue": asyncio.Queue(),
+            "initialized": True,
+        }
+        result = {"structuredContent": {"ok": True, "connected": True}, "isError": False}
+        assert mcp_route._workspace_call_changes_tool_inventory("workspace_pair", {"code": "redacted"}, result) is True
+        assert await mcp_route._queue_tools_list_changed(session_id) is True
+        notice = mcp_route._mcp_sessions[session_id]["queue"].get_nowait()
+        assert notice == {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
+    finally:
+        mcp_route._mcp_sessions.pop(session_id, None)
+        if previous is not None:
+            mcp_route._mcp_sessions[session_id] = previous
+
+
+def test_workspace_inventory_refresh_only_fires_for_successful_state_changes():
+    from app.routes import mcp as mcp_route
+
+    ok = {"structuredContent": {"ok": True, "connected": True}, "isError": False}
+    error = {"structuredContent": {"ok": False}, "isError": True}
+    assert mcp_route._workspace_call_changes_tool_inventory("workspace_status", {"workspace_id": "redacted"}, ok) is True
+    assert mcp_route._workspace_call_changes_tool_inventory("workspace_status", {}, ok) is False
+    assert mcp_route._workspace_call_changes_tool_inventory("aihelper_pair", {"action": "disconnect"}, ok) is True
+    assert mcp_route._workspace_call_changes_tool_inventory("workspace_pair", {}, error) is False

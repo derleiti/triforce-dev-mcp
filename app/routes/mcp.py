@@ -4288,6 +4288,39 @@ def _get_session(session_id: str) -> Dict[str, TypingAny]:
     return _mcp_sessions[session_id]
 
 
+def _workspace_call_changes_tool_inventory(tool_name: str, arguments: TypingAny, result: TypingAny) -> bool:
+    """Return True when a successful workspace control call changes visible MCP tools."""
+    if not isinstance(result, dict) or bool(result.get("isError")):
+        return False
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict):
+        return False
+    name = str(tool_name or "")
+    args = arguments if isinstance(arguments, dict) else {}
+    if name == "workspace_pair":
+        return bool(structured.get("ok"))
+    if name == "workspace_status":
+        return bool(args.get("workspace_id")) and bool(structured.get("connected"))
+    if name == "aihelper_pair":
+        action = str(args.get("action") or "status").strip().lower()
+        return action in {"pair", "reconnect", "disconnect"} and bool(structured.get("ok", structured.get("connected")))
+    return False
+
+
+async def _queue_tools_list_changed(session_id: str | None) -> bool:
+    """Notify an initialized MCP transport that its session-scoped tool list changed."""
+    if not session_id:
+        return False
+    session = _mcp_sessions.get(str(session_id))
+    if not session or not bool(session.get("initialized")):
+        return False
+    queue = session.get("queue")
+    if queue is None:
+        return False
+    await queue.put({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+    return True
+
+
 def _store_session_request_state(session: Dict[str, TypingAny], request: Request) -> None:
     state = request.state
     session["auth_user"] = getattr(state, "mcp_auth_user", None)
@@ -4963,6 +4996,11 @@ async def _process_mcp_request(
         result = await _call_mcp_method_handler(method, handler, params, request)
         latency_ms = (_time.time() - start_time) * 1000
         await multi_logger.log_mcp(method, params, result, latency_ms)
+        if method == "tools/call" and isinstance(params, dict):
+            tool_name = str(params.get("name") or "")
+            tool_args = params.get("arguments", {})
+            if _workspace_call_changes_tool_inventory(tool_name, tool_args, result):
+                await _queue_tools_list_changed(session_id)
         return {"jsonrpc": "2.0", "result": result, "id": req_id}
     except Exception as e:
         return {
