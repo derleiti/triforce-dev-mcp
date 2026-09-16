@@ -196,6 +196,7 @@ async def get_client_context(authorization: str = Header(None)) -> Dict[str, Any
 
     client_id = payload.get("client_id")
     user_id = payload.get("sub") or client_id
+    authority_role = str(payload.get("authority_role") or "").strip().lower()
 
     # Tier ermitteln
     tier = tier_service.get_user_tier(user_id)
@@ -218,6 +219,7 @@ async def get_client_context(authorization: str = Header(None)) -> Dict[str, Any
     return {
         "client_id": client_id,
         "user_id": user_id,
+        "authority_role": authority_role,
         "tier": tier,
         "allowed_paths": allowed_paths,
         "allow_file_write": allow_file_write,

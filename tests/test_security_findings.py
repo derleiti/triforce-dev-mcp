@@ -96,6 +96,29 @@ class TestAdminAuthUtility:
         assert exc.value.status_code == 400
 
 
+def test_signed_human_admin_authority_allows_admin_without_legacy_id():
+    from app.utils.admin_auth import require_admin
+
+    with patch("app.utils.admin_auth.ADMIN_USER_IDS", frozenset()):
+        require_admin({"user_id": "admin@example.test", "authority_role": "human_admin"})
+
+
+def test_signed_human_owner_authority_allows_admin_without_legacy_id():
+    from app.utils.admin_auth import require_admin
+
+    with patch("app.utils.admin_auth.ADMIN_USER_IDS", frozenset()):
+        require_admin({"user_id": "owner@example.test", "authority_role": "human_owner"})
+
+
+def test_enterprise_tier_without_authority_role_is_not_admin():
+    from app.utils.admin_auth import require_admin
+
+    with patch("app.utils.admin_auth.ADMIN_USER_IDS", frozenset()):
+        with pytest.raises(HTTPException) as exc:
+            require_admin({"user_id": "paid@example.test", "tier": "enterprise"})
+        assert exc.value.status_code == 403
+
+
 class TestGrantFileAccess:
     """Tests fuer POST /client/mcp/admin/grant-file-access"""
 
