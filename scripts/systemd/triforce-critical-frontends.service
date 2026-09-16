@@ -1,0 +1,19 @@
+[Unit]
+Description=TriForce Critical Web Frontends Reconcile
+Documentation=https://ailinux.me/docs/triforce
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=zombie
+Group=zombie
+WorkingDirectory=/home/zombie/workspace/triforce
+ExecStart=/home/zombie/workspace/triforce/scripts/docker/stack-control.sh start wordpress
+ExecStart=/home/zombie/workspace/triforce/scripts/docker/stack-control.sh start mailserver
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
