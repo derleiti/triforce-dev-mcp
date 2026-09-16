@@ -21,7 +21,7 @@ services:
       flarum_db:
         condition: service_healthy
     ports:
-      - "${FLARUM_PORT:-9080}:8888"
+      - "127.0.0.1:${FLARUM_PORT:-9080}:8888"
     environment:
       - FORUM_URL=${FLARUM_URL:-https://forum.ailinux.me}
       - DB_HOST=${FLARUM_DB_HOST:-flarum_db}

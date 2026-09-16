@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AILinux TriForce Settings Bridge
  * Description: Gemeinsame, validierte WordPress-Settings fuer AILinux/TriForce-Plugins.
- * Version: 1.0.0
+ * Version: 1.0.2
  */
 if (!defined('ABSPATH')) { exit; }
 const AILINUX_TRIFORCE_OPTION = 'ailinux_triforce_settings';
@@ -26,6 +26,10 @@ function ailinux_triforce_settings(): array {
     $stored = get_option(AILINUX_TRIFORCE_OPTION, []);
     if (!is_array($stored)) { $stored = []; }
     $settings = array_replace($defaults, $stored);
+    // Runtime environment is the canonical source for the shared webhook HMAC key.
+    // A stale database value must never override config/triforce.env.
+    $runtimeWebhookSecret = trim((string)($defaults["webhook_secret"] ?? ""));
+    if ($runtimeWebhookSecret !== "") { $settings["webhook_secret"] = $runtimeWebhookSecret; }
     foreach (['api_endpoint', 'mcp_endpoint', 'login_url'] as $key) {
         if (trim((string)($settings[$key] ?? '')) === '') {
             $settings[$key] = (string)($defaults[$key] ?? '');
@@ -130,3 +134,14 @@ function ailinux_triforce_render_admin_page(): void {
       <form method="post"><?php wp_nonce_field('ailinux_triforce_test_connection'); ?><input type="hidden" name="ailinux_triforce_test" value="1"><?php submit_button('Verbindung testen','secondary','submit',false); ?></form>
     </div><?php
 }
+
+// Hide core WordPress user collection endpoints from anonymous reconnaissance.
+// AILinux account integration uses the dedicated nova-ai/v1 namespace instead.
+add_filter('rest_endpoints', static function (array $endpoints): array {
+    foreach (array_keys($endpoints) as $route) {
+        if ($route === '/wp/v2/users' || str_starts_with($route, '/wp/v2/users/')) {
+            unset($endpoints[$route]);
+        }
+    }
+    return $endpoints;
+});

@@ -32,6 +32,18 @@ compose() {
   )
 }
 
+remove_legacy_wordpress_webroot_secrets() {
+  # Historical Nova builds copied the canonical TriForce env into wp-content.
+  # That puts provider/admin secrets below the public document root. Runtime
+  # configuration is injected by Compose now, so this legacy copy must never
+  # survive a WordPress start/apply/restart.
+  local legacy_env="$TRIFORCE_DIR/docker/wordpress/html/wp-content/plugins/nova-ai-frontend/config/triforce.env"
+  if [[ -e "$legacy_env" ]]; then
+    echo "Security: removing legacy WordPress webroot secret file: $legacy_env" >&2
+    rm -f -- "$legacy_env"
+  fi
+}
+
 ensure_wordpress_redis_config() {
   # The Redis Object Cache drop-in is loaded before normal plugins, so the
   # password must be defined in wp-config.php itself. No secret value is
@@ -44,6 +56,7 @@ do_action() {
   echo "==> $stack: $action"
   case "$action" in
     start|restart|apply)
+      [[ "$stack" != wordpress ]] || remove_legacy_wordpress_webroot_secrets
       compose "$stack" up -d --remove-orphans
       [[ "$stack" != wordpress ]] || ensure_wordpress_redis_config
       ;;

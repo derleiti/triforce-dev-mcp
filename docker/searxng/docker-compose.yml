@@ -15,7 +15,8 @@ services:
     pids_limit: ${SEARXNG_PIDS_LIMIT:-256}
     restart: ${SEARXNG_RESTART_POLICY:-unless-stopped}
     ports:
-      - "${SEARXNG_PORT:-8089}:8080"
+      - "172.17.0.1:${SEARXNG_PORT:-8089}:8080"
+      - "127.0.0.1:${SEARXNG_PORT:-8089}:8080"
     volumes:
       - ${SEARXNG_SETTINGS_PATH:-./settings.yml}:/etc/searxng/settings.yml:ro
       - ./limiter.toml:/etc/searxng/limiter.toml:ro
