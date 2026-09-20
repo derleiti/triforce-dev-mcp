@@ -487,6 +487,7 @@ step_generate_packages() {
       log "Running dpkg-scanpackages + apt-ftparchive in container for ${repo_name}..."
       cmd="
         set -euo pipefail
+        umask 022
         cd ${repo_path_container}
         shopt -s nullglob
 
@@ -591,12 +592,14 @@ EOF
               gzip -9c \"\$out_dir/Packages\" > \"\$out_dir/Packages.gz\"
               xz -c \"\$out_dir/Packages\" > \"\$out_dir/Packages.xz\"
               write_binary_release \"\$out_dir/Release\" \"\$suite\" \"\$component\" \"\$arch\"
+              chmod 0644 \"\$out_dir/Packages\" \"\$out_dir/Packages.gz\" \"\$out_dir/Packages.xz\" \"\$out_dir/Release\"
             done
 
             source_dir=\"\$component_dir/source\"
             mkdir -p \"\$source_dir\"
             : > \"\$source_dir/Packages\"
             gzip -9c \"\$source_dir/Packages\" > \"\$source_dir/Packages.gz\"
+            chmod 0644 \"\$source_dir/Packages\" \"\$source_dir/Packages.gz\"
           done
 
           components_joined=\$(printf '%s ' \"\${components[@]}\" | sed 's/ \$//')
