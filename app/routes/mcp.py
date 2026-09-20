@@ -1079,7 +1079,7 @@ async def handle_llm_invoke(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("'message' or 'messages' is required")
     
     if not model_id:
-        model_id = "gemini/gemini-2.0-flash"
+        model_id = os.environ.get("TRIFORCE_DEFAULT_CHAT_MODEL", "groq/groq/compound-mini")
     
     # Auto-prefix: wenn kein Provider angegeben, versuche bekannte Prefixe
     if "/" not in model_id:

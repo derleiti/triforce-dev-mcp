@@ -63,6 +63,8 @@ PUBLIC_EXACT_PATHS = {
     "/v1/search/curated",
     "/v1/search/curated/stream",
     "/v1/search/health",
+    "/v1/bugs/report",
+    "/v1/bugs/health",
     "/v1/search/widget/weather",
     "/v1/search/widget/crypto",
     "/v1/search/widget/geo",

@@ -98,6 +98,7 @@ class HandlerRegistry:
         self._register_mail_handlers()
         self._register_notification_handlers()
         self._register_dev_tool_handlers()
+        self._register_bug_report_handlers()
         self._register_wordpress_handlers()
         # structured_admin LAST: real handlers override stubs from
         # _register_log_handlers / _register_remote_handlers / _register_system_handlers
@@ -123,7 +124,9 @@ class HandlerRegistry:
                 if not message:
                     return {"error": "message parameter required"}
                 
-                model = params.get("model", "gemini-2.0-flash")
+                model = params.get("model") or os.environ.get(
+                    "TRIFORCE_DEFAULT_CHAT_MODEL", "groq/groq/compound-mini"
+                )
                 system_prompt = params.get("system_prompt", "")
                 temperature = params.get("temperature", 0.7)
                 
@@ -854,6 +857,15 @@ class HandlerRegistry:
             logger.info(f"Dev tool handlers registered: {n} tools")
         except Exception as e:
             logger.warning(f"Dev tool handlers registration failed: {e}")
+
+    def _register_bug_report_handlers(self):
+        """Register admin-only AILinux bug/crash triage tools."""
+        try:
+            from app.mcp.bug_report_tools import BUG_REPORT_HANDLERS
+            self.register_many(BUG_REPORT_HANDLERS)
+            logger.info("Bug report handlers registered: %s", sorted(BUG_REPORT_HANDLERS))
+        except Exception as exc:
+            logger.warning("Bug report handlers registration failed: %s", exc)
 
     def _register_structured_admin_handlers(self):
         """Structured Admin handlers from app/mcp/structured_admin.py.

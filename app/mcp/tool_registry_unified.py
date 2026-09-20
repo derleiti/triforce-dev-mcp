@@ -224,6 +224,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Core operations
     "shell", "binary_exec", "task_runner", "status", "service_control", "container_control", "docker_stack", "hot_reload",
     "log_viewer", "mcp_analytics", "config", "config_set",
+    "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status",
     # Files/code
     "file_ops", "code_search", "code_edit", "code_tree", "git",
     # AI/agents
@@ -348,7 +349,7 @@ SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
     "admin": {
         "description": "TriForce engine/service administration and diagnostics.",
         "inventories": {"admin", "settings", "integration"},
-        "tools": {"debug", "hot_reload", "log_viewer", "mcp_analytics"},
+        "tools": {"debug", "hot_reload", "log_viewer", "mcp_analytics", "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status"},
     },
 }
 
@@ -585,6 +586,8 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     raw_tools.extend(v5_get_all_tools())
     raw_tools.extend(WORKSPACE_CONTROL_TOOLS)
     raw_tools.extend(PORTABLE_DEVICE_TOOLS)
+    from .bug_report_tools import BUG_REPORT_TOOLS
+    raw_tools.extend(BUG_REPORT_TOOLS)
     from .handlers_memory_history import HISTORY_TOOLS
     raw_tools.extend(HISTORY_TOOLS)
 

@@ -9,7 +9,7 @@ Replaces raw shell with semantic, structured tools that:
 v1.0 - 2026-03-08
 """
 from __future__ import annotations
-import asyncio, logging, os, time
+import asyncio, logging, os, signal, time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -61,16 +61,64 @@ def _ok_path(p, allowed):
         return any(resolved == Path(a) or Path(a) in resolved.parents for a in allowed)
     except: return False
 
-async def _run(cmd, timeout=30):
-    start=time.time()
+async def _terminate_process_group(proc, grace=1.0):
+    """Terminate a subprocess and every descendant in its dedicated session."""
+    if proc.returncode is not None:
+        return
     try:
-        proc=await asyncio.create_subprocess_exec(*cmd,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except Exception:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            return
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+        return
+    except asyncio.TimeoutError:
+        pass
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except Exception:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            return
+    await proc.wait()
+
+
+async def _run(cmd, timeout=30, cwd=None, env=None):
+    start=time.time()
+    proc = None
+    try:
+        proc=await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+            start_new_session=True,
+        )
         out,err=await asyncio.wait_for(proc.communicate(),timeout=timeout)
         return {"success":proc.returncode==0,"output":out.decode(errors="replace").strip(),
                 "errors":err.decode(errors="replace").strip() or None,"exit_code":proc.returncode,
                 "elapsed_ms":round((time.time()-start)*1000)}
-    except asyncio.TimeoutError: return {"success":False,"output":"","errors":f"Timeout {timeout}s","exit_code":-1}
-    except Exception as e: return {"success":False,"output":"","errors":str(e),"exit_code":-1}
+    except asyncio.TimeoutError:
+        if proc is not None:
+            await _terminate_process_group(proc)
+        return {"success":False,"output":"","errors":f"Timeout {timeout}s","exit_code":-1,
+                "elapsed_ms":round((time.time()-start)*1000)}
+    except Exception as e:
+        if proc is not None and proc.returncode is None:
+            await _terminate_process_group(proc)
+        return {"success":False,"output":"","errors":str(e),"exit_code":-1,
+                "elapsed_ms":round((time.time()-start)*1000)}
 
 async def _sudo(cmd,timeout=30): return await _run(["sudo"]+cmd,timeout)
 
@@ -875,33 +923,16 @@ async def handle_task_runner(a):
         timeout = min(a.get("timeout", 30), 300)
         work_dir = a.get("work_dir")
         
-        # Execute via subprocess (list-based for simple commands, shell for complex)
-        start = time.time()
-        try:
-            cmd = ["sudo", "bash", "-c", decoded] if use_elevated else ["bash", "-c", decoded]
-            env = os.environ.copy()
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=work_dir,
-                env=env,
-            )
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            elapsed = round((time.time() - start) * 1000)
-            return {
-                "action": "execute",
-                "success": proc.returncode == 0,
-                "output": out.decode(errors="replace").strip(),
-                "errors": err.decode(errors="replace").strip() or None,
-                "exit_code": proc.returncode,
-                "elapsed_ms": elapsed,
-                "decoded_length": len(decoded),
-            }
-        except asyncio.TimeoutError:
-            return {"success": False, "errors": f"Timeout after {timeout}s", "exit_code": -1}
-        except Exception as e:
-            return {"success": False, "errors": str(e), "exit_code": -1}
+        # Use the shared subprocess runner so local and remote execution have
+        # identical timeout cleanup semantics and cannot leak descendants.
+        cmd = ["sudo", "bash", "-c", decoded] if use_elevated else ["bash", "-c", decoded]
+        env = os.environ.copy()
+        result = await _run(cmd, timeout=timeout, cwd=work_dir, env=env)
+        return {
+            "action": "execute",
+            **result,
+            "decoded_length": len(decoded),
+        }
     
     elif action == "execute_remote":
         task_data = a.get("task_data", "")
