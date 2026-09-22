@@ -32,7 +32,7 @@ fastapi-limiter==0.2.0
 redis==8.1.0
 
 # AI Provider SDKs
-google-genai==2.18.1
+google-genai==2.23.0
 anthropic==1.0.0
 openai==3.3.1
 mistralai==2.9.3
