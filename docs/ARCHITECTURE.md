@@ -292,3 +292,51 @@ logs?category=api|llm|mcp|error|agent
 - [MCP Tools](api/MCP.md)
 - [Federation](architecture/FEDERATION.md)
 - [Episodic Agent Memory](architecture/episodic-memory.md)
+
+
+## Project Memory und synchronisierte Agent-Historie
+
+TriForce und AICoder trennen vier Memory-Ebenen bewusst:
+
+- **Runtime State**: aktueller Run, aktive Tools, aktuelle Code-/Runtime-Evidence.
+- **Project Memory**: kanonischer aktueller Projektzustand (`todo`, `idea`, `decision`, `architecture`, `bug`, `lesson`, `feature`, `project_summary`, `documentation`).
+- **Curated Memory**: explizit verifiziertes dauerhaftes Wissen.
+- **Episodic Memory / Claude-Mem**: append-only historische Revisionen und Erfahrungen.
+
+Aktuelle Code- und Runtime-Evidence hat Vorrang vor Project Memory. Project Memory hat Vorrang vor historischer episodischer Erinnerung. Claude-Mem ist **keine Sync Authority**.
+
+### Sync-Protokoll
+
+`POST /v1/project-memory/sync` verwendet die bestehende authentifizierte Client-Session. Die Owner-ID wird ausschließlich serverseitig aus der Session abgeleitet und niemals aus Client-Daten übernommen. Jeder Project-Memory-Eintrag enthält `entity_id`, `project_key`, `kind`, `title`, `content`, `status`, `version`, `base_version`, `server_seq`, `content_hash`, `device_id`, `source`, `updated_at` und `deleted`.
+
+Optimistic Concurrency:
+
+```text
+base_version == current.version
+  -> Revision akzeptieren
+  -> version + 1
+  -> server_seq serverseitig vergeben
+
+base_version != current.version
+  -> Konflikt
+  -> Serverstand nicht überschreiben
+  -> Konfliktversuch append-only in revisions erhalten
+```
+
+Die Reihenfolge wird ausschließlich über `server_seq` bestimmt. Client-Uhren entscheiden nicht über Gewinner. Löschungen werden als Tombstones (`deleted=true`) synchronisiert; Hard Deletes sind im Sync-Pfad verboten.
+
+### Project Identity und Restore
+
+AICoder verwendet bevorzugt eine normalisierte und gehashte Git-`remote.origin`-Identität. Ohne Remote wird eine persistente Repository-UUID in `.git/ailinux-project-id`, danach eine persistente Workspace-UUID verwendet; ein Pfad-Hash ist nur Fallback. Dadurch erzeugt ein verschobenes Git-Repository kein neues Gedächtnis.
+
+Nach einer Neuinstallation kann sich AICoder erneut anmelden, dieselbe Projektidentität bestimmen und den kanonischen Project-Memory-Stand von TriForce ab Cursor `0` wiederherstellen.
+
+### Datenschutz und Offline-Verhalten
+
+Synchronisiert werden nur strukturierte Project-Memory-Einträge. Chats, Repositories, rohe Tool-Ausgaben, `.env`, Credentials und Tokens werden nicht automatisch hochgeladen. Secret-artige Inhalte werden client- und serverseitig vor Persistenz/Upload blockiert. Source-Dateien werden über Evidence-Metadaten wie Pfad/Hash referenziert, nicht als kompletter Inhalt synchronisiert.
+
+AICoder bleibt local-first: lokale Änderungen landen in der bestehenden `~/.config/ai-coder/evidence.db` und werden als `dirty` markiert. Netzwerk-/Auth-Ausfälle verhindern weder lokale Speicherung noch Coding. Konflikte werden lokal in `project_memory_conflicts` konserviert. Erfolgreicher Push/Pull aktualisiert Cursor und `server_seq`.
+
+### Claude-Mem Mirror
+
+Jede neu akzeptierte Project-Memory-Revision wird best-effort über die bestehende `EpisodicMemoryProvider`-/`ClaudeMemAdapter`-Schicht als `project_memory_revision` gespiegelt. Ein Claude-Mem-Ausfall darf den Project-Memory-Commit oder Sync niemals zurückrollen.

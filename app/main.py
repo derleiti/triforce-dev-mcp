@@ -94,6 +94,7 @@ from .routes.distributed_compute import router as distributed_compute_router
 from .routes.tristar_gui import router as tristar_gui_router
 from .routes.client_chat import router as client_chat_router
 from .routes.client_auth import router as client_auth_router
+from .routes.project_memory import router as project_memory_router
 from .routes.user_api import webhook_router as user_webhook_router
 from .routes.client_update import router as client_update_router
 from .routes.client_logs import router as client_logs_router
@@ -495,6 +496,7 @@ def create_app() -> FastAPI:
     app.include_router(vision_router, tags=["Vision"])
     app.include_router(client_chat_router, prefix="/v1", tags=["Client Chat"])
     app.include_router(client_auth_router, prefix="/v1", tags=["Client Auth"])
+    app.include_router(project_memory_router, prefix="/v1", tags=["Project Memory"])
     app.include_router(user_webhook_router, prefix="/v1", tags=["User Webhooks"])
     app.include_router(client_update_router, prefix="/v1", tags=["Client Update"])
     app.include_router(client_logs_router, tags=["Client Logs"])
