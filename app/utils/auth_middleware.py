@@ -90,6 +90,13 @@ ROUTE_JWT_AUTH_PATHS = {
     "/v1/mcp/",
 }
 
+# Route families that authenticate the AICoder account JWT inside their own
+# handlers. Keep the prefix narrow and boundary-aware so similarly named paths
+# cannot inherit the bypass accidentally.
+ROUTE_JWT_AUTH_PREFIXES = (
+    "/v1/notify-network",
+)
+
 
 PUBLIC_ASSET_PREFIXES = (
     "/v1/mcp/web/",
@@ -123,7 +130,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # Route-owned JWT endpoints validate the account Bearer token in their
         # FastAPI dependency. Do not run that JWT through MCP token validation.
-        if path in ROUTE_JWT_AUTH_PATHS:
+        if path in ROUTE_JWT_AUTH_PATHS or any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in ROUTE_JWT_AUTH_PREFIXES
+        ):
             logger.debug("AUTH_DEFER | Path: %s | Method: route_jwt_dependency", path)
             return await call_next(request)
 

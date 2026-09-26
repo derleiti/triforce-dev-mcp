@@ -211,3 +211,78 @@ def test_auth_middleware_mcp_deferral_does_not_accept_invalid_bearer(monkeypatch
         },
     )
     assert response.status_code == 401
+
+
+def test_auth_middleware_defers_notify_network_prefix_to_route_jwt_auth():
+    from fastapi import FastAPI, Header, HTTPException
+    from fastapi.testclient import TestClient
+    from app.utils.auth_middleware import AuthMiddleware
+
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+
+    @app.get("/v1/notify-network/directory")
+    async def directory_probe(authorization: str | None = Header(None)):
+        if authorization != "Bearer valid-aicoder-jwt":
+            raise HTTPException(401, "Invalid token")
+        return {"ok": True}
+
+    client = TestClient(app)
+    response = client.get(
+        "/v1/notify-network/directory",
+        headers={
+            "Authorization": "Bearer valid-aicoder-jwt",
+            "X-Forwarded-Port": "9100",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_notify_network_prefix_deferral_remains_route_authenticated():
+    from fastapi import FastAPI, Header, HTTPException
+    from fastapi.testclient import TestClient
+    from app.utils.auth_middleware import AuthMiddleware
+
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+
+    @app.post("/v1/notify-network/presence")
+    async def presence_probe(authorization: str | None = Header(None)):
+        if authorization != "Bearer valid-aicoder-jwt":
+            raise HTTPException(401, "Invalid token")
+        return {"ok": True}
+
+    client = TestClient(app)
+    missing = client.post(
+        "/v1/notify-network/presence",
+        headers={"X-Forwarded-Port": "9100"},
+    )
+    invalid = client.post(
+        "/v1/notify-network/presence",
+        headers={
+            "Authorization": "Bearer wrong",
+            "X-Forwarded-Port": "9100",
+        },
+    )
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+
+
+def test_notify_network_deferral_is_prefix_boundary_aware():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.utils.auth_middleware import AuthMiddleware
+
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+
+    @app.get("/v1/notify-network-evil")
+    async def similarly_named_route():
+        return {"ok": True}
+
+    response = TestClient(app).get(
+        "/v1/notify-network-evil",
+        headers={"X-Forwarded-Port": "9100"},
+    )
+    assert response.status_code == 401
