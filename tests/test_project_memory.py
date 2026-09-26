@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.routes import project_memory as project_memory_route
 from app.routes.client_auth import get_current_client
+from app.utils.auth_middleware import AuthMiddleware
 from app.services.project_memory import (
     ProjectMemoryStore,
     ProjectMemoryValidationError,
@@ -214,3 +215,35 @@ def test_route_requires_auth_dependency():
         "changes": [],
     })
     assert response.status_code == 401
+
+
+def test_auth_middleware_defers_project_memory_bearer_to_route_dependency(monkeypatch, tmp_path):
+    store = ProjectMemoryStore(tmp_path / "middleware-route.db")
+    monkeypatch.setattr(project_memory_route, "get_project_memory_store", lambda: store)
+
+    async def no_mirror(project_key, accepted):
+        return None
+
+    monkeypatch.setattr(project_memory_route, "_mirror_accepted", no_mirror)
+
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+    app.include_router(project_memory_route.router, prefix="/v1")
+
+    async def authenticated_client():
+        return {"email": "memory@example.test", "client_id": "client-memory"}
+
+    app.dependency_overrides[get_current_client] = authenticated_client
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/project-memory/sync",
+        headers={"Authorization": "Bearer route-owned-account-jwt"},
+        json={
+            "project_key": "project",
+            "cursor": 0,
+            "changes": [change()],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["accepted"][0]["version"] == 1

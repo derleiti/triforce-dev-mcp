@@ -79,6 +79,13 @@ INTERNAL_SECRET_PATHS = {
     "/v1/user/entitlements",
 }
 
+# These endpoints perform their own account-JWT authentication in the route
+# dependency. The outer MCP-auth middleware must not reinterpret that Bearer
+# token as an MCP access token before the route can validate it.
+ROUTE_JWT_AUTH_PATHS = {
+    "/v1/project-memory/sync",
+}
+
 
 PUBLIC_ASSET_PREFIXES = (
     "/v1/mcp/web/",
@@ -109,6 +116,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable):
         path = request.url.path
+
+        # Route-owned JWT endpoints validate the account Bearer token in their
+        # FastAPI dependency. Do not run that JWT through MCP token validation.
+        if path in ROUTE_JWT_AUTH_PATHS:
+            logger.debug("AUTH_DEFER | Path: %s | Method: route_jwt_dependency", path)
+            return await call_next(request)
 
         # Skip account auth for explicitly public/capability-authenticated paths.
         if _is_public_path(path):
