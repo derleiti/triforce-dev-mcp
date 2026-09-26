@@ -421,15 +421,11 @@ async def call_ollama(
     tools: Optional[List[dict[str, Any]]] = None,
     tool_choice: Any = "auto",
 ) -> dict:
-    """
-    Call Ollama API (lokal auf Server)
-    
-    Bei Cloud-Proxy Fehlern (502, 503, Timeout) → konfiguriertes lokales Fallback
-    """
+    """Call Ollama with node failover before model fallback."""
 
-    # Normalisiere Model-Name
+    from app.services.ollama_node_router import ollama_candidates
+
     model_name = normalize_ollama_model(model)
-
     payload = {
         "model": model_name,
         "messages": _ollama_multimodal_messages(messages),
@@ -437,126 +433,127 @@ async def call_ollama(
         "options": {
             "temperature": temperature,
             "num_predict": max_tokens,
-        }
+        },
     }
     native_tools = normalize_tools(tools)
     tool_transport = "native" if native_tools else "none"
     if native_tools:
         payload["tools"] = native_tools
 
+    last_status: int | None = None
+    last_error = ""
+    saw_timeout = False
+    endpoints = ollama_candidates(model_name)
+
     async with httpx.AsyncClient(timeout=300.0) as client:
-        try:
-            response = await client.post(
-                f"{OLLAMA_BASE_URL}/api/chat",
-                json=payload
-            )
-            # Not every Ollama model is tool-trained. Preserve chat by retrying
-            # without native tools; ai-coder's textual protocol remains active.
-            if response.status_code in (400, 404, 422) and payload.get("tools"):
-                fallback_payload = dict(payload)
-                fallback_payload.pop("tools", None)
-                tool_transport = "text_fallback"
+        for endpoint in endpoints:
+            try:
+                request_payload = payload
                 response = await client.post(
-                    f"{OLLAMA_BASE_URL}/api/chat",
-                    json=fallback_payload,
+                    f"{endpoint.base_url}/api/chat",
+                    json=request_payload,
                 )
 
-            # Cloud-Proxy Fehler → Fallback auf lokales Modell
-            if response.status_code in (502, 503, 504) and not is_fallback and not _messages_have_images(messages):
-                logger.warning(f"Ollama Cloud-Proxy Error {response.status_code} für {model} - Fallback auf lokales Modell")
-                return await call_ollama(
-                    model=LOCAL_FALLBACK_MODEL,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    is_fallback=True
-                )
-
-            if response.status_code != 200:
-                error_text = response.text
-                logger.error(f"Ollama Error: {error_text}")
-                
-                # Bei anderen Fehlern auch Fallback versuchen
-                if not is_fallback and "cloud" in model.lower() and not _messages_have_images(messages):
-                    logger.warning(f"Cloud-Modell {model} fehlgeschlagen - Fallback auf lokales Modell")
-                    return await call_ollama(
-                        model=LOCAL_FALLBACK_MODEL,
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        is_fallback=True
+                # Not every Ollama model is tool-trained. Preserve chat by
+                # retrying the same node without native tools.
+                if response.status_code in (400, 404, 422) and payload.get("tools"):
+                    fallback_payload = dict(payload)
+                    fallback_payload.pop("tools", None)
+                    tool_transport = "text_fallback"
+                    request_payload = fallback_payload
+                    response = await client.post(
+                        f"{endpoint.base_url}/api/chat",
+                        json=request_payload,
                     )
-                
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Ollama Error: {error_text}"
-                )
 
-            result = response.json()
-            message = result.get("message") or {}
-            content = message.get("content") or ""
-            tool_calls = message.get("tool_calls") or []
-            done_reason = result.get("done_reason")
+                if response.status_code != 200:
+                    last_status = int(response.status_code)
+                    last_error = response.text
+                    logger.warning(
+                        "Ollama node %s returned HTTP %s for %s",
+                        endpoint.node_id, response.status_code, model_name,
+                    )
+                    # Try the next node for transport/server/model-availability
+                    # failures before changing the requested model.
+                    continue
 
-            # Reasoning models can consume a tiny num_predict budget entirely in
-            # hidden/thinking tokens and return HTTP 200 with no assistant text.
-            # Never expose that as a successful empty answer: the caller must be
-            # able to classify it as truncation and retry with a larger budget.
-            if not content and not tool_calls:
-                if done_reason == "length":
+                result = response.json()
+                message = result.get("message") or {}
+                content = message.get("content") or ""
+                tool_calls = message.get("tool_calls") or []
+                done_reason = result.get("done_reason")
+
+                if not content and not tool_calls:
+                    if done_reason == "length":
+                        raise HTTPException(
+                            502,
+                            detail={
+                                "error": "ollama_response_truncated",
+                                "message": "Ollama exhausted max_tokens before producing an answer",
+                                "model": model_name,
+                                "finish_reason": "length",
+                            },
+                        )
                     raise HTTPException(
                         502,
                         detail={
-                            "error": "ollama_response_truncated",
-                            "message": "Ollama exhausted max_tokens before producing an answer",
+                            "error": "empty_ollama_response",
+                            "message": "Ollama returned no assistant content or tool calls",
                             "model": model_name,
-                            "finish_reason": "length",
+                            "finish_reason": done_reason,
                         },
                     )
-                raise HTTPException(
-                    502,
-                    detail={
-                        "error": "empty_ollama_response",
-                        "message": "Ollama returned no assistant content or tool calls",
-                        "model": model_name,
-                        "finish_reason": done_reason,
+
+                return {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": content,
+                            "tool_calls": tool_calls,
+                        },
+                        "finish_reason": done_reason or "stop",
+                    }],
+                    "usage": {
+                        "total_tokens": result.get("eval_count", 0) + result.get("prompt_eval_count", 0)
                     },
-                )
-
-            # Ollama Response in OpenAI-Format konvertieren
-            return {
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": tool_calls,
+                    "model_used": model_name,
+                    "is_fallback": is_fallback,
+                    "tool_transport": tool_transport,
+                    "provider_diagnostics": {
+                        "ollama_node": endpoint.node_id,
                     },
-                    "finish_reason": done_reason or "stop",
-                }],
-                "usage": {
-                    "total_tokens": result.get("eval_count", 0) + result.get("prompt_eval_count", 0)
-                },
-                "model_used": model_name,
-                "is_fallback": is_fallback,
-                "tool_transport": tool_transport
-            }
+                }
+            except HTTPException:
+                raise
+            except httpx.TimeoutException:
+                saw_timeout = True
+                logger.warning("Ollama node %s timed out for %s", endpoint.node_id, model_name)
+                continue
+            except httpx.ConnectError:
+                logger.warning("Ollama node %s unreachable for %s", endpoint.node_id, model_name)
+                continue
 
-        except httpx.ConnectError:
-            logger.error("Ollama nicht erreichbar")
-            raise HTTPException(503, "Ollama Backend nicht erreichbar")
-        except httpx.TimeoutException:
-            # Timeout bei Cloud-Proxy → Fallback
-            if not is_fallback and "cloud" in model.lower() and not _messages_have_images(messages):
-                logger.warning(f"Timeout für {model} - Fallback auf lokales Modell")
-                return await call_ollama(
-                    model=LOCAL_FALLBACK_MODEL,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    is_fallback=True
-                )
-            raise HTTPException(504, "Ollama Timeout")
+    # All nodes failed for the requested model. Only now change models.
+    if not is_fallback and "cloud" in model.lower() and not _messages_have_images(messages):
+        logger.warning("All Ollama nodes failed for %s - falling back to local model", model)
+        return await call_ollama(
+            model=LOCAL_FALLBACK_MODEL,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            is_fallback=True,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
 
+    if saw_timeout and last_status is None:
+        raise HTTPException(504, "Ollama Timeout")
+    if last_status is not None:
+        raise HTTPException(
+            status_code=last_status,
+            detail=f"Ollama Error: {last_error}",
+        )
+    raise HTTPException(503, "Ollama Backend nicht erreichbar")
 
 async def call_openrouter(
     model: str,
@@ -980,7 +977,9 @@ async def _stream_ollama_text(
     temperature: float = 0.7,
     max_tokens: int = 4096,
 ):
-    """Yield genuine Ollama response deltas for the client stream endpoint."""
+    """Yield genuine Ollama deltas with node failover before streaming starts."""
+    from app.services.ollama_node_router import ollama_candidates
+
     model_name = normalize_ollama_model(model)
     payload = {
         "model": model_name,
@@ -988,27 +987,51 @@ async def _stream_ollama_text(
         "stream": True,
         "options": {"temperature": temperature, "num_predict": max_tokens},
     }
-    try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as response:
-                if response.status_code != 200:
-                    raw = (await response.aread()).decode("utf-8", errors="replace")
-                    raise HTTPException(response.status_code, f"Ollama Error: {raw[:1000]}")
-                async for line in response.aiter_lines():
-                    if not line.strip():
+    last_status: int | None = None
+    last_error = ""
+    saw_timeout = False
+
+    for endpoint in ollama_candidates(model_name):
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                async with client.stream(
+                    "POST", f"{endpoint.base_url}/api/chat", json=payload
+                ) as response:
+                    if response.status_code != 200:
+                        last_status = int(response.status_code)
+                        last_error = (await response.aread()).decode(
+                            "utf-8", errors="replace"
+                        )
+                        logger.warning(
+                            "Ollama stream node %s returned HTTP %s for %s",
+                            endpoint.node_id, response.status_code, model_name,
+                        )
                         continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    message = data.get("message") or {}
-                    text = message.get("content") if isinstance(message, dict) else ""
-                    if text:
-                        yield str(text)
-    except httpx.ConnectError as exc:
-        raise HTTPException(503, "Ollama Backend nicht erreichbar") from exc
-    except httpx.TimeoutException as exc:
-        raise HTTPException(504, "Ollama Timeout") from exc
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        message = data.get("message") or {}
+                        text = message.get("content") if isinstance(message, dict) else ""
+                        if text:
+                            yield str(text)
+                    return
+        except httpx.ConnectError:
+            logger.warning("Ollama stream node %s unreachable", endpoint.node_id)
+            continue
+        except httpx.TimeoutException:
+            saw_timeout = True
+            logger.warning("Ollama stream node %s timed out", endpoint.node_id)
+            continue
+
+    if saw_timeout and last_status is None:
+        raise HTTPException(504, "Ollama Timeout")
+    if last_status is not None:
+        raise HTTPException(last_status, f"Ollama Error: {last_error[:1000]}")
+    raise HTTPException(503, "Ollama Backend nicht erreichbar")
 
 
 @router.post("/chat/stream")

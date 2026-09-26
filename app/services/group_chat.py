@@ -1134,18 +1134,27 @@ Format:
         """Fuehrt Task via Ollama aus (lokal oder cloud Modelle)."""
         try:
             import aiohttp
+            from app.services.ollama_node_router import ollama_candidates
             model = self.OLLAMA_MODEL_MAP.get(agent_id, "kimi-k2-thinking:cloud")
+            last_error = "Ollama nodes unavailable"
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=600)) as session:
-                async with session.post(
-                    "http://localhost:11434/api/chat",
-                    json={"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False},
-                ) as resp:
-                    if resp.status != 200:
-                        error = await resp.text()
-                        return {"status": "error", "error": f"Ollama {resp.status}: {error}", "response": ""}
-                    data = await resp.json()
-                    content = data.get("message", {}).get("content", "")
-                    return {"status": "success", "response": content, "model": model}
+                for endpoint in ollama_candidates(model):
+                    try:
+                        async with session.post(
+                            f"{endpoint.base_url}/api/chat",
+                            json={"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False},
+                        ) as resp:
+                            if resp.status != 200:
+                                error = await resp.text()
+                                last_error = f"Ollama {resp.status}: {error}"
+                                continue
+                            data = await resp.json()
+                            content = data.get("message", {}).get("content", "")
+                            return {"status": "success", "response": content, "model": model, "node": endpoint.node_id}
+                    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                        last_error = type(exc).__name__
+                        continue
+            return {"status": "error", "error": last_error, "response": ""}
         except Exception as e:
             logger.error(f"Ollama execution failed for {agent_id}: {e}")
             return {"status": "error", "error": str(e), "response": ""}

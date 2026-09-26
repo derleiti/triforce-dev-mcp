@@ -462,8 +462,9 @@ class LoadBalancerIntegration:
         # Basis: Verfügbare Kapazität
         capacity = 1.0 - (node.current_load / max(node.max_concurrent, 1))
         
-        # Role-Bonus: Hub bevorzugen
-        role_bonus = 1.2 if node.role == NodeRole.HUB else 1.0
+        # Keep the public hub responsive: healthy compute nodes get a modest
+        # routing bonus, while the hub stays available as fallback.
+        role_bonus = 0.85 if node.role == NodeRole.HUB else 1.15
         
         # Latenz-Malus (wenn verfügbar)
         latency_factor = max(0.5, 1.0 - (node.avg_latency_ms / 1000))

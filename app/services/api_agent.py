@@ -228,11 +228,22 @@ async def _call_ollama_local(
     if tools:
         payload["tools"] = tools
 
+    from app.services.ollama_node_router import ollama_candidates
+    last_error = "Ollama nodes unavailable"
     async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.post("http://localhost:11434/api/chat", json=payload)
-        if r.status_code != 200:
-            raise Exception(f"Ollama returned {r.status_code}: {r.text[:200]}")
-        data = r.json()
+        for endpoint in ollama_candidates(model):
+            try:
+                r = await client.post(f"{endpoint.base_url}/api/chat", json=payload)
+            except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                last_error = type(exc).__name__
+                continue
+            if r.status_code != 200:
+                last_error = f"Ollama returned {r.status_code}: {r.text[:200]}"
+                continue
+            data = r.json()
+            break
+        else:
+            raise Exception(last_error)
         # Convert Ollama format → OpenAI format
         msg = data.get("message", {})
         tool_calls_raw = msg.get("tool_calls", [])

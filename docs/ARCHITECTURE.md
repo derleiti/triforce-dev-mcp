@@ -340,3 +340,30 @@ AICoder bleibt local-first: lokale Änderungen landen in der bestehenden `~/.con
 ### Claude-Mem Mirror
 
 Jede neu akzeptierte Project-Memory-Revision wird best-effort über die bestehende `EpisodicMemoryProvider`-/`ClaudeMemAdapter`-Schicht als `project_memory_revision` gespiegelt. Ein Claude-Mem-Ausfall darf den Project-Memory-Commit oder Sync niemals zurückrollen.
+
+
+## Compute-Offload und Node-Rollen
+
+Die drei festen AILinux-Nodes haben unterschiedliche Betriebsrollen:
+
+- **Hetzner / ailinux** bleibt Public Hub, API-/Control-Plane und zuverlässiger Fallback. Rechenarbeit soll dort nicht bevorzugt landen.
+- **backup** ist der bevorzugte allgemeine Ollama-/Cloud-Proxy-Compute-Node. Er besitzt eigenen Swap und große freie Storage-/RAM-Reserve.
+- **zombie-pc** wird modellabhängig für lokale Compute-Modelle genutzt. Der normale Desktop-/Workspace-Betrieb bleibt davon unabhängig.
+
+Ollama-Anfragen verwenden eine gemeinsame Node-Auswahl. Für normale Modelle ist die Reihenfolge `backup -> hetzner`. Für explizit auf Zombie-PC vorhandene Modelle ist sie `zombie-pc -> backup -> hetzner`. Netzwerk-, Timeout- und Serverfehler führen zuerst zum nächsten Node; erst wenn alle passenden Nodes für das gewünschte Modell versagen, greift ein vorhandener Modell-Fallback.
+
+Die Federation-Gewichtung bevorzugt bei gleicher freier Kapazität Compute-Nodes gegenüber dem Public Hub. Hetzner bleibt trotzdem verfügbar und übernimmt bei Ausfall der Offload-Nodes.
+
+### Memory Storage
+
+Die aktive Claude-Mem-SQLite bleibt auf dem lokalen NVMe des TriForce-Hubs. Sie wird **nicht** über NFS/SSHFS oder ein anderes Netzwerk-Dateisystem gemeinsam schreibbar gemacht. Stattdessen erzeugt Hetzner stündlich mit SQLite-`.backup` einen konsistenten Snapshot und repliziert ihn auf den Backup-Node. Dadurch bleibt die aktive Datenbank lokal schnell und robust, während historische Wiederherstellungskapazität auf dem großen Backup-Datenträger liegt.
+
+### Host-Reserven
+
+Swap und Dateisystemreserve werden vor Compute-/Memory-Wachstum behandelt. Aktueller Zielzustand:
+
+- Hetzner: vorhandener großer Swap als Hub-Reserve.
+- backup: dedizierter Swapfile und niedrige Swappiness.
+- zombie-pc: vorhandene NVMe-Swap-Partition aktiv plus kleiner Swapfile als zusätzliche Reserve.
+
+Compute-Offload darf Root-, Docker-/Service- und Swap-Reserve nicht verdrängen.
