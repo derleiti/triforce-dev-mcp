@@ -79,11 +79,15 @@ INTERNAL_SECRET_PATHS = {
     "/v1/user/entitlements",
 }
 
-# These endpoints perform their own account-JWT authentication in the route
-# dependency. The outer MCP-auth middleware must not reinterpret that Bearer
-# token as an MCP access token before the route can validate it.
+# These endpoints perform their own Bearer authentication in the route
+# dependency. The outer MCP-auth middleware must not reinterpret an AICoder
+# account JWT as an MCP access token before the route can validate it.
+# `/v1/mcp` uses `require_mcp_auth`, which intentionally accepts either a
+# normal MCP credential or a valid AICoder account JWT.
 ROUTE_JWT_AUTH_PATHS = {
     "/v1/project-memory/sync",
+    "/v1/mcp",
+    "/v1/mcp/",
 }
 
 

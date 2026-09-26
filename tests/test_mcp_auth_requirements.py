@@ -132,3 +132,82 @@ def test_service_mcp_alias_is_not_public_guest():
     from app.utils.mcp_auth import _is_public_guest_mcp_path
     assert _is_public_guest_mcp_path("/v1/mcp") is True
     assert _is_public_guest_mcp_path("/v1/mcp/service") is False
+
+def test_auth_middleware_defers_mcp_bearer_to_dual_auth_dependency(monkeypatch):
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from app.utils.auth_middleware import AuthMiddleware
+
+    monkeypatch.setattr(mcp_auth, "MCP_AUTH_USER", "user")
+    monkeypatch.setattr(mcp_auth, "MCP_AUTH_PASS", "pass")
+    monkeypatch.setattr(mcp_auth, "is_valid_token", lambda _token: False)
+    monkeypatch.setattr(
+        mcp_auth,
+        "_validate_jwt",
+        lambda token: {
+            "email": "admin@example.test",
+            "client_id": "client-admin",
+            "authority_role": "human_owner",
+        } if token == "valid-aicoder-jwt" else None,
+    )
+    monkeypatch.setattr(
+        mcp_auth,
+        "_jwt_authority",
+        lambda _payload: ("human_owner", 100, "test"),
+    )
+
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+
+    @app.post("/v1/mcp")
+    async def mcp_probe(request: Request):
+        user = await mcp_auth.require_mcp_auth(request)
+        return {
+            "user": user,
+            "method": request.state.mcp_auth_method,
+            "full": request.state.mcp_auth_full_access,
+        }
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/mcp",
+        headers={
+            "Authorization": "Bearer valid-aicoder-jwt",
+            "X-Forwarded-Port": "9100",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "user": "admin@example.test",
+        "method": "jwt",
+        "full": True,
+    }
+
+
+def test_auth_middleware_mcp_deferral_does_not_accept_invalid_bearer(monkeypatch):
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from app.utils.auth_middleware import AuthMiddleware
+
+    monkeypatch.setattr(mcp_auth, "MCP_AUTH_USER", "user")
+    monkeypatch.setattr(mcp_auth, "MCP_AUTH_PASS", "pass")
+    monkeypatch.setattr(mcp_auth, "is_valid_token", lambda _token: False)
+    monkeypatch.setattr(mcp_auth, "_validate_jwt", lambda _token: None)
+
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+
+    @app.post("/v1/mcp")
+    async def mcp_probe(request: Request):
+        await mcp_auth.require_mcp_auth(request)
+        return {"ok": True}
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/mcp",
+        headers={
+            "Authorization": "Bearer invalid-token",
+            "X-Forwarded-Port": "9100",
+        },
+    )
+    assert response.status_code == 401
