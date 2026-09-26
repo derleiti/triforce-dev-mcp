@@ -66,23 +66,84 @@ class FederationNode:
     status: NodeStatus = NodeStatus.UNKNOWN
     last_heartbeat: Optional[datetime] = None
     consecutive_failures: int = 0
-    
+    optional: bool = True
+    draining: bool = False
+    placement_weight: float = 1.0
+
     # Capabilities
     models: List[str] = field(default_factory=list)
     max_concurrent: int = 10
     current_load: int = 0
-    
+
+    # Resource metrics learned from the public /health heartbeat.
+    cpu_percent: float = 0.0
+    memory_percent: float = 0.0
+    load_ratio: float = 0.0
+    memory_available_mb: int = 0
+    swap_free_mb: int = 0
+    disk_free_gb: float = 0.0
+    metrics_updated_at: Optional[datetime] = None
+
     # Stats
     total_requests: int = 0
     total_errors: int = 0
     avg_latency_ms: float = 0
-    
-    def is_available(self) -> bool:
-        """Check ob Node für Requests verfügbar"""
+
+    def heartbeat_age_seconds(self) -> float:
+        if self.last_heartbeat is None:
+            return float("inf")
+        return max(0.0, (datetime.now() - self.last_heartbeat).total_seconds())
+
+    def is_available(self, stale_after: float = 75.0) -> bool:
+        """Return whether this node may receive new work.
+
+        Optional nodes are never required for cluster health. A draining,
+        degraded, offline or stale node is simply omitted from scheduling.
+        """
         return (
-            self.status == NodeStatus.HEALTHY and
-            self.current_load < self.max_concurrent
+            self.status == NodeStatus.HEALTHY
+            and not self.draining
+            and self.current_load < self.max_concurrent
+            and self.heartbeat_age_seconds() <= stale_after
         )
+
+    def selection_score(self, stale_after: float = 75.0) -> float:
+        """Resource-aware scheduling score in the range 0..100."""
+        if not self.is_available(stale_after=stale_after):
+            return 0.0
+
+        queue_headroom = max(
+            0.0,
+            1.0 - (self.current_load / max(self.max_concurrent, 1)),
+        )
+        latency_headroom = max(0.20, 1.0 - (self.avg_latency_ms / 1500.0))
+
+        metrics_fresh = (
+            self.metrics_updated_at is not None
+            and (datetime.now() - self.metrics_updated_at).total_seconds() <= stale_after * 2
+        )
+        if not metrics_fresh:
+            # Older/downgraded nodes that do not expose fresh resource metrics
+            # remain usable, but never look artificially idle.
+            resource_score = 0.65
+        else:
+            cpu_headroom = max(0.0, 1.0 - min(self.cpu_percent, 100.0) / 100.0)
+            memory_headroom = max(0.0, 1.0 - min(self.memory_percent, 100.0) / 100.0)
+            load_headroom = max(0.0, 1.0 - min(self.load_ratio, 1.5) / 1.5)
+            resource_score = (
+                0.32 * cpu_headroom
+                + 0.32 * memory_headroom
+                + 0.16 * load_headroom
+                + 0.12 * queue_headroom
+                + 0.08 * latency_headroom
+            )
+            if self.memory_available_mb and self.memory_available_mb < 1024:
+                resource_score *= 0.55
+            if self.swap_free_mb and self.swap_free_mb < 512:
+                resource_score *= 0.85
+
+        score = resource_score * self.placement_weight * 100.0
+        return max(0.0, min(100.0, score))
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -95,6 +156,23 @@ class FederationNode:
             "current_load": self.current_load,
             "max_concurrent": self.max_concurrent,
             "total_requests": self.total_requests,
+            "optional": self.optional,
+            "draining": self.draining,
+            "placement_weight": self.placement_weight,
+            "selection_score": round(self.selection_score(), 2),
+            "heartbeat_age_seconds": (
+                round(self.heartbeat_age_seconds(), 2)
+                if self.last_heartbeat else None
+            ),
+            "metrics": {
+                "cpu_percent": self.cpu_percent,
+                "memory_percent": self.memory_percent,
+                "load_ratio": self.load_ratio,
+                "memory_available_mb": self.memory_available_mb,
+                "swap_free_mb": self.swap_free_mb,
+                "disk_free_gb": self.disk_free_gb,
+                "updated_at": self.metrics_updated_at.isoformat() if self.metrics_updated_at else None,
+            },
         }
 
 
@@ -103,9 +181,11 @@ class ServerFederation:
     Verwaltet Federation zwischen AILinux Servern
     """
     
-    HEARTBEAT_INTERVAL = 30  # Sekunden
-    FAILURE_THRESHOLD = 3    # Nach X Failures -> offline
-    RECOVERY_CHECK = 60      # Check offline nodes alle X Sekunden
+    HEARTBEAT_INTERVAL = 15  # seconds
+    HEARTBEAT_TIMEOUT = 2.5  # one missing optional node must not stall the mesh
+    FAILURE_THRESHOLD = 2    # degraded immediately, offline on repeated failure
+    STALE_AFTER = 60         # stale nodes never receive new work
+    RECOVERY_CHECK = 30
     
     def __init__(self):
         self.nodes: Dict[str, FederationNode] = {}
@@ -139,24 +219,35 @@ class ServerFederation:
                 "url": "https://api.ailinux.me",
                 "vpn_ip": "10.10.0.1",
                 "port": 9100,
-                "role": "hub"
+                "role": "hub",
+                "optional": False,
+                "placement_weight": 0.72,
             },
             "backup": {
                 "url": "http://10.10.0.3:9000",
                 "vpn_ip": "10.10.0.3",
                 "port": 9100,
-                "role": "node"
+                "role": "node",
+                "optional": True,
+                "placement_weight": 1.18,
             },
             "zombie-pc": {
                 "url": "http://10.10.0.2:9000",
                 "vpn_ip": "10.10.0.2",
                 "port": 9100,
-                "role": "node"
+                "role": "node",
+                "optional": True,
+                "placement_weight": 1.08,
             }
         }
         
         secret = os.getenv("FEDERATION_SECRET", "")
-        
+        drained = {
+            item.strip()
+            for item in os.getenv("TRIFORCE_DRAIN_NODES", "").split(",")
+            if item.strip()
+        }
+
         for node_id, config in nodes_config.items():
             if node_id != self.my_node_id:
                 role = NodeRole.HUB if config["role"] == "hub" else NodeRole.NODE
@@ -165,6 +256,9 @@ class ServerFederation:
                     role=role,
                     base_url=f"http://{config['vpn_ip']}:{config['port']}",
                     secret_key=secret,
+                    optional=bool(config.get("optional", True)),
+                    draining=node_id in drained,
+                    placement_weight=float(config.get("placement_weight", 1.0)),
                 )
     
     async def _heartbeat_loop(self):
@@ -180,35 +274,52 @@ class ServerFederation:
                 await asyncio.sleep(5)
     
     async def _check_all_nodes(self):
-        """Checke alle Nodes"""
-        for node_id, node in self.nodes.items():
-            await self._check_node(node)
+        """Probe every peer concurrently so one dead node cannot stall others."""
+        if not self.nodes:
+            return
+        await asyncio.gather(
+            *(self._check_node(node) for node in self.nodes.values()),
+            return_exceptions=True,
+        )
     
     async def _check_node(self, node: FederationNode):
-        """Health-Check für einen Node"""
+        """Health-check a peer with a short bounded timeout."""
+        started = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            timeout = httpx.Timeout(self.HEARTBEAT_TIMEOUT, connect=1.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 headers = {}
                 if node.secret_key:
                     headers["X-Federation-Key"] = node.secret_key
-                
-                response = await client.get(
-                    f"{node.base_url}/health",
-                    headers=headers
-                )
-                
+
+                response = await client.get(f"{node.base_url}/health", headers=headers)
+
                 if response.status_code == 200:
                     node.status = NodeStatus.HEALTHY
                     node.last_heartbeat = datetime.now()
                     node.consecutive_failures = 0
-                    
-                    # Parse capabilities from response
+                    latency_ms = (time.monotonic() - started) * 1000.0
+                    node.avg_latency_ms = (
+                        latency_ms if node.avg_latency_ms <= 0
+                        else (0.75 * node.avg_latency_ms + 0.25 * latency_ms)
+                    )
+
                     data = response.json()
                     if "models" in data:
                         node.models = data["models"]
+
+                    metrics = data.get("node_metrics")
+                    if isinstance(metrics, dict):
+                        node.cpu_percent = float(metrics.get("cpu_percent") or 0.0)
+                        node.memory_percent = float(metrics.get("memory_percent") or 0.0)
+                        node.load_ratio = float(metrics.get("load_ratio") or 0.0)
+                        node.memory_available_mb = int(metrics.get("memory_available_mb") or 0)
+                        node.swap_free_mb = int(metrics.get("swap_free_mb") or 0)
+                        node.disk_free_gb = float(metrics.get("disk_free_gb") or 0.0)
+                        node.metrics_updated_at = datetime.now()
                 else:
                     await self._handle_node_failure(node, f"HTTP {response.status_code}")
-                    
+
         except Exception as e:
             await self._handle_node_failure(node, str(e))
     
@@ -268,19 +379,24 @@ class ServerFederation:
         
         return node
     
-    def get_available_node(self, model: str = None) -> Optional[FederationNode]:
-        """Finde verfügbaren Node für Request"""
-        available = [n for n in self.nodes.values() if n.is_available()]
-        
+    def rank_available_nodes(self, model: str = None) -> List[FederationNode]:
+        """Return healthy nodes ordered by live capacity and placement policy."""
+        available = [
+            n for n in self.nodes.values()
+            if n.is_available(stale_after=self.STALE_AFTER)
+        ]
         if model:
-            # Filtere nach Model-Support
             available = [n for n in available if model in n.models or not n.models]
-        
-        if not available:
-            return None
-        
-        # Wähle Node mit geringstem Load
-        return min(available, key=lambda n: n.current_load / n.max_concurrent)
+        return sorted(
+            available,
+            key=lambda n: n.selection_score(stale_after=self.STALE_AFTER),
+            reverse=True,
+        )
+
+    def get_available_node(self, model: str = None) -> Optional[FederationNode]:
+        """Return the best live node, never requiring an optional peer."""
+        ranked = self.rank_available_nodes(model)
+        return ranked[0] if ranked else None
     
     def get_status(self) -> Dict[str, Any]:
         """Federation Status"""
@@ -337,19 +453,25 @@ FEDERATION_NODES = {
         "url": "https://api.ailinux.me",
         "vpn_ip": "10.10.0.1",
         "port": 9100,
-        "role": "hub"
+        "role": "hub",
+        "optional": False,
+        "placement_weight": 0.72,
     },
     "backup": {
         "url": "http://10.10.0.3:9000",
         "vpn_ip": "10.10.0.3",
         "port": 9100,
-        "role": "node"
+        "role": "node",
+        "optional": True,
+        "placement_weight": 1.18,
     },
     "zombie-pc": {
         "url": "http://10.10.0.2:9000",
         "vpn_ip": "10.10.0.2",
         "port": 9100,
-        "role": "node"
+        "role": "node",
+        "optional": True,
+        "placement_weight": 1.08,
     }
 }
 
@@ -456,21 +578,7 @@ class LoadBalancerIntegration:
         Berechne Gewichtung für Load Balancer (0-100)
         Höher = mehr Traffic
         """
-        if node.status != NodeStatus.HEALTHY:
-            return 0
-        
-        # Basis: Verfügbare Kapazität
-        capacity = 1.0 - (node.current_load / max(node.max_concurrent, 1))
-        
-        # Keep the public hub responsive: healthy compute nodes get a modest
-        # routing bonus, while the hub stays available as fallback.
-        role_bonus = 0.85 if node.role == NodeRole.HUB else 1.15
-        
-        # Latenz-Malus (wenn verfügbar)
-        latency_factor = max(0.5, 1.0 - (node.avg_latency_ms / 1000))
-        
-        weight = int(capacity * role_bonus * latency_factor * 100)
-        return max(0, min(100, weight))
+        return int(round(node.selection_score(stale_after=self.federation.STALE_AFTER)))
     
     def get_haproxy_server_state(self) -> str:
         """

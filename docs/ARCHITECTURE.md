@@ -367,3 +367,23 @@ Swap und Dateisystemreserve werden vor Compute-/Memory-Wachstum behandelt. Aktue
 - zombie-pc: vorhandene NVMe-Swap-Partition aktiv plus kleiner Swapfile als zusätzliche Reserve.
 
 Compute-Offload darf Root-, Docker-/Service- und Swap-Reserve nicht verdrängen.
+
+
+### Dynamisches Compute-Scheduling und optionale Nodes
+
+Federation-Worker sind **opportunistisch**. Weder `backup` noch `zombie-pc` sind Quorum-, Storage- oder Control-Plane-Abhängigkeiten. Der öffentliche Hub bleibt auch dann funktionsfähig, wenn ein Worker ausgeschaltet, neu installiert oder aus WireGuard entfernt wird.
+
+Jeder Node liefert über den bestehenden `/health`-Pfad einen kleinen Capacity-Snapshot mit CPU-Auslastung, CPU-Anzahl, Load-Ratio, RAM-Auslastung und verfügbarem RAM, freiem Swap sowie freiem Root-Speicher. Diese zusätzlichen Resource-Metriken werden nur bei gültigem `X-Federation-Key` mitgeliefert; der öffentliche Healthcheck verrät sie nicht. Der Hub cached die Werte über parallele Heartbeats und berechnet daraus einen Selection Score. Die Gewichtung berücksichtigt:
+
+- CPU- und RAM-Headroom
+- Load Average relativ zur CPU-Anzahl
+- lokale Request-/Concurrency-Auslastung
+- gemessene Heartbeat-Latenz
+- node-spezifische Placement-Gewichte
+- Mindestreserven für RAM und Swap
+
+Heartbeats laufen parallel und mit kurzem Timeout. Ein langsamer oder verschwundener optionaler Node kann dadurch die Prüfung anderer Nodes nicht verzögern. Nach dem ersten Fehler wird ein Node `degraded`, nach wiederholtem Fehler `offline`; beide Zustände erhalten keinen neuen Compute. Stale Heartbeats und `draining` führen ebenfalls zu Score 0. Sobald ein späterer Healthcheck wieder erfolgreich ist, wird der Node automatisch erneut schedulable.
+
+Für geplante Wartung kann `TRIFORCE_DRAIN_NODES` als kommaseparierte Liste gesetzt werden, beispielsweise `TRIFORCE_DRAIN_NODES=zombie-pc`. Das ist optional: ungeplante Ausfälle werden automatisch abgefangen.
+
+Ollama verwendet dieselben gecachten Federation-Metriken. Bei normaler Last bleibt Backup bevorzugt und Hetzner Control-Plane-Fallback. Wenn Backup stark ausgelastet ist, darf der Hub vorübergehend übernehmen. Ein exklusiv auf Zombie-PC vorhandenes Modell behält Modell-Affinität, solange Zombie gesund ist. Fällt Zombie aus, wird der Node ausgelassen; kann das angeforderte Modell nirgendwo ausgeführt werden, wechselt der Chat-Pfad auf das allgemeine `LOCAL_FALLBACK_MODEL` statt an der optionalen Hardware zu scheitern.

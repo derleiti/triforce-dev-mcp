@@ -534,9 +534,21 @@ async def call_ollama(
                 continue
 
     # All nodes failed for the requested model. Only now change models.
-    if not is_fallback and "cloud" in model.lower() and not _messages_have_images(messages):
-        logger.warning("All Ollama nodes failed for %s - falling back to local model", model)
-        return await call_ollama(
+    # This also covers a model hosted exclusively on an optional worker such as
+    # zombie-pc: removing/reinstalling that machine must not make chat depend on
+    # its presence.
+    fallback_name = normalize_ollama_model(LOCAL_FALLBACK_MODEL)
+    if (
+        not is_fallback
+        and model_name != fallback_name
+        and not _messages_have_images(messages)
+    ):
+        logger.warning(
+            "All Ollama nodes failed for %s - falling back to %s",
+            model,
+            LOCAL_FALLBACK_MODEL,
+        )
+        fallback_result = await call_ollama(
             model=LOCAL_FALLBACK_MODEL,
             messages=messages,
             temperature=temperature,
@@ -545,6 +557,9 @@ async def call_ollama(
             tools=tools,
             tool_choice=tool_choice,
         )
+        fallback_result["fallback_from"] = model
+        fallback_result["fallback_to"] = LOCAL_FALLBACK_MODEL
+        return fallback_result
 
     if saw_timeout and last_status is None:
         raise HTTPException(504, "Ollama Timeout")
