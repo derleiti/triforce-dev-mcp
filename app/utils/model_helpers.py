@@ -5,7 +5,7 @@ from __future__ import annotations
 # All known provider prefixes
 PROVIDER_PREFIXES = (
     "ollama/", "gemini/", "mistral/", "anthropic/", "openai/", "groq/",
-    "cerebras/", "cohere/", "kimi/", "huggingface/", "github/",
+    "cerebras/", "nvidia/", "cohere/", "kimi/", "huggingface/", "github/",
     "openrouter/", "together/", "fireworks/", "cloudflare/", "gpt-oss/",
 )
 
