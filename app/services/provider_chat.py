@@ -616,6 +616,10 @@ async def _compatible(
     if provider == "openrouter":
         headers.update({"HTTP-Referer": "https://ailinux.me", "X-Title": "AILinux ai-coder"})
     payload: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens}
+    if provider == "nvidia" and model.startswith("openai/gpt-oss"):
+        effort = os.getenv("NVIDIA_REASONING_EFFORT", "low").strip().lower()
+        if effort in {"low", "medium", "high"}:
+            payload["reasoning_effort"] = effort
     if temperature is not None:
         payload["temperature"] = temperature
     if tools:

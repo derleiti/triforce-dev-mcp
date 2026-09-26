@@ -1441,6 +1441,10 @@ async def _stream_openai_compatible(
         "model": target_model,
         "messages": messages,
     }
+    if provider == "nvidia" and target_model.startswith("openai/gpt-oss"):
+        effort = os.getenv("NVIDIA_REASONING_EFFORT", "low").strip().lower()
+        if effort in {"low", "medium", "high"}:
+            body["reasoning_effort"] = effort
     if temperature is not None:
         body["temperature"] = max(0.0, min(temperature, 2.0))
 
