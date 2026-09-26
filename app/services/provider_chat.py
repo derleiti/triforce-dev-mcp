@@ -652,7 +652,15 @@ async def _cloudflare(
     api_key = _key(settings, "cloudflare_api_token", "CLOUDFLARE_API_TOKEN")
     if not account or not api_key:
         raise HTTPException(503, "Cloudflare support is not configured")
-    payload: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens}
+    try:
+        cloudflare_max_tokens = max(1, int(os.getenv("CLOUDFLARE_MAX_TOKENS", "8192")))
+    except (TypeError, ValueError):
+        cloudflare_max_tokens = 8192
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": min(max_tokens, cloudflare_max_tokens),
+    }
     if temperature is not None:
         payload["temperature"] = temperature
     if tools:

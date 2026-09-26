@@ -68,3 +68,32 @@ def test_nvidia_gpt_oss_defaults_to_low_reasoning_effort(monkeypatch):
     assert seen["payload"]["model"] == "openai/gpt-oss-20b"
     assert seen["payload"]["reasoning_effort"] == "low"
     assert result["content"] == "nvidia-ok"
+
+
+def test_cloudflare_caps_requested_output_tokens(monkeypatch):
+    from app.services import provider_chat
+
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "account")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "configured")
+    monkeypatch.delenv("CLOUDFLARE_MAX_TOKENS", raising=False)
+    seen = {}
+
+    async def fake_post(provider, url, headers, payload, timeout):
+        seen.update(provider=provider, url=url, payload=payload)
+        return {
+            "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "choices": [{"message": {"content": "cloudflare-ok", "tool_calls": []}}],
+            "usage": {"total_tokens": 4},
+        }
+
+    monkeypatch.setattr(provider_chat, "_post", fake_post)
+    result = asyncio.run(provider_chat.chat_completion(
+        SimpleNamespace(provider="cloudflare"),
+        "cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        [{"role": "user", "content": "hi"}],
+        max_tokens=16384,
+    ))
+
+    assert seen["provider"] == "cloudflare"
+    assert seen["payload"]["max_tokens"] == 8192
+    assert result["content"] == "cloudflare-ok"
