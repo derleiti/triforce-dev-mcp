@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.bug_reports import get_report, list_reports, stats, update_status
+from app.services.bug_reports import (
+    get_report,
+    list_reports,
+    resolve_report,
+    stats,
+    update_status,
+)
 
 BUG_REPORT_TOOLS = [
     {
@@ -53,6 +59,25 @@ BUG_REPORT_TOOLS = [
         "annotations": {"readOnlyHint": False, "idempotentHint": True},
         "x_inventory": "admin",
     },
+    {
+        "name": "bug_report_resolve",
+        "description": "Resolve a bug with a documented, verified fix. Archives the fix to bugs@ailinux.me and makes it eligible for Training Center distillation.",
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "report_id": {"type": "string", "minLength": 8, "maxLength": 64},
+                "fix_summary": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "verification": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "docs_ref": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "fix_version": {"type": "string", "maxLength": 128, "default": ""},
+                "fix_commit": {"type": "string", "maxLength": 160, "default": ""},
+            },
+            "required": ["report_id", "fix_summary", "verification", "docs_ref"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": True},
+        "x_inventory": "admin",
+    },
 ]
 
 
@@ -82,9 +107,21 @@ async def handle_bug_report_status(params: dict[str, Any]) -> dict[str, Any]:
     return update_status(str(params.get("report_id") or "").strip(), str(params.get("status") or "").strip())
 
 
+async def handle_bug_report_resolve(params: dict[str, Any]) -> dict[str, Any]:
+    return resolve_report(
+        str(params.get("report_id") or "").strip(),
+        fix_summary=str(params.get("fix_summary") or ""),
+        verification=str(params.get("verification") or ""),
+        docs_ref=str(params.get("docs_ref") or ""),
+        fix_version=str(params.get("fix_version") or ""),
+        fix_commit=str(params.get("fix_commit") or ""),
+    )
+
+
 BUG_REPORT_HANDLERS = {
     "bug_reports_list": handle_bug_reports_list,
     "bug_report_get": handle_bug_report_get,
     "bug_report_stats": handle_bug_report_stats,
     "bug_report_status": handle_bug_report_status,
+    "bug_report_resolve": handle_bug_report_resolve,
 }

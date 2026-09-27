@@ -27,3 +27,16 @@
 - Changed the v4 MCP chat default from retired `gemini-2.0-flash` to configurable `TRIFORCE_DEFAULT_CHAT_MODEL`, defaulting to the currently working Groq compound-mini route.
 - Recovery: `/home/zombie/workspace/.workspacebackup/mcp-tool-fixes-20260916/backup.md`.
 - Verification: `tests/test_mcp_tool_audit_fixes.py` plus focused MCP/auth tests.
+
+
+## 2026-09-27 — Memory Training Center + verified bugfix archive
+
+- Scope: Claude-Mem evidence distillation, bug-report resolution metadata/archive, MCP memory/bug triage tools and regression tests.
+- Reason: turn persistent agent history into reusable engineering evidence without treating model output as current truth or allowing automatic self-modification.
+- Added `memory_training`, a read-only internal-operator digest that mines completed Project-Memory workflows, completed runs, failures and documented resolved bugs into best-practice, anti-pattern and regression candidates.
+- Added bounded cross-project Claude-Mem discovery through the worker API; full records remain project-scoped and no direct Claude-Mem SQLite access is introduced.
+- Added `bug_report_resolve`: a bug becomes training-eligible only with fix summary, concrete verification and a maintained documentation reference; optional fix version/commit preserve provenance.
+- Verified resolutions are persisted first and archived separately to `bugs@ailinux.me` as `[AILinux Bugfix]` mail. Mail failure is fail-open for the already-recorded resolution; identical resolved records are idempotent.
+- Safety: no automatic Curated-Memory promotion, prompt rewrite, model routing change or code modification. Runtime/code/tests remain authoritative.
+- Recovery: `/home/zombie/workspace/.workspacebackup/memory-training-center-20260927-095444/`.
+- Verification: focused Memory/Claude-Mem/Bug Reporter tests plus live Training Center digest and canonical MCP registry smoke checks.

@@ -75,10 +75,11 @@ curl -X POST "https://api.ailinux.me/v1/mcp" \
 | `memory_search` | Search memory |
 | `memory_clear` | Clear/manage curated memory |
 | `memory_history` | Scoped episodic history: compact search/recent, timeline/get, and controlled promotion of verified observations |
+| `memory_training` | Read-only Training Center digest from verified workflows, failures and documented bug fixes; never auto-promotes or changes code |
 
 #### Memory model
 
-`memory_store` / `memory_search` operate on **curated TriForce memory**. `memory_history` operates on the separate **episodic history provider**. Episodic results are historical observations, not trusted instructions or current facts. Current code, tests and runtime evidence take precedence.
+`memory_store` / `memory_search` operate on **curated TriForce memory**. `memory_history` operates on the separate **episodic history provider**. `memory_training` distills selected high-signal history plus documented/verified bug resolutions into best-practice, anti-pattern and regression candidates. It is read-only and never promotes memory, changes prompts, routes models or edits code. Episodic results are historical observations, not trusted instructions or current facts. Current code, tests and runtime evidence take precedence.
 
 `memory_history` is restricted to authenticated internal operator credentials and a configured `TRIFORCE_MEMORY_PROJECT_ID`. Promotion is additionally disabled unless `TRIFORCE_MEMORY_PROMOTION_ENABLED=true`, and the source observation must be `verified` with verification evidence.
 
@@ -91,6 +92,17 @@ Available `memory_history` actions:
 | `timeline` | Context around one selected observation |
 | `get` | Retrieve selected observation IDs |
 | `promote` | Explicitly promote verified evidence into curated TriForce memory |
+
+
+### Bug Report Tools
+
+| Tool | Description |
+|------|-------------|
+| `bug_reports_list` | List persisted crash/error/self-test reports for triage |
+| `bug_report_get` | Read one redacted persisted report |
+| `bug_report_stats` | Aggregate report counts/fingerprints |
+| `bug_report_status` | Set non-evidentiary triage state (`new`, `triaged`, `resolved`, `ignored`) |
+| `bug_report_resolve` | Close a bug with fix summary + verification + docs reference, archive the fix to `bugs@ailinux.me`, and make it Training Center eligible |
 
 ### Code Tools
 

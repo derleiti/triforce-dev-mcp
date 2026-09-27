@@ -14,8 +14,8 @@ import sqlite3
 import ssl
 import sys
 import threading
-import traceback
 import time
+import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -138,13 +138,37 @@ def _connect() -> sqlite3.Connection:
             mail_status TEXT NOT NULL DEFAULT 'pending',
             mail_error TEXT NOT NULL DEFAULT '',
             mailed_at TEXT NOT NULL DEFAULT '',
-            last_seen_at TEXT NOT NULL
+            last_seen_at TEXT NOT NULL,
+            resolved_at TEXT NOT NULL DEFAULT '',
+            fix_summary TEXT NOT NULL DEFAULT '',
+            fix_version TEXT NOT NULL DEFAULT '',
+            fix_commit TEXT NOT NULL DEFAULT '',
+            verification TEXT NOT NULL DEFAULT '',
+            docs_ref TEXT NOT NULL DEFAULT '',
+            resolution_mail_status TEXT NOT NULL DEFAULT '',
+            resolution_mail_error TEXT NOT NULL DEFAULT '',
+            resolution_mailed_at TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_bug_reports_created ON bug_reports(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_bug_reports_fingerprint ON bug_reports(fingerprint, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, created_at DESC);
         """
     )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(bug_reports)").fetchall()}
+    migrations = {
+        "resolved_at": "TEXT NOT NULL DEFAULT ''",
+        "fix_summary": "TEXT NOT NULL DEFAULT ''",
+        "fix_version": "TEXT NOT NULL DEFAULT ''",
+        "fix_commit": "TEXT NOT NULL DEFAULT ''",
+        "verification": "TEXT NOT NULL DEFAULT ''",
+        "docs_ref": "TEXT NOT NULL DEFAULT ''",
+        "resolution_mail_status": "TEXT NOT NULL DEFAULT ''",
+        "resolution_mail_error": "TEXT NOT NULL DEFAULT ''",
+        "resolution_mailed_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in migrations.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE bug_reports ADD COLUMN {name} {definition}")
     return conn
 
 
@@ -219,6 +243,44 @@ def _smtp_send(report: dict[str, Any], report_id: str, duplicate_count: int) -> 
             smtp.login(user, password)
         smtp.send_message(msg)
 
+
+def _smtp_send_resolution(report: dict[str, Any]) -> None:
+    """Archive a documented, verified bug fix in the same bug mailbox."""
+    host = os.getenv("BUG_SMTP_HOST") or os.getenv("MAIL_SMTP_HOST") or "127.0.0.1"
+    port = int(os.getenv("BUG_SMTP_PORT") or os.getenv("MAIL_SMTP_PORT") or "587")
+    user = os.getenv("BUG_SMTP_USER", "")
+    password = os.getenv("BUG_SMTP_PASS", "")
+    starttls = (os.getenv("BUG_SMTP_STARTTLS", "true").lower() not in {"0", "false", "no"})
+    msg = EmailMessage()
+    msg["From"] = f"AILinux Bugfix Archive <{_MAIL_FROM}>"
+    msg["To"] = _MAIL_TO
+    msg["Subject"] = f"[AILinux Bugfix] {report.get('app', 'unknown')} {report.get('fingerprint', '')}"
+    msg["X-AILinux-Bug-ID"] = str(report.get("id") or "")
+    msg["X-AILinux-Fingerprint"] = str(report.get("fingerprint") or "")
+    body = {
+        "report_id": report.get("id"),
+        "app": report.get("app"),
+        "repo": report.get("repo"),
+        "fingerprint": report.get("fingerprint"),
+        "resolved_at": report.get("resolved_at"),
+        "fix_summary": report.get("fix_summary"),
+        "fix_version": report.get("fix_version"),
+        "fix_commit": report.get("fix_commit"),
+        "verification": report.get("verification"),
+        "docs_ref": report.get("docs_ref"),
+        "duplicate_count": report.get("duplicate_count"),
+    }
+    msg.set_content(json.dumps(body, indent=2, ensure_ascii=False, sort_keys=True))
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(host, port, timeout=10) as smtp:
+        smtp.ehlo("api.ailinux.me")
+        if starttls:
+            smtp.starttls(context=context)
+            smtp.ehlo("api.ailinux.me")
+        if user and password:
+            smtp.login(user, password)
+        smtp.send_message(msg)
 
 def submit_report(payload: dict[str, Any]) -> dict[str, Any]:
     report = _sanitize_report(payload)
@@ -366,7 +428,7 @@ def list_reports(*, limit: int = 50, status: str = "", app: str = "", fingerprin
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with _LOCK, _connect() as conn:
         rows = conn.execute(
-            "SELECT id,created_at,app,repo,version,platform,event_type,delivery,fingerprint,exception_type,exception_message,user_message,status,duplicate_count,mail_status,last_seen_at FROM bug_reports"
+            "SELECT id,created_at,app,repo,version,platform,event_type,delivery,fingerprint,exception_type,exception_message,user_message,status,duplicate_count,mail_status,last_seen_at,resolved_at,fix_summary,fix_version,fix_commit,verification,docs_ref,resolution_mail_status FROM bug_reports"
             + where + " ORDER BY created_at DESC LIMIT ?", (*values, limit)
         ).fetchall()
     return [dict(row) for row in rows]
@@ -393,6 +455,98 @@ def update_status(report_id: str, status: str) -> dict[str, Any]:
         cur = conn.execute("UPDATE bug_reports SET status=? WHERE id=?", (status, report_id))
     return {"ok": bool(cur.rowcount), "report_id": report_id, "status": status}
 
+
+def resolve_report(
+    report_id: str, *, fix_summary: str, verification: str, docs_ref: str,
+    fix_version: str = "", fix_commit: str = "",
+) -> dict[str, Any]:
+    """Resolve one bug with enough evidence to qualify as a training signal.
+
+    Resolution is persisted before the archive mail is attempted.  Mail failure
+    never rolls back the verified fix record.
+    """
+    report_id = str(report_id or "").strip()
+    summary = redact_text(fix_summary, 8_000).strip()
+    proof = redact_text(verification, 4_000).strip()
+    docs = redact_text(docs_ref, 2_000).strip()
+    version = redact_text(fix_version, 128).strip()
+    commit = redact_text(fix_commit, 160).strip()
+    if not report_id:
+        raise ValueError("report_id required")
+    if not summary:
+        raise ValueError("fix_summary required")
+    if not proof:
+        raise ValueError("verification required")
+    if not docs:
+        raise ValueError("docs_ref required")
+
+    now = utc_now()
+    with _LOCK, _connect() as conn:
+        row = conn.execute("SELECT * FROM bug_reports WHERE id=?", (report_id,)).fetchone()
+        if not row:
+            return {"ok": False, "report_id": report_id, "status": "not_found"}
+        existing = dict(row)
+        unchanged = (
+            existing.get("status") == "resolved"
+            and existing.get("fix_summary") == summary
+            and existing.get("verification") == proof
+            and existing.get("docs_ref") == docs
+            and existing.get("fix_version") == version
+            and existing.get("fix_commit") == commit
+        )
+        if unchanged and existing.get("resolution_mail_status") == "sent":
+            return {
+                "ok": True, "report_id": report_id, "status": "resolved",
+                "training_eligible": True, "resolution_mail_status": "sent",
+                "idempotent": True,
+            }
+        conn.execute(
+            """UPDATE bug_reports SET status='resolved',resolved_at=?,fix_summary=?,fix_version=?,
+               fix_commit=?,verification=?,docs_ref=?,resolution_mail_status='pending',
+               resolution_mail_error='' WHERE id=?""",
+            (now, summary, version, commit, proof, docs, report_id),
+        )
+        archived = dict(existing)
+        archived.update({
+            "status": "resolved", "resolved_at": now, "fix_summary": summary,
+            "fix_version": version, "fix_commit": commit, "verification": proof,
+            "docs_ref": docs,
+        })
+
+    mail_status = "sent"
+    try:
+        _smtp_send_resolution(archived)
+        with _LOCK, _connect() as conn:
+            conn.execute(
+                "UPDATE bug_reports SET resolution_mail_status='sent',resolution_mailed_at=?,resolution_mail_error='' WHERE id=?",
+                (utc_now(), report_id),
+            )
+    except Exception as exc:  # noqa: BLE001 - archive delivery is intentionally fail-open
+        mail_status = "failed"
+        with _LOCK, _connect() as conn:
+            conn.execute(
+                "UPDATE bug_reports SET resolution_mail_status='failed',resolution_mail_error=? WHERE id=?",
+                (redact_text(exc, 500), report_id),
+            )
+    return {
+        "ok": True, "report_id": report_id, "status": "resolved",
+        "training_eligible": True, "resolution_mail_status": mail_status,
+    }
+
+
+def list_training_resolutions(*, limit: int = 100) -> list[dict[str, Any]]:
+    """Return documented, verified bug fixes eligible for memory distillation."""
+    limit = max(1, min(int(limit), 200))
+    with _LOCK, _connect() as conn:
+        rows = conn.execute(
+            """SELECT id,created_at,resolved_at,app,repo,version,event_type,fingerprint,
+                      duplicate_count,fix_summary,fix_version,fix_commit,verification,docs_ref
+               FROM bug_reports
+               WHERE status='resolved' AND fix_summary<>'' AND verification<>'' AND docs_ref<>''
+               ORDER BY resolved_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 def stats() -> dict[str, Any]:
     with _LOCK, _connect() as conn:

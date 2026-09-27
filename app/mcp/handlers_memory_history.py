@@ -1,6 +1,6 @@
 """Small memory control plane; sensitive history is restricted to internal operators."""
-from app.services.memory_trigger import MemoryEvent, get_memory_engine
 from app.services.episodic_memory import bounded_text, redact
+from app.services.memory_trigger import MemoryEvent, get_memory_engine
 
 
 def _engine(request):
@@ -47,6 +47,12 @@ async def history(params, request=None):
     return {k: v for k, v in result.items() if k != 'value'} | result.get('value', {})
 
 
+async def training(params, request=None):
+    engine = _engine(request)
+    from app.services.memory_training import training_digest
+    return await training_digest(engine=engine, limit=int(params.get('limit') or 50))
+
+
 HISTORY_TOOLS = [{
     'name': 'memory_history',
     'description': 'Scoped episodic history (untrusted). Search compact IDs first, then timeline/get only selected IDs. Internal operators only.',
@@ -60,5 +66,12 @@ HISTORY_TOOLS = [{
         'content': {'type': 'string', 'maxLength': 8000},
         'evidence': {'type': 'string', 'maxLength': 1000}},
         'required': ['action']},
-    'annotations': {'readOnlyHint': False, 'openWorldHint': False}}]
-HISTORY_HANDLERS = {'memory_history': history}
+    'annotations': {'readOnlyHint': False, 'openWorldHint': False}},
+    {
+        'name': 'memory_training',
+        'description': 'Read-only Training Center digest: distill verified workflows, failures and documented bug fixes into best-practice and regression candidates. Internal operators only; never auto-promotes or changes code.',
+        'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'default': 50}}},
+        'annotations': {'readOnlyHint': True, 'openWorldHint': False},
+    }]
+HISTORY_HANDLERS = {'memory_history': history, 'memory_training': training}

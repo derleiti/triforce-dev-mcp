@@ -149,3 +149,21 @@ async def test_promotion_requires_evidence(tmp_path):
     e.provider.get_observations.return_value = [memory(7, verification_state='verified', evidence='')]
     result = await e.promote(7, memory_type='fact', content='parser fix')
     assert result == {'status': 'rejected', 'reason': 'verification_evidence_required'}
+
+
+@pytest.mark.asyncio
+async def test_global_search_requires_query_and_preserves_project_scope(tmp_path):
+    def handle(request):
+        assert request.url.path == '/api/search'
+        assert 'project' not in request.url.params
+        return httpx.Response(200, json={'observations': [
+            {'id': 10, 'project': 'project-a', 'title': 'project_memory_revision', 'metadata': {'event_type': 'project_memory_revision'}},
+            {'id': 11, 'project': 'project-b', 'title': 'project_memory_revision', 'metadata': {'event_type': 'project_memory_revision'}},
+        ]})
+
+    adapter = ClaudeMemAdapter(config(tmp_path), httpx.MockTransport(handle))
+    rows = await adapter.search_global('project_memory_revision', 20)
+    assert [row['id'] for row in rows] == [10, 11]
+    assert {row['project'] for row in rows} == {'project-a', 'project-b'}
+    with pytest.raises(MemoryUnavailable):
+        await adapter.search_global('', 20)

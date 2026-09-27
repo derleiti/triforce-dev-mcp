@@ -56,3 +56,17 @@ Statuses are `new`, `triaged`, `resolved` and `ignored`. These tools operate on 
 ## Public ingestion safeguards
 
 The ingestion route is intentionally unauthenticated so an app can report login/startup failures. It is rate-limited, schema-bounded, performs recursive server-side redaction, does not persist raw source IPs, fixes sender/recipient server-side and never accepts arbitrary e-mail destinations.
+
+
+## Verified resolution and Training Center loop
+
+A report is only eligible as a reusable training signal after a documented fix is closed with `bug_report_resolve`. The resolver requires:
+
+- `fix_summary` — what was changed and why,
+- `verification` — concrete tests/runtime/manual evidence,
+- `docs_ref` — the changelog or other maintained documentation reference,
+- optional `fix_version` and `fix_commit` provenance.
+
+TriForce persists that resolution first and then sends a second structured archive message with subject `[AILinux Bugfix] ...` to `bugs@ailinux.me`. Archive-mail failure never rolls back the resolution record. Repeating the same already-mailed resolution is idempotent.
+
+The Memory Training Center consumes only resolved reports that contain all three required evidence fields. A raw/new/triaged bug report can become an anti-pattern signal through runtime history, but it cannot become a verified best practice merely because somebody changed its status.
