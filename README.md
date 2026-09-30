@@ -1,7 +1,5 @@
 # TriForce AI Platform
 
-[![CI](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/ci.yml)
-[![Security](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/security.yml/badge.svg?branch=master)](https://github.com/derleiti/triforce-dev-mcp/actions/workflows/security.yml)
 
 **Current source version: 2.86.8** · Public API: https://api.ailinux.me · MCP/Helper entry: https://api.ailinux.me/v1/mcp
 
