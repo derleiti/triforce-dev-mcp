@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     docker_log_tail: int = Field(default=100, ge=10, le=5000, validation_alias="DOCKER_LOG_TAIL")
     docker_network_name: str = Field(default="triforce-net", validation_alias="DOCKER_NETWORK_NAME")
 
+    # Optional OpenShell-backed disposable compute. This stays disabled unless
+    # explicitly enabled on a compute node; the existing Docker backend remains
+    # the default runtime for AILinux Helper compute shares.
+    openshell_compute_enabled: bool = Field(default=False, validation_alias="TRIFORCE_OPENSHELL_COMPUTE_ENABLED")
+    openshell_cli: str = Field(default="openshell", validation_alias="TRIFORCE_OPENSHELL_CLI")
+    openshell_image: str = Field(default="python:3.13-slim", validation_alias="TRIFORCE_OPENSHELL_IMAGE")
+    openshell_cpu: str = Field(default="2", validation_alias="TRIFORCE_OPENSHELL_CPU")
+    openshell_memory: str = Field(default="2Gi", validation_alias="TRIFORCE_OPENSHELL_MEMORY")
+
     docker_redis_image: str = Field(default="redis:8.10-alpine", validation_alias="DOCKER_REDIS_IMAGE")
     docker_redis_container: str = Field(default="triforce-redis", validation_alias="DOCKER_REDIS_CONTAINER")
     docker_redis_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_REDIS_BIND")

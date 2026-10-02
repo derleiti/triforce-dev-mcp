@@ -1164,6 +1164,53 @@ async def test_browser_remote_compute_is_intercepted_by_triforce_sandbox(monkeyp
     assert conn.calls == []
 
 
+
+@pytest.mark.asyncio
+async def test_browser_remote_compute_can_dispatch_to_feature_gated_openshell(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+    from app.services import workspace_openshell_sandbox as sandbox
+
+    conn = DummyConnection('browser-openshell-compute')
+    conn.share_manifest = {
+        'resources': [
+            {'type': 'workspace', 'enabled': True, 'mode': 'read_write'},
+            {'type': 'compute', 'enabled': True, 'runtime': 'triforce_openshell', 'available': True},
+        ],
+        'grants': [
+            {'resource': 'workspace', 'action': 'read'},
+            {'resource': 'workspace', 'action': 'write'},
+            {'resource': 'compute', 'action': 'execute'},
+        ],
+    }
+    seen = {}
+
+    async def fake_openshell_compute(**kwargs):
+        seen.update(kwargs)
+        return {
+            'content': [{'type': 'text', 'text': 'openshell-ok'}],
+            'structuredContent': {'ok': True, 'backend': 'triforce_openshell'},
+            'isError': False,
+        }
+
+    monkeypatch.setattr(sandbox, 'execute_openshell_compute', fake_openshell_compute)
+    sessions.bind_workspace(
+        'session-openshell-compute',
+        conn,
+        mode='write',
+        capabilities=['file_read', 'file_edit', 'file_ops', 'compute_execute'],
+    )
+    req = DummyRequest('session-openshell-compute')
+    result = await bridge.call_public_local_tool(req, 'compute_execute', {'command': 'python -V', 'cwd': '.'})
+
+    assert result['isError'] is False
+    assert result['structuredContent']['backend'] == 'triforce_openshell'
+    assert seen['connection'] is conn
+    assert seen['mode'] == 'write'
+    assert seen['arguments']['command'] == 'python -V'
+    assert 'compute_execute' in seen['capabilities']
+    assert conn.calls == []
+
+
 @pytest.mark.asyncio
 async def test_portable_device_read_operation_allowed_in_read_only_binding():
     conn = DummyConnection()

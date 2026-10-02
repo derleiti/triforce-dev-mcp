@@ -961,11 +961,23 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if wire_name in COMPUTE_TOOLS:
         compute = manifest_resource(_binding_share_manifest(binding), RESOURCE_COMPUTE)
         runtime = str(compute.get("runtime") or "").strip().lower().replace("-", "_")
+        identity = affinity_sid or sid or str(binding.get("session_id") or binding.get("lease_id") or "workspace")
         if runtime == "triforce_docker":
             from .workspace_compute_sandbox import execute_remote_compute
-            identity = affinity_sid or sid or str(binding.get("session_id") or binding.get("lease_id") or "workspace")
             try:
                 return await execute_remote_compute(
+                    connection=connection, arguments=arguments, mode=mode,
+                    capabilities=capabilities, identity=identity,
+                )
+            except (ValueError, RuntimeError) as exc:
+                return _tool_error(
+                    "WORKSPACE_COMPUTE_SANDBOX_FAILED", str(exc),
+                    tool=name, retryable=False, sandboxed=True,
+                )
+        if runtime == "triforce_openshell":
+            from .workspace_openshell_sandbox import execute_openshell_compute
+            try:
+                return await execute_openshell_compute(
                     connection=connection, arguments=arguments, mode=mode,
                     capabilities=capabilities, identity=identity,
                 )
