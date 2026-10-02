@@ -18,6 +18,7 @@ from typing import Any
 from app.config import get_settings
 
 from .workspace_compute_sandbox import (
+    MAX_TOTAL_BYTES,
     _mirror_workspace,
     _run,
     _safe_rel,
@@ -60,6 +61,24 @@ def _pack_workspace(workspace: Path, archive: Path) -> None:
             tf.add(path, arcname=path.relative_to(workspace).as_posix(), recursive=False)
 
 
+TRANSFER_SENTINEL = ".triforce-openshell-transfer-sentinel"
+
+
+def _consume_transfer_sentinel(download_root: Path, marker: str) -> None:
+    sentinel = download_root / TRANSFER_SENTINEL
+    try:
+        value = sentinel.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            "OpenShell download layout verification failed; write-back refused"
+        ) from exc
+    if value != marker:
+        raise RuntimeError(
+            "OpenShell download sentinel mismatch; write-back refused"
+        )
+    sentinel.unlink()
+
+
 async def execute_openshell_compute(
     *, connection: Any, arguments: dict[str, Any], mode: str, capabilities: set[str], identity: str,
 ) -> dict[str, Any]:
@@ -85,17 +104,26 @@ async def execute_openshell_compute(
     workspace.mkdir(parents=True, exist_ok=False)
     download_root.mkdir(parents=True, exist_ok=True)
 
-    baseline, warnings = await _mirror_workspace(connection, workspace, mode, capabilities)
     writable = mode == "write" and "file_edit" in capabilities and "file_ops" in capabilities
-    _pack_workspace(workspace, archive)
+    baseline: dict[str, str] = {}
+    warnings: list[str] = []
 
     sandbox = _sandbox_name(identity, run_id)
+    create_attempted = False
     created = False
+    stage = "workspace_mirror"
     code = 1
     stdout = stderr = ""
     cleanup_warning = ""
+    writeback_error = ""
+    writeback_completed = not writable
     sync = {"changed": 0, "deleted": 0, "backed_up": 0}
     try:
+        baseline, warnings = await _mirror_workspace(connection, workspace, mode, capabilities)
+        stage = "workspace_pack"
+        _pack_workspace(workspace, archive)
+        stage = "sandbox_create"
+        create_attempted = True
         await _must([
             cli, "sandbox", "create",
             "--name", sandbox,
@@ -108,7 +136,9 @@ async def execute_openshell_compute(
             "--", "/bin/sh", "-lc", "sleep infinity",
         ], timeout=180)
         created = True
+        stage = "workspace_upload"
         await _must([cli, "sandbox", "upload", sandbox, str(archive), "/tmp"], timeout=120)
+        stage = "workspace_extract"
         await _must([
             cli, "sandbox", "exec", "-n", sandbox, "--no-tty", "--no-login-shell",
             "--", "/bin/sh", "-lc",
@@ -116,6 +146,7 @@ async def execute_openshell_compute(
         ], timeout=60)
 
         sandbox_cwd = "/sandbox/workspace" + (f"/{cwd}" if cwd else "")
+        stage = "command"
         code, stdout, stderr = await _run([
             cli, "sandbox", "exec", "-n", sandbox,
             "--workdir", sandbox_cwd,
@@ -124,24 +155,68 @@ async def execute_openshell_compute(
         ], timeout=timeout + 15)
 
         if writable:
-            await _must([
-                cli, "sandbox", "exec", "-n", sandbox, "--no-tty", "--no-login-shell",
-                "--", "/bin/sh", "-lc", "mkdir -p /sandbox/workspace",
-            ], timeout=30)
-            await _must([
-                cli, "sandbox", "download", sandbox, "/sandbox/workspace", str(download_root),
-            ], timeout=120)
-            current = _scan_workspace(download_root)
-            sync = await _write_back(connection, baseline, current, mode, run_id)
+            try:
+                stage = "writeback_prepare"
+                marker = uuid.uuid4().hex
+                await _must([
+                    cli, "sandbox", "exec", "-n", sandbox, "--no-tty", "--no-login-shell",
+                    "--", "/bin/sh", "-lc",
+                    f"printf '%s' '{marker}' > /sandbox/workspace/{TRANSFER_SENTINEL}",
+                ], timeout=30)
+                stage = "writeback_size_check"
+                size_text = await _must([
+                    cli, "sandbox", "exec", "-n", sandbox, "--no-tty", "--no-login-shell",
+                    "--", "/bin/sh", "-lc", "du -sb /sandbox/workspace | cut -f1",
+                ], timeout=30)
+                try:
+                    remote_size = int(size_text.strip().splitlines()[-1])
+                except (ValueError, IndexError) as exc:
+                    raise RuntimeError(
+                        "OpenShell workspace size check failed; download refused"
+                    ) from exc
+                if remote_size > MAX_TOTAL_BYTES:
+                    raise RuntimeError(
+                        f"OpenShell workspace exceeds download limit ({remote_size} > {MAX_TOTAL_BYTES})"
+                    )
+                stage = "writeback_download"
+                await _must([
+                    cli, "sandbox", "download", sandbox, "/sandbox/workspace", str(download_root),
+                ], timeout=120)
+                stage = "writeback_verify"
+                _consume_transfer_sentinel(download_root, marker)
+                current = _scan_workspace(download_root)
+                stage = "writeback_apply"
+                sync = await _write_back(connection, baseline, current, mode, run_id)
+                writeback_completed = True
+            except TimeoutError:
+                writeback_error = f"OpenShell {stage} timed out; write-back did not complete"
+                if code == 0:
+                    code = 124
+                stderr = (stderr + "\n" + writeback_error).strip()
+            except RuntimeError as exc:
+                writeback_error = str(exc)
+                if code == 0:
+                    code = 125
+                stderr = (stderr + "\nwrite-back refused: " + writeback_error).strip()
     except TimeoutError:
         code = 124
-        stderr = f"command timed out after {timeout}s"
+        stderr = f"OpenShell {stage} timed out"
     finally:
-        if created:
-            delete_code, _, delete_err = await _run([cli, "sandbox", "delete", sandbox], timeout=45)
-            if delete_code:
-                cleanup_warning = (delete_err or "OpenShell sandbox cleanup failed").strip()[:500]
-        shutil.rmtree(run_root, ignore_errors=True)
+        try:
+            if create_attempted:
+                try:
+                    delete_code, _, delete_err = await _run(
+                        [cli, "sandbox", "delete", sandbox], timeout=45
+                    )
+                    if delete_code and created:
+                        cleanup_warning = (
+                            delete_err or "OpenShell sandbox cleanup failed"
+                        ).strip()[:500]
+                except Exception as exc:
+                    if created:
+                        cleanup_warning = f"OpenShell sandbox cleanup failed: {exc}"[:500]
+        finally:
+            shutil.rmtree(run_root, ignore_errors=True)
 
     pieces: list[str] = []
     if stdout:
@@ -154,6 +229,8 @@ async def execute_openshell_compute(
     )
     if warnings:
         pieces.append("mirror_warnings:\n" + "\n".join(warnings[:20]))
+    if writeback_error:
+        pieces.append("writeback_error:\n" + writeback_error)
     if cleanup_warning:
         warnings = [*warnings, cleanup_warning]
         pieces.append("cleanup_warning:\n" + cleanup_warning)
@@ -168,6 +245,8 @@ async def execute_openshell_compute(
             "internet": "deny-by-default",
             "workspace": "~/workspace",
             "workspace_writeback": writable,
+            "workspace_writeback_completed": writeback_completed,
+            "writeback_error": writeback_error or None,
             "sync": sync,
             "warnings": warnings[:20],
         },
