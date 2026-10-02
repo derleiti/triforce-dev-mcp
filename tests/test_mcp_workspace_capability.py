@@ -1439,3 +1439,51 @@ async def test_workspace_only_tool_without_lease_skips_v4_error_path(monkeypatch
     assert result["isError"] is True
     assert result["structuredContent"]["code"] == "workspace_not_paired"
     assert result["structuredContent"]["source"] == "workspace_bridge"
+
+
+@pytest.mark.asyncio
+async def test_browser_remote_compute_can_route_to_openshell(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+    from app.services import workspace_compute_openshell as openshell_backend
+
+    conn = DummyConnection('browser-openshell-compute')
+    conn.share_manifest = {
+        'resources': [
+            {'type': 'workspace', 'enabled': True, 'mode': 'read_write'},
+            {'type': 'compute', 'enabled': True, 'runtime': 'openshell', 'available': True},
+        ],
+        'grants': [
+            {'resource': 'workspace', 'action': 'read'},
+            {'resource': 'workspace', 'action': 'write'},
+            {'resource': 'compute', 'action': 'execute'},
+        ],
+    }
+    seen = {}
+
+    async def fake_openshell_compute(**kwargs):
+        seen.update(kwargs)
+        return {
+            'content': [{'type': 'text', 'text': 'openshell-ok'}],
+            'structuredContent': {'ok': True, 'backend': 'openshell'},
+            'isError': False,
+        }
+
+    monkeypatch.setattr(openshell_backend, 'execute_openshell_compute', fake_openshell_compute)
+    sessions.bind_workspace(
+        'session-openshell-compute',
+        conn,
+        mode='write',
+        capabilities=['file_read', 'file_edit', 'file_ops', 'compute_execute'],
+    )
+    req = DummyRequest('session-openshell-compute')
+    result = await bridge.call_public_local_tool(
+        req, 'compute_execute', {'command': 'python -V', 'cwd': '.'}
+    )
+
+    assert result['isError'] is False
+    assert result['structuredContent']['backend'] == 'openshell'
+    assert seen['connection'] is conn
+    assert seen['mode'] == 'write'
+    assert seen['arguments']['command'] == 'python -V'
+    assert 'compute_execute' in seen['capabilities']
+    assert conn.calls == []
