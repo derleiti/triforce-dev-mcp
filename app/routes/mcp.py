@@ -486,9 +486,17 @@ def _finish_tools_list(
 
 
 def _filter_tools_for_client(tools: List[Dict[str, Any]], request: Optional[Request] = None) -> List[Dict[str, Any]]:
-    """Apply normal MCP authorization; ai-coder is an identity, not a deny profile."""
+    """Apply normal MCP authorization plus the claimed web-worker capability profile."""
     if request is None:
         return tools
+    try:
+        from app.mcp.web_worker import filter_restricted_worker_tools, worker_mode_for_request
+        if worker_mode_for_request(request) in {"ticket", "market"}:
+            return filter_restricted_worker_tools(tools, request)
+    except Exception:
+        state = getattr(request, "state", None)
+        if str(getattr(state, "mcp_worker_mode", "") or "") in {"ticket", "market"}:
+            return []
     if is_internal_full_request(request):
         return tools
     return filter_tools_for_external(tools, request=request)
@@ -3042,7 +3050,11 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
             )
 
         try:
-            v4_result = await call_v4_tool(tool_name, arguments)
+            v4_handler = _get_v4_handler(tool_name)
+            if v4_handler is not None and _tool_handler_accepts_request(v4_handler):
+                v4_result = await _call_tool_handler(v4_handler, arguments, request)
+            else:
+                v4_result = await call_v4_tool(tool_name, arguments)
             if v4_result is not None:
                 return _build_tool_result(
                     _tag_execution_target(v4_result, tool_name, "server")

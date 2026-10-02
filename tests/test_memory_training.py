@@ -49,6 +49,20 @@ class Provider:
                     "tool": "code_edit", "error_type": "SyntaxError", "error": "invalid syntax",
                 },
             },
+            4: {
+                "id": 4,
+                "project": "triforce:dev:triforce",
+                "title": "feature_experience: memory bridge",
+                "metadata": {
+                    "event_type": "feature_experience", "verification_state": "verified",
+                    "schema": "mcp-feature-experience-v1", "project_key": "triforce",
+                    "task": "wire Dev-MCP feature experience memory", "summary": "stored verified experience",
+                    "architecture": "MCP -> Claude-Mem -> Training Center",
+                    "verification": "focused tests passed", "lessons": "keep writes fail-open",
+                    "future_features": "surface experience browser", "source": "dev-mcp",
+                    "fingerprint": "abc123", "repo": "triforce", "commit": "deadbeef",
+                },
+            },
         }
 
     async def search_global(self, query: str, limit: int):
@@ -56,6 +70,7 @@ class Provider:
             "project_memory_revision": [1],
             "run_completed": [2],
             "tool_failed": [3],
+            "feature_experience": [4],
         }
         return [
             {k: v for k, v in self.rows[i].items() if k in {"id", "project", "title", "metadata"}}
@@ -79,13 +94,16 @@ async def test_training_digest_distills_only_evidence_backed_signals(monkeypatch
 
     assert digest["mode"] == "read_only_distillation"
     assert digest["automatic_promotion"] is False
-    assert digest["source_counts"] == {"episodic_selected": 3, "documented_resolved_bugs": 1}
+    assert digest["source_counts"] == {"episodic_selected": 4, "documented_resolved_bugs": 1}
     kinds = {item["kind"] for item in digest["best_practices"]}
-    assert {"verified_workflow", "verified_bugfix"} <= kinds
+    assert {"verified_workflow", "verified_feature_experience", "verified_bugfix"} <= kinds
+    feature = next(item for item in digest["best_practices"] if item["kind"] == "verified_feature_experience")
+    assert feature["architecture"] == "MCP -> Claude-Mem -> Training Center"
+    assert feature["verification"] == "focused tests passed"
     assert digest["successful_runs"][0]["findings"] == "pytest passed"
     assert digest["anti_patterns"][0]["tool"] == "code_edit"
     regression_kinds = {item["kind"] for item in digest["regression_candidates"]}
-    assert {"workflow_regression", "bug_regression"} <= regression_kinds
+    assert {"workflow_regression", "feature_regression", "bug_regression"} <= regression_kinds
 
 
 def test_verified_bug_resolution_is_archived_and_training_eligible(monkeypatch, tmp_path):

@@ -1022,7 +1022,7 @@ def test_display_result_normalizes_desktop_data_url_to_native_image_content():
     assert result['structuredContent']['width'] == 800
     assert result['structuredContent']['height'] == 600
     assert result['structuredContent']['source'] == 'primary-screen'
-    assert 'data_url' not in result['structuredContent']
+    assert result['structuredContent']['data_url'] == 'data:image/png;base64,' + encoded
 
 
 def test_display_result_normalizes_raw_base64_and_preserves_jpeg_mime():
@@ -1042,7 +1042,23 @@ def test_display_result_normalizes_raw_base64_and_preserves_jpeg_mime():
     assert result['content'][0]['mimeType'] == 'image/jpeg'
     assert result['content'][0]['data'] == encoded
     assert result['structuredContent']['source'] == 'android-screen'
-    assert 'data' not in result['structuredContent']
+    assert result['structuredContent']['data_url'] == 'data:image/jpeg;base64,' + encoded
+
+
+def test_display_result_mirrors_native_image_block_into_structured_data_url_for_connectors():
+    import base64
+    from app.services.mcp_workspace_bridge import _normalize_display_tool_result
+
+    encoded = base64.b64encode(b'\xff\xd8connector-frame\xff\xd9').decode('ascii')
+    raw = {
+        'content': [{'type': 'image', 'data': encoded, 'mimeType': 'image/jpeg'}],
+        'structuredContent': {'ok': True, 'frame_id': 7},
+        'isError': False,
+    }
+    result = _normalize_display_tool_result('computer_screenshot', raw)
+    assert result['content'][0]['data'] == encoded
+    assert result['structuredContent']['mimeType'] == 'image/jpeg'
+    assert result['structuredContent']['data_url'] == 'data:image/jpeg;base64,' + encoded
 
 
 def test_display_result_rejects_malformed_base64_without_echoing_payload():
@@ -1235,7 +1251,7 @@ def test_live_vision_result_normalizes_cached_jpeg_to_native_image_content():
     assert result['structuredContent']['frame_id'] == 42
     assert result['structuredContent']['scene_id'] == 9
     assert result['structuredContent']['frame_age_ms'] == 17
-    assert 'data' not in result['structuredContent']
+    assert result['structuredContent']['data_url'] == 'data:image/jpeg;base64,' + encoded
 
 
 @pytest.mark.asyncio

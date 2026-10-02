@@ -255,7 +255,7 @@ EXTERNAL_TOOL_ALLOWLIST_FULL: Set[str] = {
 # Tools die NIE extern auftauchen und das internal_full Profil brauchen.
 PRIVILEGED_TOOLS: Set[str] = {
     # Direkter Code/Shell-Zugriff
-    "shell", "task_runner", "binary_exec",
+    "shell", "server_control", "task_runner", "binary_exec",
     "custom_exec", "custom_binary",
     "remote_exec", "remote_admin", "remote_task",
     # Service / Container Aenderungen
@@ -486,6 +486,19 @@ def is_tool_allowed(tool_name: str, request, arguments: Optional[Dict[str, Any]]
     manifest and are routed before this server-side gate.
     """
     name = tool_name[9:] if tool_name.startswith("triforce_") else tool_name
+    # A claimed ticket worker is intentionally narrower than its underlying
+    # authenticated/internal identity. Enforce this before internal_full so a
+    # support ticket can never elevate by inheriting the browser connector role.
+    try:
+        from app.mcp.web_worker import worker_mode_for_request, restricted_worker_tool_allowed
+        worker_mode = worker_mode_for_request(request)
+        if worker_mode in {"ticket", "market"}:
+            return restricted_worker_tool_allowed(worker_mode, name, arguments)
+    except Exception:
+        # Fail closed only when the request explicitly carries worker state.
+        state = getattr(request, "state", None) if request is not None else None
+        if str(getattr(state, "mcp_worker_mode", "") or "") in {"ticket", "market"}:
+            return False
     internal_full = is_internal_full_request(request)
     if internal_full:
         return True

@@ -757,8 +757,7 @@ async def test_guest_discovery_exposes_complete_non_admin_catalog_without_granti
     """Discovery is complete; call-time RBAC remains authoritative."""
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
     names = {tool['name'] for tool in result['tools']}
-    assert {'binary_exec', 'task_runner'} <= names
-    assert {'shell', 'remote_exec', 'remote_admin'}.isdisjoint(names)
+    assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'remote_admin'}.isdisjoint(names)
     assert 'memory_store' not in names
 
 

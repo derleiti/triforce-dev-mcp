@@ -758,12 +758,12 @@ function ailinux_nova_dark_customize_preview_js() {
 add_action( 'customize_preview_init', 'ailinux_nova_dark_customize_preview_js' );
 
 /**
- * Set posts per page to 125 for blog and archive views
+ * Set posts per page to 12 for blog and archive views
  */
 function ailinux_nova_dark_posts_per_page( $query ) {
     if ( ! is_admin() && $query->is_main_query() ) {
         if ( is_home() || is_archive() ) {
-            $query->set( 'posts_per_page', 125 );
+            $query->set( 'posts_per_page', 12 );
         }
     }
 }
@@ -821,10 +821,174 @@ function ailinux_nova_dark_enqueue_consent_css() {
 }
 add_action( 'wp_enqueue_scripts', 'ailinux_nova_dark_enqueue_consent_css', 35 );
 
+/**
+ * Load the MCP registry UI from a real theme asset. Keeping this JavaScript out
+ * of post_content prevents wpautop/texturize and Cloudflare Rocket Loader from
+ * rewriting executable code on the MCP page.
+ */
+function ailinux_nova_dark_enqueue_mcp_server_page() {
+    if ( ! is_page( 1521678 ) && ! is_page( 'mcp-server' ) ) {
+        return;
+    }
+
+    wp_enqueue_style(
+        'ailinux-mcp-server',
+        AILINUX_NOVA_DARK_URI . '/dist/mcp-server.css',
+        array(),
+        ailinux_nova_dark_get_asset_version( '/dist/mcp-server.css' )
+    );
+
+    wp_enqueue_script(
+        'ailinux-mcp-server',
+        AILINUX_NOVA_DARK_URI . '/dist/mcp-server.js',
+        array(),
+        ailinux_nova_dark_get_asset_version( '/dist/mcp-server.js' ),
+        true
+    );
+}
+add_action( 'wp_enqueue_scripts', 'ailinux_nova_dark_enqueue_mcp_server_page', 36 );
+
+/**
+ * Fetch the public/non-admin MCP catalogue server-side. The page therefore has
+ * useful content even when browser JavaScript, CORS or CDN script rewriting is
+ * unavailable. Discovery remains separate from call-time authorization.
+ *
+ * @return array|WP_Error
+ */
+function ailinux_nova_dark_get_public_mcp_tools() {
+    $cache_key = 'ailinux_public_mcp_tools_v1';
+    $cached = get_transient( $cache_key );
+    if ( is_array( $cached ) ) {
+        return $cached;
+    }
+
+    $response = wp_remote_post(
+        'https://api.ailinux.me/v1/mcp',
+        array(
+            'timeout' => 10,
+            'headers' => array(
+                'Content-Type' => 'application/json',
+                'Accept'       => 'application/json',
+            ),
+            'body' => wp_json_encode(
+                array(
+                    'jsonrpc' => '2.0',
+                    'id'      => 1,
+                    'method'  => 'tools/list',
+                    'params'  => array( 'inventory' => 'all' ),
+                )
+            ),
+        )
+    );
+
+    if ( is_wp_error( $response ) ) {
+        return $response;
+    }
+
+    if ( 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+        return new WP_Error( 'mcp_http_error', 'MCP registry returned a non-200 response.' );
+    }
+
+    $payload = json_decode( wp_remote_retrieve_body( $response ), true );
+    $tools = $payload['result']['tools'] ?? null;
+    if ( ! is_array( $tools ) ) {
+        return new WP_Error( 'mcp_payload_error', 'MCP registry response did not contain a tool list.' );
+    }
+
+    set_transient( $cache_key, $tools, MINUTE_IN_SECONDS );
+    return $tools;
+}
+
+/**
+ * Replace the MCP page's loading placeholders with a server-rendered snapshot.
+ */
+function ailinux_nova_dark_render_mcp_tools( $content ) {
+    if ( ! is_page( 1521678 ) && ! is_page( 'mcp-server' ) ) {
+        return $content;
+    }
+
+    $tools = ailinux_nova_dark_get_public_mcp_tools();
+    if ( is_wp_error( $tools ) ) {
+        $status_html = '<div class="mcp-status bad" id="mcp-status"><i></i><span>Live tool list unavailable right now.</span></div>';
+        return preg_replace(
+            '#<div class="mcp-status" id="mcp-status"><i></i><span>.*?</span></div>#s',
+            $status_html,
+            $content,
+            1
+        );
+    }
+
+    $categories = array();
+    $cards = '';
+    foreach ( $tools as $tool ) {
+        if ( ! is_array( $tool ) || empty( $tool['name'] ) ) {
+            continue;
+        }
+
+        $groups = isset( $tool['x_inventory_groups'] ) && is_array( $tool['x_inventory_groups'] ) ? $tool['x_inventory_groups'] : array();
+        $category = (string) ( $tool['x_task_inventory'] ?? $tool['x_inventory'] ?? ( $groups[0] ?? 'other' ) );
+        $categories[ $category ] = true;
+
+        $name = (string) ( $tool['x_display_name'] ?? $tool['name'] );
+        $description = (string) ( $tool['description'] ?? '' );
+        $access = (string) ( $tool['x_access'] ?? 'policy' );
+        $execution = (string) ( $tool['x_execution'] ?? 'server' );
+        $hint = (string) ( $tool['x_usage_hint'] ?? '' );
+        $search_text = strtolower( $name . ' ' . $description . ' ' . $category . ' ' . $access . ' ' . $execution . ' ' . $hint );
+
+        $cards .= '<article class="mcp-tool" data-category="' . esc_attr( $category ) . '" data-search="' . esc_attr( $search_text ) . '">';
+        $cards .= '<h4>' . esc_html( $name ) . '</h4>';
+        $cards .= '<p>' . esc_html( $description ) . '</p>';
+        $cards .= '<div class="mcp-tags">';
+        foreach ( array_filter( array( $category, $access, $execution, $hint ) ) as $tag ) {
+            $cards .= '<span class="mcp-tag">' . esc_html( (string) $tag ) . '</span>';
+        }
+        $cards .= '</div></article>';
+    }
+
+    ksort( $categories, SORT_NATURAL | SORT_FLAG_CASE );
+    $select = '<select id="mcp-filter" aria-label="Filter MCP tools"><option value="">All categories</option>';
+    foreach ( array_keys( $categories ) as $category ) {
+        $select .= '<option value="' . esc_attr( $category ) . '">' . esc_html( $category ) . '</option>';
+    }
+    $select .= '</select>';
+
+    $count = count( $tools );
+    $status_html = '<div class="mcp-status ok" id="mcp-status"><i></i><span>Live registry connected - ' . esc_html( (string) $count ) . ' tools currently advertised for this public session</span></div>';
+
+    $content = preg_replace(
+        '#<div class="mcp-status" id="mcp-status"><i></i><span>.*?</span></div>#s',
+        $status_html,
+        $content,
+        1
+    );
+    $content = preg_replace(
+        '#<select id="mcp-filter" aria-label="Filter MCP tools">.*?</select>#s',
+        $select,
+        $content,
+        1
+    );
+    $content = preg_replace(
+        '#<div class="mcp-tools" id="mcp-tools"></div>#',
+        '<div class="mcp-tools" id="mcp-tools">' . $cards . '</div>',
+        $content,
+        1
+    );
+    $content = preg_replace(
+        '#<span class="mcp-count" id="mcp-count"></span>#',
+        '<span class="mcp-count" id="mcp-count">' . esc_html( (string) $count ) . ' / ' . esc_html( (string) $count ) . ' tools</span>',
+        $content,
+        1
+    );
+
+    return $content;
+}
+add_filter( 'the_content', 'ailinux_nova_dark_render_mcp_tools', 20 );
+
 // FIX 2026-04-11: Rocket Loader protection + optional CSP nonce for theme scripts
 add_filter('script_loader_tag', function ($tag, $handle, $src) {
     // 1. Prevent Rocket Loader from deferring critical scripts (ALWAYS active)
-    $cfasync_handles = ['ailinux-nova-dark-color-mode', 'ailinux-nova-dark-app', 'ailinux-nova-dark-mobile-menu'];
+    $cfasync_handles = ['ailinux-nova-dark-color-mode', 'ailinux-nova-dark-app', 'ailinux-nova-dark-mobile-menu', 'ailinux-mcp-server'];
     if (in_array($handle, $cfasync_handles, true) && strpos($tag, 'data-cfasync') === false) {
         $tag = str_replace('<script ', '<script data-cfasync="false" ', $tag);
     }
