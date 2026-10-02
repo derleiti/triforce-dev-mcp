@@ -233,6 +233,14 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
 
+    # Mercatai autonomous agent marketplace
+    mercatai_api_key: str | None = Field(default=None, validation_alias="MERCATAI_API_KEY")
+    mercatai_agent_id: str | None = Field(default=None, validation_alias="MERCATAI_AGENT_ID")
+    mercatai_agent_uuid: str | None = Field(default=None, validation_alias="MERCATAI_AGENT_UUID")
+    mercatai_developer_api_key: str | None = Field(default=None, validation_alias="MERCATAI_DEVELOPER_API_KEY")
+    mercatai_base_url: str = Field(default="https://mercatai.eu", validation_alias="MERCATAI_BASE_URL")
+    mercatai_timeout_seconds: int = Field(default=30, ge=5, le=120, validation_alias="MERCATAI_TIMEOUT_SECONDS")
+
     # Mistral
     mistral_api_key: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
     mistral_organisation_id: str | None = Field(default=None, validation_alias="MISTRAL_ORG_ID")

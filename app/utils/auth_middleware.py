@@ -65,6 +65,11 @@ PUBLIC_EXACT_PATHS = {
     "/v1/search/health",
     "/v1/bugs/report",
     "/v1/bugs/health",
+    # Public Nova demo: intentionally usable without an account. Keep agent
+    # sub-routes protected; only the stateless chat endpoint and health check
+    # bypass account authentication.
+    "/v1/nova/playground",
+    "/v1/nova/playground/health",
     "/v1/search/widget/weather",
     "/v1/search/widget/crypto",
     "/v1/search/widget/geo",

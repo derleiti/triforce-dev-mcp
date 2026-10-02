@@ -525,10 +525,23 @@ def _normalize_display_tool_result(name: str, result: Dict[str, Any]) -> Dict[st
         return result
 
     content = result.get("content")
-    if isinstance(content, list) and any(
-        isinstance(block, dict) and block.get("type") == "image" for block in content
-    ):
-        return result
+    if isinstance(content, list):
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "image"):
+                continue
+            encoded = block.get("data")
+            mime = str(block.get("mimeType") or block.get("mime_type") or "").strip().lower()
+            structured = result.get("structuredContent")
+            if isinstance(encoded, str) and encoded and mime.startswith("image/") and isinstance(structured, dict):
+                # Some connector transports surface only structuredContent and drop
+                # native MCP image blocks. Mirror the verified image as a data URL
+                # while preserving the canonical image content block for MCP clients.
+                structured = dict(structured)
+                structured.setdefault("mimeType", mime)
+                structured["data_url"] = f"data:{mime};base64,{encoded}"
+                result = dict(result)
+                result["structuredContent"] = structured
+            return result
 
     structured = result.get("structuredContent")
     if not isinstance(structured, dict):
@@ -586,6 +599,7 @@ def _normalize_display_tool_result(name: str, result: Dict[str, Any]) -> Dict[st
         if key not in {"data", "data_url", "dataUrl"}
     }
     metadata["mimeType"] = mime
+    metadata["data_url"] = f"data:{mime};base64,{encoded}"
     return {
         "content": [{"type": "image", "data": encoded, "mimeType": mime}],
         "structuredContent": metadata,

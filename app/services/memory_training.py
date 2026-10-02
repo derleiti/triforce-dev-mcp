@@ -14,6 +14,7 @@ from .episodic_memory import redact
 
 _SIGNAL_QUERIES = (
     "project_memory_revision",
+    "feature_experience",
     "run_completed",
     "tool_failed",
     "test_failed",
@@ -56,7 +57,7 @@ async def _episodic_signals(provider: Any, limit: int) -> tuple[list[dict[str, A
         for row in rows:
             meta = row.get("metadata") or {}
             event_type = str(meta.get("event_type") or "")
-            if event_type in {"project_memory_revision", "run_completed"} | _FAILURE_EVENTS:
+            if event_type in {"project_memory_revision", "feature_experience", "run_completed"} | _FAILURE_EVENTS:
                 compact[int(row["id"])] = row
 
     by_project: dict[str, list[int]] = defaultdict(list)
@@ -115,6 +116,27 @@ def _distill_project_memory(rows: list[dict[str, Any]]) -> tuple[list[dict[str, 
             "server_seq": meta.get("server_seq"),
             "source": meta.get("source"),
         }
+        if nested.get("schema") == "aicoder-feature-experience-v1":
+            best.append({
+                "kind": "verified_feature_experience",
+                "title": str(outer.get("title") or row.get("title") or "Verified feature experience")[:240],
+                "task": task,
+                "summary": str(nested.get("summary") or "")[:3000],
+                "architecture": str(nested.get("architecture") or "")[:2200],
+                "verification": str(nested.get("verification") or "")[:1400],
+                "lessons": str(nested.get("lessons") or "")[:1200],
+                "future_features": str(nested.get("future_features") or "")[:1200],
+                "verification_kind": str(nested.get("verification_kind") or "")[:64],
+                "confidence": 0.95,
+                "evidence": evidence,
+            })
+            regressions.append({
+                "kind": "feature_regression",
+                "title": f"Regression for verified feature: {task[:180]}",
+                "verification": str(nested.get("verification") or "")[:1400],
+                "evidence": evidence,
+            })
+            continue
         best.append({
             "kind": "verified_workflow",
             "title": str(outer.get("title") or row.get("title") or "Completed workflow")[:240],
@@ -130,6 +152,49 @@ def _distill_project_memory(rows: list[dict[str, Any]]) -> tuple[list[dict[str, 
             "evidence": evidence,
         })
     return best, regressions
+
+
+def _distill_feature_experiences(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    practices: list[dict[str, Any]] = []
+    regressions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        meta = row.get("metadata") or {}
+        if meta.get("event_type") != "feature_experience" or meta.get("verification_state") != "verified":
+            continue
+        fingerprint = str(meta.get("fingerprint") or row.get("id") or "")
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        task = str(meta.get("task") or row.get("title") or "")[:1000]
+        evidence = {
+            "observation_id": row.get("id"),
+            "project": row.get("project"),
+            "project_key": meta.get("project_key"),
+            "repo": meta.get("repo"),
+            "commit": meta.get("commit"),
+            "source": meta.get("source"),
+            "fingerprint": fingerprint[:32],
+        }
+        practices.append({
+            "kind": "verified_feature_experience",
+            "title": str(row.get("title") or f"Feature experience: {task}")[:240],
+            "task": task,
+            "summary": str(meta.get("summary") or "")[:3000],
+            "architecture": str(meta.get("architecture") or "")[:2200],
+            "verification": str(meta.get("verification") or "")[:1400],
+            "lessons": str(meta.get("lessons") or "")[:1200],
+            "future_features": str(meta.get("future_features") or "")[:1200],
+            "confidence": 0.95,
+            "evidence": evidence,
+        })
+        regressions.append({
+            "kind": "feature_regression",
+            "title": f"Regression for verified feature: {task[:180]}",
+            "verification": str(meta.get("verification") or "")[:1400],
+            "evidence": evidence,
+        })
+    return practices, regressions
 
 
 def _distill_runtime(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -211,6 +276,7 @@ async def training_digest(*, engine: Any, limit: int = 50) -> dict[str, Any]:
     bugfix_rows = list_training_resolutions(limit=limit)
 
     workflow_practices, workflow_regressions = _distill_project_memory(episodic)
+    feature_practices, feature_regressions = _distill_feature_experiences(episodic)
     successful_runs, anti_patterns = _distill_runtime(episodic)
     bugfix_practices, bug_regressions = _distill_bugfixes(bugfix_rows)
 
@@ -223,9 +289,9 @@ async def training_digest(*, engine: Any, limit: int = 50) -> dict[str, Any]:
             "episodic_selected": len(episodic),
             "documented_resolved_bugs": len(bugfix_rows),
         },
-        "best_practices": workflow_practices + bugfix_practices,
+        "best_practices": workflow_practices + feature_practices + bugfix_practices,
         "successful_runs": successful_runs,
         "anti_patterns": anti_patterns,
-        "regression_candidates": workflow_regressions + bug_regressions,
+        "regression_candidates": workflow_regressions + feature_regressions + bug_regressions,
         "warnings": warnings[:20],
     })

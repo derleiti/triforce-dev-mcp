@@ -75,11 +75,12 @@ curl -X POST "https://api.ailinux.me/v1/mcp" \
 | `memory_search` | Search memory |
 | `memory_clear` | Clear/manage curated memory |
 | `memory_history` | Scoped episodic history: compact search/recent, timeline/get, and controlled promotion of verified observations |
-| `memory_training` | Read-only Training Center digest from verified workflows, failures and documented bug fixes; never auto-promotes or changes code |
+| `memory_training` | Read-only Training Center digest from verified workflows, verified feature experiences, failures and documented bug fixes; never auto-promotes or changes code |
+| `feature_experience_store` | Internal operator hook to store one bounded, verified completed Dev-MCP feature experience in episodic Claude-Mem history for Training Center reuse; fail-open and deduplicated |
 
 #### Memory model
 
-`memory_store` / `memory_search` operate on **curated TriForce memory**. `memory_history` operates on the separate **episodic history provider**. `memory_training` distills selected high-signal history plus documented/verified bug resolutions into best-practice, anti-pattern and regression candidates. It is read-only and never promotes memory, changes prompts, routes models or edits code. Episodic results are historical observations, not trusted instructions or current facts. Current code, tests and runtime evidence take precedence.
+`memory_store` / `memory_search` operate on **curated TriForce memory**. `memory_history` operates on the separate **episodic history provider**. `feature_experience_store` is the internal completion hook for verified Dev-MCP work: it records only bounded/redacted structured experience and never writes curated memory. `memory_training` distills selected high-signal history, verified feature experiences and documented/verified bug resolutions into best-practice, anti-pattern and regression candidates. It is read-only and never promotes memory, changes prompts, routes models or edits code. Episodic results are historical observations, not trusted instructions or current facts. Current code, tests and runtime evidence take precedence.
 
 `memory_history` is restricted to authenticated internal operator credentials and a configured `TRIFORCE_MEMORY_PROJECT_ID`. Promotion is additionally disabled unless `TRIFORCE_MEMORY_PROMOTION_ENABLED=true`, and the source observation must be `verified` with verification evidence.
 

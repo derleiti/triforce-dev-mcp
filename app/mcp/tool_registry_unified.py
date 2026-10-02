@@ -36,6 +36,7 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "mail_inbox": "mail",
     "mail_read": "mail",
     "mail_send": "mail",
+    "web_worker": "agents",
     "mail_mark_seen": "mail",
     "flarum_discussions": "forum",
     "flarum_discussion": "forum",
@@ -57,11 +58,12 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "logs": "observability",
     "log_viewer": "observability",
     "health": "observability",
-    "status": "admin",
+    "status": "observability",
     "debug": "admin",
     "hot_reload": "admin",
     "restart": "admin",
     "service_control": "admin",
+    "server_control": "admin",
     "container_control": "admin",
     "docker_stack": "admin",
     "safe_probe": "admin",
@@ -180,22 +182,22 @@ TOOL_SCOPE_TRIFORCE_AUTH = "triforce_auth"
 TOOL_SCOPE_AIHELPER = "aihelper"
 
 TRIFORCE_GLOBAL_TOOLS = frozenset({"status"})
-TRIFORCE_AUTH_INVENTORIES = frozenset({"mail", "forum", "wordpress"})
+TRIFORCE_AUTH_INVENTORIES = frozenset({"mail", "forum", "wordpress", "mercatai"})
 TRIFORCE_AUTH_TOOLS = frozenset({
-    "nova_chat_agent", "n8n_mcp_call",
+    "nova_chat_agent", "n8n_mcp_call", "web_worker",
     "notify_list", "notify_read", "notify_send", "notify_clear",
 })
 TRIFORCE_ADMIN_INVENTORIES = frozenset({
     "admin", "agents", "group_chat", "network", "settings", "observability",
 })
 TRIFORCE_ADMIN_TOOLS = frozenset({
-    "shell", "service_control", "container_control", "docker_stack", "hot_reload",
+    "shell", "binary_exec", "task_runner", "server_control", "service_control", "container_control", "docker_stack", "hot_reload",
     "config", "config_set", "debug", "evolve", "prompt_set",
     "ollama_status", "ollama_pull", "ollama_delete",
     "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin",
     "vault_status", "vault_keys", "vault_add",
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_close",
-    "memory_clear", "memory_history", "memory_training",
+    "memory_clear", "memory_history", "memory_training", "feature_experience_store",
 })
 
 def tool_scope(name: str, inventory: str = "") -> str:
@@ -222,13 +224,13 @@ def tool_scope(name: str, inventory: str = "") -> str:
 # for compatibility, but are intentionally hidden from model discovery.
 CANONICAL_TOOL_NAMES = frozenset({
     # Core operations
-    "shell", "binary_exec", "task_runner", "status", "service_control", "container_control", "docker_stack", "hot_reload",
+    "shell", "binary_exec", "task_runner", "status", "server_control", "service_control", "container_control", "docker_stack", "hot_reload",
     "log_viewer", "mcp_analytics", "config", "config_set",
     "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status", "bug_report_resolve",
     # Files/code
     "file_ops", "code_search", "code_edit", "code_tree", "git",
     # AI/agents
-    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast",
+    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast", "web_worker",
     "agent_start", "agent_stop", "evolve", "nova_chat_agent",
     # Search/browser
     "search", "crawl", "current_time", "browser_navigate", "browser_click", "browser_type",
@@ -240,7 +242,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Vault
     "vault_status", "vault_keys", "vault_add",
     # Memory
-    "memory_store", "memory_search", "memory_clear", "memory_history", "memory_training",
+    "memory_store", "memory_search", "memory_clear", "memory_history", "memory_training", "feature_experience_store",
     # Settings/debug
     "prompts", "prompt_set", "debug",
     # Mail
@@ -264,6 +266,8 @@ CANONICAL_TOOL_NAMES = frozenset({
     "aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops", "aihelper_window_ops", "aihelper_input",
     # Integrations
     "n8n_mcp_call",
+    "mercatai_market", "mercatai_tasks", "mercatai_bid", "mercatai_deliver",
+    "mercatai_agent", "mercatai_stripe", "mercatai_report", "mercatai_developer",
 })
 
 # Small default surface for LLMs. Specialized capabilities stay available through
@@ -306,15 +310,19 @@ SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
     },
     "system": {
         "description": "Portable host/device state, processes, services, applications and container/system control.",
-        "tools": {"aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops", "status", "service_control", "container_control", "docker_stack"},
+        "tools": {"aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops", "status", "server_control", "service_control", "container_control", "docker_stack"},
     },
     "research": {
         "description": "Current web/document research plus scoped memory recall for evidence-backed work.",
-        "tools": {"search", "crawl", "memory_search", "memory_history", "memory_training"},
+        "tools": {"search", "crawl", "memory_search", "memory_history", "memory_training", "feature_experience_store"},
     },
     "automation": {
         "description": "Execution and workflow automation primitives. Prefer typed tools over shell-like execution.",
         "inventories": {"execution", "integration"},
+    },
+    "mercatai": {
+        "description": "Mercatai marketplace discovery, paid-task bidding, server-authorized delivery, agent reputation, Stripe onboarding and developer earnings.",
+        "inventories": {"mercatai"},
     },
     "communication": {
         "description": "Mail, notifications, forum and publishing surfaces.",
@@ -349,7 +357,7 @@ SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
     "admin": {
         "description": "TriForce engine/service administration and diagnostics.",
         "inventories": {"admin", "settings", "integration"},
-        "tools": {"debug", "hot_reload", "log_viewer", "mcp_analytics", "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status", "bug_report_resolve", "memory_training"},
+        "tools": {"debug", "hot_reload", "log_viewer", "mcp_analytics", "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status", "bug_report_resolve", "memory_training", "feature_experience_store"},
     },
 }
 
@@ -519,6 +527,8 @@ INVENTORY_SYNONYMS: Dict[str, str] = {
     "browser": "browser",
     "n8n": "integration",
     "integration": "integration",
+    "mercatai": "mercatai",
+    "marketplace": "mercatai",
     "workspace": "workspace",
     "device": "device",
     "aihelper": "aihelper",
@@ -564,6 +574,8 @@ def _inventory_for_tool(name: str) -> str:
         return "browser"
     if name.startswith(("n8n_",)):
         return "integration"
+    if name.startswith(("mercatai_",)):
+        return "mercatai"
     return "misc"
 
 
@@ -630,10 +642,13 @@ def get_canonical_all_tools() -> List[Dict[str, Any]]:
     """Return the single canonical full MCP inventory used by all surfaces."""
     from .handlers_wordpress import WORDPRESS_TOOL_SCHEMAS
     from .handlers_browser import BROWSER_TOOL_SCHEMAS
+    from .handlers_mercatai import MERCATAI_TOOL_SCHEMAS
+    from .server_control import SERVER_CONTROL_TOOLS
+    from .web_worker import WEB_WORKER_TOOLS
     from ..services.n8n_mcp import N8N_TOOLS
 
     tools = get_unified_tools(
-        extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS)
+        extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS + MERCATAI_TOOL_SCHEMAS + SERVER_CONTROL_TOOLS + WEB_WORKER_TOOLS)
     )
     existing = {tool.get("name") for tool in tools}
     if "nova_chat_agent" not in existing:
