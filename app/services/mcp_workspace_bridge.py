@@ -974,6 +974,19 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
                     "WORKSPACE_COMPUTE_SANDBOX_FAILED", str(exc),
                     tool=name, retryable=False, sandboxed=True,
                 )
+        if runtime == "openshell":
+            from .workspace_compute_openshell import execute_openshell_compute
+            identity = affinity_sid or sid or str(binding.get("session_id") or binding.get("lease_id") or "workspace")
+            try:
+                return await execute_openshell_compute(
+                    connection=connection, arguments=arguments, mode=mode,
+                    capabilities=capabilities, identity=identity,
+                )
+            except (ValueError, RuntimeError) as exc:
+                return _tool_error(
+                    "WORKSPACE_COMPUTE_SANDBOX_FAILED", str(exc),
+                    tool=name, retryable=False, sandboxed=True,
+                )
 
     try:
         result = await connection.send_tool_call(
