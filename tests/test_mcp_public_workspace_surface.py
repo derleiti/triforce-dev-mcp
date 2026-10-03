@@ -576,6 +576,14 @@ def test_helper_release_catalog_is_manifest_driven_with_hashes_and_linux_alias(t
     assert catalog["linux"]["available"] is True
     assert catalog["latest_version"] == "2.90.29"
 
+    document = json.loads(manifest.read_text())
+    document["artifacts"]["linux-appimage"]["version"] = "2.90.30"
+    manifest.write_text(json.dumps(document))
+    catalog = _helper_release_catalog()
+    assert catalog["linux-appimage"]["version"] == "2.90.30"
+    assert catalog["linux"]["version"] == "2.90.30"
+    assert catalog["latest_version"] == "2.90.29"
+
 
 
 def test_helper_download_routes_support_head_for_health_checks():

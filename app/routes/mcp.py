@@ -177,10 +177,11 @@ def _helper_release_catalog() -> dict:
         artifact = release_root / filename
         expected_size = int(meta.get("size") or 0)
         available = bool(filename and artifact.is_file() and (not expected_size or artifact.stat().st_size == expected_size))
+        artifact_version = str(meta.get("version") or version)
         catalog[str(platform)] = {
             "available": available,
             "platform": str(platform),
-            "version": version,
+            "version": artifact_version,
             "filename": filename,
             "size": expected_size,
             "media_type": str(meta.get("media_type") or "application/octet-stream"),
