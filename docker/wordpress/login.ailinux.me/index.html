@@ -876,9 +876,21 @@ async function completeBrowserLogin(data, fallbackEmail){
     }catch(err){showMsg('login-msg','App-Login konnte nicht abgeschlossen werden: '+err.message);return false;}
   }
 
-  const redirect=new URLSearchParams(location.search).get('redirect')||'https://ailinux.me/';
+  const params=new URLSearchParams(location.search);
+  const redirect=params.get('redirect')||'https://ailinux.me/';
   let target=null;
   try{target=new URL(redirect)}catch{}
+  const isOpenHeatTarget=!!target && target.origin==='https://openheat.dating' && target.pathname==='/auth/callback';
+  if(isOpenHeatTarget){
+    const openheatState=params.get('openheat_state')||'';
+    if(openheatState.length<16){showMsg('login-msg','OpenHeat Login-State fehlt oder ist ungültig.');return false;}
+    try{
+      const issued=await createOneTimeBrowserCode(data.token,{purpose:'openheat',redirect_uri:'https://openheat.dating/auth/callback',state:openheatState});
+      if(!issued.handoff_url)throw new Error('OpenHeat handoff URL missing');
+      location.replace(issued.handoff_url);
+      return true;
+    }catch(err){showMsg('login-msg','OpenHeat Login konnte nicht abgeschlossen werden: '+err.message);return false;}
+  }
   const isWordPressTarget=!!target && target.protocol==='https:' && ['ailinux.me','www.ailinux.me'].includes(target.hostname);
   if(isWordPressTarget){
     try{
