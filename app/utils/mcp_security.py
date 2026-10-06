@@ -255,7 +255,7 @@ EXTERNAL_TOOL_ALLOWLIST_FULL: Set[str] = {
 # Tools die NIE extern auftauchen und das internal_full Profil brauchen.
 PRIVILEGED_TOOLS: Set[str] = {
     # Direkter Code/Shell-Zugriff
-    "shell", "task_runner", "binary_exec",
+    "shell", "server_control", "task_runner", "binary_exec",
     "custom_exec", "custom_binary",
     "remote_exec", "remote_admin", "remote_task",
     # Service / Container Aenderungen
@@ -429,9 +429,32 @@ def is_ai_coder_request(request) -> bool:
 def filter_tools_for_external(
     tools: List[Dict[str, Any]], request=None,
 ) -> List[Dict[str, Any]]:
-    """Default-deny external catalogue using the normal MCP external policy."""
-    allowed = EXTERNAL_TOOL_ALLOWLIST
-    return [t for t in tools if t.get("name") in allowed]
+    """Expose one complete non-admin catalogue to external MCP clients.
+
+    Discovery is intentionally broader than execution authority: ChatGPT/WebMCP
+    clients must be able to learn the same canonical non-admin vocabulary even
+    before account auth or a Helper share is attached.  ``is_tool_allowed`` and
+    the workspace share-manifest remain the authoritative execution gates.
+    TriForce engine/admin tools are the only canonical tools hidden here.
+    """
+    state = getattr(request, "state", None) if request is not None else None
+    auth_method = str(getattr(state, "mcp_auth_method", "") or "")
+    public_guest = auth_method == "public_guest"
+    result: List[Dict[str, Any]] = []
+    for tool in tools:
+        name = str(tool.get("name") or "")
+        scope = str(tool.get("x_scope") or "global")
+        if scope == "triforce_admin":
+            continue
+        # Shared-memory writes remain undiscoverable to anonymous guests. This is
+        # a persistence/poisoning boundary, not merely an execution permission.
+        if public_guest and name in PUBLIC_GUEST_DENIED_TOOLS:
+            continue
+        cloned = dict(tool)
+        if scope == "triforce_auth":
+            cloned["x_requires_auth"] = True
+        result.append(cloned)
+    return result
 
 
 def _external_action_is_read_only(name: str, arguments: Optional[Dict[str, Any]]) -> bool:
@@ -446,25 +469,76 @@ def _external_action_is_read_only(name: str, arguments: Optional[Dict[str, Any]]
     return True
 
 
-def is_tool_allowed(tool_name: str, request, arguments: Optional[Dict[str, Any]] = None) -> bool:
-    """
-    Darf der Caller dieses Tool aufrufen?
+def _is_authenticated_request(request) -> bool:
+    state = getattr(request, "state", None) if request is not None else None
+    method = str(getattr(state, "mcp_auth_method", "") or "").strip().lower()
+    user = str(getattr(state, "mcp_auth_user", "") or "").strip()
+    return bool(method and method not in {"public_guest", "none", "anonymous"} and user)
 
-    - Privilegierte Tools: nur mit internal_full.
-    - Gemischte Tools: extern nur in read-only Modi.
-    - Sonst: Allowlist oder internal_full.
+
+def is_tool_allowed(tool_name: str, request, arguments: Optional[Dict[str, Any]] = None) -> bool:
+    """Authorize one server-side MCP call after discovery filtering.
+
+    Global tools follow the external allowlist/read-only rules. TriForce account
+    integrations (mail/forum/WordPress/notifications/Nova/n8n) require a real
+    authenticated identity. TriForce engine/admin tools remain internal_full only.
+    AILinux Helper tools are authorized separately by the workspace lease/share
+    manifest and are routed before this server-side gate.
     """
     name = tool_name[9:] if tool_name.startswith("triforce_") else tool_name
+    # A claimed ticket worker is intentionally narrower than its underlying
+    # authenticated/internal identity. Enforce this before internal_full so a
+    # support ticket can never elevate by inheriting the browser connector role.
+    try:
+        from app.mcp.web_worker import worker_mode_for_request, restricted_worker_tool_allowed
+        worker_mode = worker_mode_for_request(request)
+        if worker_mode in {"ticket", "market"}:
+            return restricted_worker_tool_allowed(worker_mode, name, arguments)
+    except Exception:
+        # Fail closed only when the request explicitly carries worker state.
+        state = getattr(request, "state", None) if request is not None else None
+        if str(getattr(state, "mcp_worker_mode", "") or "") in {"ticket", "market"}:
+            return False
     internal_full = is_internal_full_request(request)
+    if internal_full:
+        return True
+    try:
+        from app.mcp.tool_registry_unified import (
+            CANONICAL_TOOL_NAMES,
+            TOOL_SCOPE_TRIFORCE_ADMIN,
+            TOOL_SCOPE_TRIFORCE_AUTH,
+            tool_scope,
+        )
+        # Scope metadata governs the canonical surface. Legacy compatibility
+        # handlers keep their established external allowlist semantics until they
+        # are removed or explicitly migrated; otherwise a broad legacy inventory
+        # label (for example service_status -> admin) would silently break AICoder.
+        scope = tool_scope(name) if name in CANONICAL_TOOL_NAMES else "legacy"
+    except Exception:
+        scope = "legacy"
+    if scope == TOOL_SCOPE_TRIFORCE_ADMIN:
+        return False
+    if scope == TOOL_SCOPE_TRIFORCE_AUTH:
+        return _is_authenticated_request(request)
     if name in PRIVILEGED_TOOLS:
-        return internal_full
+        return False
+    if name in PUBLIC_GUEST_DENIED_TOOLS and not _is_authenticated_request(request):
+        return False
     if name in EXTERNAL_TOOL_ALLOWLIST:
-        return internal_full or _external_action_is_read_only(name, arguments)
-    # Unbekannte Tools: nur intern erlaubt (default-deny)
-    return internal_full
+        return _external_action_is_read_only(name, arguments)
+    return False
 
 
 # Legacy-Alias: EXTERNAL_TOOL_ALLOWLIST == FULL fuer Backward-Compat
+# External tools that are useful for authenticated clients but must never be
+# writable by anonymous/public_guest callers.  Memory writes target the shared
+# TriStar store, so allowing them for guests would create a persistence /
+# memory-poisoning channel.
+PUBLIC_GUEST_DENIED_TOOLS: Set[str] = {
+    "memory_store",
+    "tristar_memory_store",
+}
+
 EXTERNAL_TOOL_ALLOWLIST: Set[str] = EXTERNAL_TOOL_ALLOWLIST_FULL
 
 
@@ -474,6 +548,7 @@ __all__ = [
     "EXTERNAL_TOOL_ALLOWLIST_REMOTE",
     "AI_CODER_TOOL_ALLOWLIST",
     "PRIVILEGED_TOOLS",
+    "PUBLIC_GUEST_DENIED_TOOLS",
     "client_ip",
     "is_ai_coder_request",
     "is_internal_full_request",

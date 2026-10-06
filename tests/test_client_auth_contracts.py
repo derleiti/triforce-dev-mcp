@@ -166,3 +166,114 @@ async def test_google_login_existing_user_does_not_require_password_or_wordpress
     assert login.email == email
     assert login.token
     assert client_auth.USER_REGISTRY[email]["google_sub"] == "google-sub-123"
+
+@pytest.mark.asyncio
+async def test_signed_user_session_restores_client_after_process_restart(monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "owner@example.test")
+    client_auth.USER_REGISTRY["owner@example.test"] = {"tier": "enterprise", "name": "Owner"}
+    login = client_auth.issue_user_login_response("owner@example.test", client_auth.USER_REGISTRY["owner@example.test"])
+    # Simulate the process-local registries being lost on service restart.
+    client_auth.CLIENT_REGISTRY.clear()
+    client_auth.ACTIVE_SESSIONS.clear()
+
+    current = await client_auth.get_current_client(f"Bearer {login.token}")
+
+    assert current["client_id"] == login.client_id
+    assert current["role"] == "admin"
+    assert current["authority_role"] == "human_owner"
+    assert current["client"]["restored_from_signed_session"] is True
+
+
+@pytest.mark.asyncio
+async def test_require_admin_uses_organizational_authority_not_enterprise_tier(monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    email = "enterprise-member@example.test"
+    client_auth.USER_REGISTRY[email] = {"tier": "enterprise", "name": "Member"}
+    login = client_auth.issue_user_login_response(email, client_auth.USER_REGISTRY[email])
+
+    with pytest.raises(client_auth.HTTPException) as exc:
+        await client_auth.require_admin(f"Bearer {login.token}")
+
+    assert exc.value.status_code == 403
+
+@pytest.mark.asyncio
+async def test_wordpress_backed_local_login_refreshes_authoritative_tier(monkeypatch):
+    email = "wp-paid@example.test"
+    client_auth.USER_REGISTRY[email] = {
+        "password_hash": client_auth.hash_secret("secret"),
+        "tier": "free",
+        "name": "Cached User",
+        "auth_provider": "wordpress",
+        "nova_entitlements": {"copa_ocr": True},
+    }
+    monkeypatch.setattr(client_auth, "save_user_to_file", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(client_auth, "verify_wordpress_login", lambda got_email, password: {
+        "email": got_email,
+        "name": "WordPress User",
+        "tier": "paid",
+        "wordpress_roles": ["subscriber"],
+        "wordpress_can_admin": False,
+        "authority_role": "",
+        "nova_entitlements": {"copa_ocr": True},
+    })
+
+    login = await client_auth.user_login(
+        client_auth.UserLoginRequest(email=email, password="secret")
+    )
+
+    assert login.tier == "pro"
+    assert client_auth.USER_REGISTRY[email]["tier"] == "paid"
+    assert client_auth.USER_REGISTRY[email]["auth_provider"] == "wordpress"
+    assert client_auth.USER_REGISTRY[email]["wordpress_authority_verified_at"]
+
+
+@pytest.mark.asyncio
+async def test_wordpress_backed_login_fails_closed_when_wordpress_rejects_cached_password(monkeypatch):
+    email = "wp-password-changed@example.test"
+    client_auth.USER_REGISTRY[email] = {
+        "password_hash": client_auth.hash_secret("old-secret"),
+        "tier": "pro",
+        "name": "Cached Pro",
+        "auth_provider": "wordpress",
+        "nova_entitlements": {"copa_ocr": True},
+    }
+    monkeypatch.setattr(client_auth, "verify_wordpress_login", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(client_auth.HTTPException) as exc:
+        await client_auth.user_login(
+            client_auth.UserLoginRequest(email=email, password="old-secret")
+        )
+
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_wordpress_backed_login_accepts_new_password_without_local_hash_sync(monkeypatch):
+    email = "wp-password-changed@example.test"
+    client_auth.USER_REGISTRY[email] = {
+        "password_hash": client_auth.hash_secret("old-secret"),
+        "tier": "free",
+        "name": "Cached User",
+        "auth_provider": "wordpress",
+        "nova_entitlements": {},
+    }
+    monkeypatch.setattr(client_auth, "save_user_to_file", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(client_auth, "verify_wordpress_login", lambda got_email, password: {
+        "email": got_email,
+        "name": "WordPress User",
+        "tier": "paid",
+        "wordpress_roles": ["subscriber"],
+        "wordpress_can_admin": False,
+        "nova_entitlements": {"copa_ocr": True},
+    } if password == "new-secret" else None)
+
+    login = await client_auth.user_login(
+        client_auth.UserLoginRequest(email=email, password="new-secret")
+    )
+
+    assert login.tier == "pro"
+    assert login.nova_entitlements == {"copa_ocr": True}
+
+
+def test_entitlement_normalizer_ignores_boolean_list_placeholders():
+    assert client_auth.normalize_entitlements([True, "copa_ocr", False, None]) == {"copa_ocr": True}

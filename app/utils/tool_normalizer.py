@@ -52,6 +52,11 @@ READONLY_TOOLS: FrozenSet[str] = frozenset({
     "search_llm_config",
     "health_check",  # v3 Name
     "network_info", "system_info",
+    # Canonical AILinux Helper read-only surface. Mutating Helper tools (pair,
+    # input, app/process/service/window ops, clipboard write, vision start/stop,
+    # compute) deliberately stay out of this set.
+    "aihelper_observe", "aihelper_screenshot", "aihelper_vision_status",
+    "aihelper_vision_observe", "aihelper_clipboard_read", "aihelper_device_info",
 
     # Agent-Endpoint Methoden
     "agent/status", "agent/output",

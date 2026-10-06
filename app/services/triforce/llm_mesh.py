@@ -40,7 +40,6 @@ MODEL_ALIASES: Dict[str, str] = {
     # Reviewer/Reasoning models
     "mistral": "mistral/mistral-medium-latest",  # Faster, more stable
     "mistral-large": "mistral/mistral-large-latest",  # For complex tasks
-    "codestral": "mistral/codestral-latest",  # Code-specialized
     "cogito": "cogito-2.1:671b-cloud",
 
     # Admin/Special models
@@ -66,7 +65,6 @@ LLM_SPECIALIZATIONS: Dict[str, List[str]] = {
     "cogito": ["reasoning", "logic", "debugging"],
     "mistral": ["review", "security", "fast_response"],
     "mistral-large": ["complex_analysis", "code_analysis", "reasoning"],
-    "codestral": ["code_generation", "code_completion", "refactoring"],
     "magistral": ["deep_reasoning", "math", "logic"],
     "glm": ["chinese", "general", "agents"],
     "minimax": ["agents", "general", "fast"],

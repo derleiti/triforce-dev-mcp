@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 from types import SimpleNamespace
 
@@ -56,17 +58,17 @@ async def test_workspace_control_contract_is_versioned_and_complete():
     result = await handle_tools_list({}, request=FakeRequest("public_guest", False, "schema-public"))
     tools = {tool["name"]: tool for tool in result["tools"]}
 
-    assert "workspace_pair" in tools
-    status_props = tools["workspace_status"]["inputSchema"]["properties"]
-    assert {"workspace_id", "workspace_token"} <= set(status_props)
+    assert "aihelper_pair" in tools
+    pair_props = tools["aihelper_pair"]["inputSchema"]["properties"]
+    assert {"action", "code", "workspace_context", "wait_seconds"} <= set(pair_props)
+    assert {"status", "pair", "reconnect", "disconnect"} <= set(pair_props["action"]["enum"])
 
     contract_fp = bridge.workspace_contract_fingerprint()
     assert len(contract_fp) == 64
-    for name in ("workspace_status", "workspace_pair"):
-        tool = tools[name]
-        assert tool["x_schema_version"] == bridge.WORKSPACE_SCHEMA_VERSION
-        assert tool["x_schema_fingerprint"] == bridge.workspace_tool_schema_fingerprint(tool)
-        assert tool["x_workspace_contract_fingerprint"] == contract_fp
+    tool = tools["aihelper_pair"]
+    assert tool["x_schema_version"] == bridge.WORKSPACE_SCHEMA_VERSION
+    assert tool["x_schema_fingerprint"] == bridge.workspace_tool_schema_fingerprint(tool)
+    assert tool["x_workspace_contract_fingerprint"] == contract_fp
 
 
 @pytest.mark.asyncio
@@ -101,7 +103,7 @@ async def test_shared_tool_names_use_canonical_registry_schema_hash(monkeypatch)
 @pytest.mark.asyncio
 async def test_each_tools_list_call_rebuilds_workspace_contract(monkeypatch):
     first = await handle_tools_list({}, request=FakeRequest("public_guest", False, "schema-one"))
-    first_tool = {tool["name"]: tool for tool in first["tools"]}["workspace_status"]
+    first_tool = {tool["name"]: tool for tool in first["tools"]}["aihelper_pair"]
 
     original = workspace_tool_contract.WORKSPACE_CONTROL_TOOLS[0]["inputSchema"]["properties"]
     changed = dict(original)
@@ -109,9 +111,39 @@ async def test_each_tools_list_call_rebuilds_workspace_contract(monkeypatch):
     monkeypatch.setitem(workspace_tool_contract.WORKSPACE_CONTROL_TOOLS[0]["inputSchema"], "properties", changed)
 
     second = await handle_tools_list({}, request=FakeRequest("public_guest", False, "schema-two"))
-    second_tool = {tool["name"]: tool for tool in second["tools"]}["workspace_status"]
+    second_tool = {tool["name"]: tool for tool in second["tools"]}["aihelper_pair"]
 
     assert "contract_refresh_probe" not in first_tool["inputSchema"]["properties"]
     assert "contract_refresh_probe" in second_tool["inputSchema"]["properties"]
     assert first_tool["x_schema_fingerprint"] != second_tool["x_schema_fingerprint"]
     assert first_tool["x_workspace_contract_fingerprint"] != second_tool["x_workspace_contract_fingerprint"]
+
+
+def test_workspace_node_supports_secret_free_native_handshake_and_hashed_identity():
+    source = (Path(__file__).resolve().parents[1] / "app/routes/mcp_node.py").read_text(encoding="utf-8")
+    assert 'getattr(websocket, "headers", {})' in source
+    assert 'request_headers.get("x-ailinux-pair-code")' in source
+    assert 'request_headers.get("x-ailinux-handoff-code")' in source
+    assert 'request_headers.get("x-ailinux-machine-id")' in source
+    assert 'hashlib.sha256(workspace_credential_id.encode("utf-8"))' in source
+    assert "workspace_credential_id.replace('-', '')[:12]" not in source
+
+@pytest.mark.asyncio
+async def test_public_catalog_contains_every_canonical_non_admin_schema_except_guest_persistence_denies():
+    from app.mcp.tool_registry_unified import TOOL_SCOPE_TRIFORCE_ADMIN
+    from app.utils.mcp_security import PUBLIC_GUEST_DENIED_TOOLS
+
+    canonical = get_canonical_all_tools()
+    expected = {
+        tool['name'] for tool in canonical
+        if tool.get('x_scope') != TOOL_SCOPE_TRIFORCE_ADMIN
+        and tool['name'] not in PUBLIC_GUEST_DENIED_TOOLS
+    }
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'catalog-parity'))
+    actual = {tool['name'] for tool in result['tools']}
+
+    assert expected <= actual
+    assert not {
+        tool['name'] for tool in canonical
+        if tool.get('x_scope') == TOOL_SCOPE_TRIFORCE_ADMIN
+    } & actual

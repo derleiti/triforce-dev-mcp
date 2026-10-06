@@ -78,6 +78,32 @@ def flarum_get(path, params=None):
     r.raise_for_status()
     return r.json()
 
+def wait_for_flarum_ready(timeout=90, interval=5):
+    """Wait for the local Flarum API during boot without logging a false hard error."""
+    deadline = time.monotonic() + timeout
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            flarum_get("/posts", params={"page[limit]": 1})
+            if attempts > 1:
+                log.info(f"Flarum API bereit nach {attempts} Versuchen")
+            return True
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            if status in {401, 403}:
+                raise RuntimeError(f"Flarum API authentication failed with HTTP {status}") from exc
+            last_error = exc
+        except requests.RequestException as exc:
+            last_error = exc
+        if time.monotonic() >= deadline:
+            log.warning(f"Flarum API beim Start noch nicht bereit: {last_error}")
+            return False
+        if attempts == 1:
+            log.info("Flarum API beim Start noch nicht bereit; warte auf Readiness")
+        time.sleep(interval)
+
+
 def flarum_post(discussion_id, content):
     headers = {
         "Authorization": f"Token {FLARUM_TOKEN}",
@@ -218,6 +244,7 @@ def ask_nova(post_content, discussion_id, reason):
 def main():
     log.info("Nova Flarum Bot gestartet")
     log.info(f"Ignoriere eigene Flarum user_ids: {sorted(NOVA_USER_IDS)}")
+    wait_for_flarum_ready()
     state = load_state()
 
     # Beim ersten Start: aktuellen höchsten Post-ID als Baseline setzen (kein Spam)

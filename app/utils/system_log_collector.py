@@ -29,6 +29,8 @@ from logging.handlers import RotatingFileHandler
 import json
 import os
 
+from app.utils.log_formatters import redact_sensitive
+
 logger = logging.getLogger("ailinux.system.collector")
 
 # Base directories
@@ -104,7 +106,7 @@ class SystemLogCollector:
                 "filename": "ailinux-backend.log"
             },
             "syslog": {
-                "command": ["journalctl", "-p", "err..emerg", "-n", "100", "--no-pager", "-o", "short-iso"],
+                "command": ["journalctl", "-p", "err..emerg", "--since", "-30 seconds", "--no-pager", "-o", "short-iso"],
                 "output_dir": SYSTEM_LOG_DIR,
                 "filename": "syslog-errors.log"
             },
@@ -188,7 +190,7 @@ class SystemLogCollector:
                         f.write(f"\n{'='*60}\n")
                         f.write(f"=== Log Collection: {datetime.now().isoformat()} ===\n")
                         f.write(f"{'='*60}\n")
-                        f.write(output)
+                        f.write(redact_sensitive(output))
                         f.write("\n")
 
                     results["sources_collected"].append(source_name)
@@ -233,12 +235,19 @@ class SystemLogCollector:
             # Keyword matching alone misfires on the logger NAME: "uvicorn.error"
             # contains the word "error", so every startup line was stored as ERROR.
             level_match = re.search(
-                r"\|\s*(DEBUG|INFO|NOTICE|WARNING|WARN|ERROR|CRITICAL|FATAL)\s*\|",
+                r"(?:\||│)\s*(DEBUG|DBG|INFO|INF|NOTICE|WARNING|WARN|WRN|ERROR|ERR|CRITICAL|FATAL)\s*(?:\||│)",
                 line,
             )
             if level_match:
-                if level_match.group(1).upper() in ("ERROR", "CRITICAL", "FATAL"):
+                if level_match.group(1).upper() in ("ERROR", "ERR", "CRITICAL", "FATAL"):
                     error_logger.error(f"[{source}] {line.strip()}")
+                continue
+
+            # Generic journal/boot snapshots contain command names and payload
+            # text such as `reset-failed` at non-error priorities. Real system
+            # errors are collected separately by the priority-filtered syslog
+            # source, so never infer severity from words in these snapshots.
+            if source in {"systemd", "boot"}:
                 continue
 
             # No structured level present -> fall back to keyword heuristics.
@@ -284,7 +293,7 @@ class SystemLogCollector:
             output_file = KERNEL_LOG_DIR / "dmesg.log"
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(f"# dmesg collected at {datetime.now().isoformat()}\n")
-                f.write(output)
+                f.write(redact_sensitive(output))
             return output
         return None
 
@@ -354,7 +363,7 @@ class SystemLogCollector:
                     error_file = ERROR_DEBUG_DIR / "system-errors.log"
                     with open(error_file, "a", encoding="utf-8") as f:
                         f.write(f"\n--- {datetime.now().isoformat()} ---\n")
-                        f.write(output)
+                        f.write(redact_sensitive(output))
 
                     # Also extract and log via Python logging
                     self._extract_and_log_errors("journald", output)

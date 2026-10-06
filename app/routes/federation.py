@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 import socket
 import psutil
 
-from ..services.server_federation import federation, NodeRole, FEDERATION_NODES
+from ..services.server_federation import federation, NodeRole, NodeStatus, FEDERATION_NODES
 
 router = APIRouter(prefix="/federation", tags=["Federation"])
 
@@ -108,7 +108,7 @@ async def receive_heartbeat(
         node = federation.nodes[x_node_id]
         from datetime import datetime
         node.last_heartbeat = datetime.now()
-        node.status = "healthy"
+        node.status = NodeStatus.HEALTHY
         return {"status": "ok", "node_id": x_node_id}
     
     return {"status": "unknown_node"}
@@ -121,13 +121,12 @@ async def federation_health_check():
     Health check endpoint for federation nodes.
     Used by peers to verify connectivity.
     """
-    import time
+    from .health import _compute_health_metrics
+    metrics = _compute_health_metrics()
     return {
         "status": "ok",
         "node_id": LOCAL_NODE_ID,
-        "cpu_percent": psutil.cpu_percent(),
-        "memory_percent": psutil.virtual_memory().percent,
-        "timestamp": int(time.time())
+        **metrics,
     }
 
 
@@ -205,7 +204,16 @@ async def get_all_weights():
             "weight": lb_integration._calculate_weight(node),
             "status": node.status.value,
             "load": f"{node.current_load}/{node.max_concurrent}",
-            "models": node.models[:5]  # First 5 models
+            "draining": node.draining,
+            "heartbeat_age_seconds": (
+                round(node.heartbeat_age_seconds(), 2) if node.last_heartbeat else None
+            ),
+            "metrics": {
+                "cpu_percent": node.cpu_percent,
+                "memory_percent": node.memory_percent,
+                "load_ratio": node.load_ratio,
+            },
+            "models": node.models[:5],
         }
     return {"weights": weights, "count": len(weights)}
 

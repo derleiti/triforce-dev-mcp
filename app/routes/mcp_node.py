@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import asyncio
 import json
+import hashlib
 import logging
 import uuid
 from datetime import datetime
@@ -402,6 +403,30 @@ class ProxyToolResponse(BaseModel):
 # WebSocket Endpoint für Clients
 # =============================================================================
 
+def _workspace_ticket_from_subprotocol(headers: Any) -> str:
+    """Extract a one-shot workspace ticket from Sec-WebSocket-Protocol."""
+    raw = str((headers or {}).get("sec-websocket-protocol") or "")
+    for item in raw.split(","):
+        token = item.strip()
+        if token.startswith("ailinux-ticket."):
+            return token.removeprefix("ailinux-ticket.").strip().upper()
+    return ""
+
+
+def _workspace_transport_ticket(headers: Any) -> str:
+    """Return the one-shot workspace transport credential from supported channels.
+
+    Browsers carry the ticket as a WebSocket subprotocol because browser JavaScript
+    cannot set arbitrary upgrade headers. Native Helpers use a dedicated header so
+    the durable Join ID or resume credential never needs to be sent on the upgrade.
+    """
+    headers = headers or {}
+    return (
+        _workspace_ticket_from_subprotocol(headers)
+        or str(headers.get("x-ailinux-socket-ticket") or "").strip().upper()
+    )
+
+
 @router.websocket("/connect")
 async def websocket_connect(
     websocket: WebSocket,
@@ -425,15 +450,35 @@ async def websocket_connect(
 
     Nach Verbindung kann der Server Tools auf dem Client ausführen.
     """
-    await websocket.accept()
+    request_headers = getattr(websocket, "headers", {}) or {}
+    offered_protocols = {item.strip() for item in str(request_headers.get("sec-websocket-protocol") or "").split(",") if item.strip()}
+    accepted_protocol = "ailinux-workspace-v1" if "ailinux-workspace-v1" in offered_protocols else None
+    await websocket.accept(subprotocol=accepted_protocol)
     
     # mode=workspace is an anonymous, session-paired local executor. It never
     # represents an account and can expose only client_workspace_tool.
     mode = websocket.query_params.get("mode", "full")
     is_telemetry_only = mode == "telemetry"
     is_workspace_node = mode == "workspace"
-    pair_code = str(websocket.query_params.get("pair_code") or "").strip().upper()
-    handoff_code = str(websocket.query_params.get("handoff_code") or "").strip().upper()
+    # Native clients keep workspace credentials out of URLs. Query parameters
+    # remain a compatibility fallback for older/browser clients; log formatters
+    # redact them while those clients are upgraded.
+    protocol_ticket = _workspace_transport_ticket(request_headers)
+    pair_code = str(
+        request_headers.get("x-ailinux-pair-code")
+        or websocket.query_params.get("pair_code")
+        or ""
+    ).strip().upper()
+    handoff_code = str(
+        request_headers.get("x-ailinux-handoff-code")
+        or websocket.query_params.get("handoff_code")
+        or ""
+    ).strip().upper()
+    machine_id = str(
+        request_headers.get("x-ailinux-machine-id")
+        or machine_id
+        or ""
+    ).strip() or None
     resume_token = ""
     handoff_context: dict[str, Any] = {}
     paired_mcp_session = None
@@ -441,8 +486,11 @@ async def websocket_connect(
     if is_workspace_node:
         try:
             from app.services.mcp_workspace_sessions import (
-                consume_workspace_handoff_ticket, consume_workspace_resume_ticket, pair_code_kind,
+                consume_workspace_handoff_ticket, consume_workspace_resume_ticket,
+                consume_workspace_socket_ticket, pair_code_kind,
             )
+            if protocol_ticket:
+                pair_code = consume_workspace_socket_ticket(protocol_ticket) or protocol_ticket
             if handoff_code:
                 handoff_context = consume_workspace_handoff_ticket(handoff_code)
                 if handoff_context:
@@ -498,9 +546,10 @@ async def websocket_connect(
     # Ownership and tier come from authenticated server state, never query claims.
     if is_workspace_node:
         workspace_credential_id = handoff_code or pair_code
+        credential_fingerprint = hashlib.sha256(workspace_credential_id.encode("utf-8")).hexdigest()[:12]
         resolved_user_id = (
             f"workspace:{paired_mcp_session[:12]}" if paired_mcp_session
-            else f"workspace:web:{workspace_credential_id.replace('-', '')[:12].lower()}"
+            else f"workspace:web:{credential_fingerprint}"
         )
     else:
         resolved_user_id = payload.get("sub") or client_id
@@ -515,6 +564,11 @@ async def websocket_connect(
             await websocket.close(code=4003, reason="Client identifier belongs to another account")
             return
     
+    if is_workspace_node and str(machine_id or "").lower() in {"android", "ios", "desktop", "pc", "client", "unknown"}:
+        logger.warning(
+            "Workspace client uses non-unique machine_id=%s; upgrade the client to persistent device identity",
+            machine_id,
+        )
     logger.info(f"MCP Node connecting: session={session_id}, machine={machine_id}, user={resolved_user_id}, tier={resolved_tier.value}, version={client_version}")
 
     # Client-Verbindung registrieren
@@ -593,6 +647,13 @@ async def websocket_connect(
                 share_manifest = build_share_manifest(share)
                 connection.share_manifest = share_manifest
                 legacy_share = legacy_workspace_view(share_manifest)
+                shared_capabilities = list(legacy_share.get("capabilities") or [])
+                logger.info(
+                    "Workspace capability manifest | client=%s count=%d capabilities=%s",
+                    client_id,
+                    len(shared_capabilities),
+                    shared_capabilities,
+                )
                 if workspace_pair_kind == "handoff" and handoff_context:
                     from app.services.mcp_workspace_sessions import complete_workspace_handoff
                     binding = complete_workspace_handoff(
@@ -634,8 +695,12 @@ async def websocket_connect(
                         task=legacy_share["task"],
                         capabilities=legacy_share["capabilities"],
                     )
-                    logger.info("Local workspace resumed | lease=%s client=%s mode=%s", str(binding.get("lease_id") or "")[:12], client_id, binding["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True, "resume_token": binding.get("resume_token", resume_token)}})
+                    waiting_for_session = bool(binding.get("waiting_for_session"))
+                    logger.info(
+                        "Local workspace resumed | lease=%s client=%s mode=%s waiting=%s",
+                        str(binding.get("lease_id") or "")[:12], client_id, binding["mode"], waiting_for_session,
+                    )
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting" if waiting_for_session else "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": waiting_for_session, "reconnected": True, "resume_token": binding.get("resume_token", resume_token)}})
                 elif workspace_pair_kind == "reconnect" and paired_mcp_session:
                     from app.services.mcp_workspace_sessions import reconnect_web_workspace
                     binding = reconnect_web_workspace(
@@ -645,7 +710,7 @@ async def websocket_connect(
                         capabilities=legacy_share["capabilities"],
                     )
                     logger.info("Local workspace reconnected | session=%s client=%s mode=%s", paired_mcp_session, client_id, binding["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "connected", "access_mode": binding["mode"], "mode": binding["mode"], "waiting_for_session": False, "reconnected": True, "resume_token": binding.get("resume_token", "")}})
                 elif workspace_pair_kind == "session" and paired_mcp_session:
                     from app.services.mcp_workspace_sessions import promote_session_pair_to_web_lease
                     binding = promote_session_pair_to_web_lease(
@@ -665,7 +730,7 @@ async def websocket_connect(
                         capabilities=legacy_share["capabilities"],
                     )
                     logger.info("Local workspace waiting | code=%s client=%s mode=%s", pair_code[:9] + "...", client_id, waiting["mode"])
-                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting", "access_mode": waiting["mode"], "mode": waiting["mode"], "waiting_for_session": True}})
+                    await websocket.send_json({"jsonrpc": "2.0", "method": "workspace/shared", "params": {"ok": True, "state": "waiting", "access_mode": waiting["mode"], "mode": waiting["mode"], "waiting_for_session": True, "resume_token": waiting.get("resume_token", "")}})
 
             elif data.get("method") == "workspace/tool_stage" and is_workspace_node:
                 params = data.get("params", {}) if isinstance(data.get("params"), dict) else {}
