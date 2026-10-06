@@ -1,8 +1,11 @@
 from app.mcp.compatibility import (
+    build_discover_result,
     build_initialize_result,
     detect_profile,
+    is_modern_request,
     logical_session_id,
     negotiate_protocol_version,
+    stamp_modern_result_meta,
 )
 
 
@@ -96,3 +99,41 @@ def test_provider_transport_profiles_match_known_compatibility_constraints():
     assert detect_profile({"name": "Grok"}, {}).streamable_http is True
     assert detect_profile({"name": "Grok"}, {}).legacy_sse is True
     assert detect_profile({"name": "unknown"}, {}).legacy_sse is True
+
+
+def test_modern_discover_advertises_both_protocol_eras():
+    result = build_discover_result(
+        server_name="ailinux-mcp-server",
+        server_version="test",
+        instructions="hello",
+    )
+    assert "2024-11-05" in result["supportedVersions"]
+    assert "2025-11-25" in result["supportedVersions"]
+    assert "2026-07-28" in result["supportedVersions"]
+    assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "ailinux-mcp-server"
+
+
+def test_modern_request_detection_accepts_header_or_meta():
+    assert is_modern_request(
+        {"jsonrpc":"2.0","method":"tools/list","params":{}},
+        {"MCP-Protocol-Version":"2026-07-28"},
+    )
+    assert is_modern_request(
+        {
+            "jsonrpc":"2.0",
+            "method":"tools/list",
+            "params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}},
+        },
+        {},
+    )
+
+
+def test_modern_response_gets_server_identity_without_overwriting_meta():
+    response = {"jsonrpc":"2.0","id":1,"result":{"tools":[],"_meta":{"custom":"kept"}}}
+    stamped = stamp_modern_result_meta(
+        response,
+        server_name="ailinux-mcp-server",
+        server_version="test",
+    )
+    assert stamped["result"]["_meta"]["custom"] == "kept"
+    assert stamped["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["version"] == "test"

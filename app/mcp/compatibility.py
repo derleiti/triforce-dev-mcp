@@ -11,8 +11,12 @@ import hashlib
 from typing import Any, Mapping
 
 HANDSHAKE_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+MODERN_PROTOCOL_VERSION = "2026-07-28"
+SUPPORTED_PROTOCOL_VERSIONS = (*HANDSHAKE_PROTOCOL_VERSIONS, MODERN_PROTOCOL_VERSION)
 LEGACY_DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 LATEST_HANDSHAKE_PROTOCOL_VERSION = "2025-11-25"
+SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo"
+PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,69 @@ def negotiate_protocol_version(requested: Any) -> str:
     # initialize only negotiates handshake-era revisions. Unknown/future/modern
     # revisions receive the latest handshake revision as a counter-offer.
     return LATEST_HANDSHAKE_PROTOCOL_VERSION
+
+
+def request_protocol_version(
+    body: Mapping[str, Any] | None,
+    headers: Mapping[str, str] | None = None,
+) -> str:
+    h = _lower_headers(headers)
+    header_version = h.get("mcp-protocol-version", "").strip()
+    if header_version:
+        return header_version
+    b = body or {}
+    params = b.get("params") if isinstance(b.get("params"), Mapping) else {}
+    meta = params.get("_meta") if isinstance(params.get("_meta"), Mapping) else {}
+    return str(meta.get(PROTOCOL_VERSION_META_KEY) or "").strip()
+
+
+def is_modern_request(
+    body: Mapping[str, Any] | None,
+    headers: Mapping[str, str] | None = None,
+) -> bool:
+    return request_protocol_version(body, headers) == MODERN_PROTOCOL_VERSION
+
+
+def build_discover_result(
+    *,
+    server_name: str,
+    server_version: str,
+    instructions: str,
+) -> dict[str, Any]:
+    return {
+        "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+        "capabilities": {
+            "tools": {"listChanged": True},
+            "prompts": {"listChanged": True},
+            "resources": {"listChanged": True},
+        },
+        "instructions": instructions,
+        "_meta": {
+            SERVER_INFO_META_KEY: {
+                "name": server_name,
+                "version": server_version,
+            }
+        },
+    }
+
+
+def stamp_modern_result_meta(
+    response: Mapping[str, Any] | None,
+    *,
+    server_name: str,
+    server_version: str,
+) -> dict[str, Any] | None:
+    if response is None:
+        return None
+    out = dict(response)
+    result = out.get("result")
+    if isinstance(result, Mapping):
+        result_out = dict(result)
+        meta = dict(result_out.get("_meta") or {}) if isinstance(result_out.get("_meta"), Mapping) else {}
+        meta.setdefault(SERVER_INFO_META_KEY, {"name": server_name, "version": server_version})
+        result_out["_meta"] = meta
+        out["result"] = result_out
+    return out
 
 
 def build_initialize_result(

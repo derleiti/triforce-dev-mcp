@@ -50,7 +50,14 @@ from ..mcp.translation import BidirectionalTranslator, APIToMCPTranslator, MCPTo
 from ..mcp.specialists import specialist_router, SPECIALISTS
 from ..mcp.context import context_manager, prompt_library, workflow_manager
 from ..mcp.agent_instructions import build_mcp_instructions
-from ..mcp.compatibility import build_initialize_result, detect_profile, logical_session_id
+from ..mcp.compatibility import (
+    build_discover_result,
+    build_initialize_result,
+    detect_profile,
+    is_modern_request,
+    logical_session_id,
+    stamp_modern_result_meta,
+)
 from ..mcp.adaptive_code import ADAPTIVE_CODE_TOOLS, ADAPTIVE_CODE_HANDLERS
 from ..mcp.adaptive_code_v4 import ADAPTIVE_CODE_V4_TOOLS, ADAPTIVE_CODE_V4_HANDLERS
 from ..mcp.handlers_group_chat import GROUP_CHAT_HANDLERS
@@ -5020,7 +5027,7 @@ async def mcp_messages_handler(request: Request, session_id: Optional[str] = Non
 
 # ============================================================================
 # UNIFIED MCP ENDPOINT - Maximum Compatibility
-# Supports: Streamable HTTP (2025-03-26), Legacy SSE (2024-11-05), ChatGPT
+# Supports: Modern stateless MCP (2026-07-28), Streamable HTTP handshake clients, Legacy SSE
 # ============================================================================
 
 async def _process_mcp_request(
@@ -5064,6 +5071,17 @@ async def _process_mcp_request(
             "error": {"code": -32600, "message": "Invalid Request", "data": "method is required"},
             "id": req_id
         }
+
+    # MCP 2026-07-28 stateless lifecycle discovery.
+    if method == "server/discover":
+        result = build_discover_result(
+            server_name="ailinux-mcp-server",
+            server_version=VERSION,
+            instructions=_mcp_instructions_for_request(request),
+        )
+        latency_ms = (_time.time() - start_time) * 1000
+        await multi_logger.log_mcp(method, params, result, latency_ms)
+        return {"jsonrpc": "2.0", "result": result, "id": req_id}
 
     # Special handling for initialize
     if method == "initialize":
@@ -5248,6 +5266,12 @@ async def mcp_unified_endpoint(request: Request):
         for item in body:
             response = await _process_mcp_request(item, request, session_id)
             if response is not None:  # Skip notification responses
+                if is_modern_request(item, dict(request.headers)):
+                    response = stamp_modern_result_meta(
+                        response,
+                        server_name="ailinux-mcp-server",
+                        server_version=VERSION,
+                    )
                 responses.append(response)
 
         if not responses:
@@ -5268,6 +5292,12 @@ async def mcp_unified_endpoint(request: Request):
 
     # Single request
     response = await _process_mcp_request(body, request, session_id)
+    if response is not None and is_modern_request(body, dict(request.headers)):
+        response = stamp_modern_result_meta(
+            response,
+            server_name="ailinux-mcp-server",
+            server_version=VERSION,
+        )
 
     if response is None:
         return Response(status_code=202)  # Notification acknowledged
