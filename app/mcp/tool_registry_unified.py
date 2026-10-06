@@ -182,7 +182,7 @@ TOOL_SCOPE_TRIFORCE_AUTH = "triforce_auth"
 TOOL_SCOPE_AIHELPER = "aihelper"
 
 TRIFORCE_GLOBAL_TOOLS = frozenset({"status"})
-TRIFORCE_AUTH_INVENTORIES = frozenset({"mail", "forum", "wordpress", "mercatai"})
+TRIFORCE_AUTH_INVENTORIES = frozenset({"mail", "forum", "wordpress", "mercatai", "cloudflare"})
 TRIFORCE_AUTH_TOOLS = frozenset({
     "nova_chat_agent", "n8n_mcp_call", "web_worker",
     "notify_list", "notify_read", "notify_send", "notify_clear",
@@ -266,6 +266,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     "aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops", "aihelper_window_ops", "aihelper_input",
     # Integrations
     "n8n_mcp_call",
+    "cloudflare_dns_list", "cloudflare_dns_get", "cloudflare_dns_delete",
     "mercatai_market", "mercatai_tasks", "mercatai_bid", "mercatai_deliver",
     "mercatai_agent", "mercatai_stripe", "mercatai_report", "mercatai_developer",
 })
@@ -574,6 +575,8 @@ def _inventory_for_tool(name: str) -> str:
         return "browser"
     if name.startswith(("n8n_",)):
         return "integration"
+    if name.startswith(("cloudflare_",)):
+        return "cloudflare"
     if name.startswith(("mercatai_",)):
         return "mercatai"
     return "misc"
@@ -645,10 +648,19 @@ def get_canonical_all_tools() -> List[Dict[str, Any]]:
     from .handlers_mercatai import MERCATAI_TOOL_SCHEMAS
     from .server_control import SERVER_CONTROL_TOOLS
     from .web_worker import WEB_WORKER_TOOLS
+    from .cloudflare_dns_tools import CLOUDFLARE_DNS_TOOLS
     from ..services.n8n_mcp import N8N_TOOLS
 
     tools = get_unified_tools(
-        extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS + MERCATAI_TOOL_SCHEMAS + SERVER_CONTROL_TOOLS + WEB_WORKER_TOOLS)
+        extra_tools=(
+            WORDPRESS_TOOL_SCHEMAS
+            + BROWSER_TOOL_SCHEMAS
+            + N8N_TOOLS
+            + MERCATAI_TOOL_SCHEMAS
+            + SERVER_CONTROL_TOOLS
+            + WEB_WORKER_TOOLS
+            + CLOUDFLARE_DNS_TOOLS
+        )
     )
     existing = {tool.get("name") for tool in tools}
     if "nova_chat_agent" not in existing:

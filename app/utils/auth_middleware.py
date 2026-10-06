@@ -51,6 +51,13 @@ PUBLIC_PATHS = [
 ]
 
 PUBLIC_EXACT_PATHS = {
+    # Public read-only API documentation. The interactive docs themselves do
+    # not grant API access; protected operations still require their normal
+    # endpoint authentication.
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+    "/openapi.json",
     "/v1/mcp/workspace/pair-ticket",
     "/v1/mcp/workspace/socket-ticket",
     "/v1/mcp/workspace/resume-ticket",
@@ -65,6 +72,7 @@ PUBLIC_EXACT_PATHS = {
     "/v1/search/health",
     "/v1/bugs/report",
     "/v1/bugs/health",
+    "/v1/sipgate/oauth/callback",
     # Public Nova demo: intentionally usable without an account. Keep agent
     # sub-routes protected; only the stateless chat endpoint and health check
     # bypass account authentication.

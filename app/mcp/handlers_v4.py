@@ -103,6 +103,7 @@ class HandlerRegistry:
         self._register_dev_tool_handlers()
         self._register_bug_report_handlers()
         self._register_wordpress_handlers()
+        self._register_cloudflare_dns_handlers()
         # structured_admin LAST: real handlers override stubs from
         # _register_log_handlers / _register_remote_handlers / _register_system_handlers
         # (e.g. log_viewer, remote_status, service_status -> not_implemented stubs)
@@ -110,6 +111,15 @@ class HandlerRegistry:
 
         self._initialized = True
         logger.info(f"Initialized {len(self._handlers)} handlers")
+
+    def _register_cloudflare_dns_handlers(self):
+        """Cloudflare DNS: authenticated, server-side credential backed."""
+        try:
+            from app.mcp.cloudflare_dns_tools import CLOUDFLARE_DNS_HANDLERS
+            self.register_many(CLOUDFLARE_DNS_HANDLERS)
+            logger.info("Cloudflare DNS handlers registered: %s", len(CLOUDFLARE_DNS_HANDLERS))
+        except Exception as exc:
+            logger.warning("Cloudflare DNS handlers registration failed: %s", exc)
     
     def _register_core_handlers(self):
         """Core: chat, models, specialist"""

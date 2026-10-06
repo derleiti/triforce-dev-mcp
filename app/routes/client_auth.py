@@ -566,7 +566,7 @@ class AuthConfigResponse(BaseModel):
 
 
 class BrowserCodeRequest(BaseModel):
-    purpose: str = Field(..., pattern="^(wordpress|app)$")
+    purpose: str = Field(..., pattern="^(wordpress|app|openheat)$")
     app_id: str = ""
     redirect_uri: str = ""
     code_challenge: str = ""
@@ -576,10 +576,11 @@ class BrowserCodeRequest(BaseModel):
 
 class BrowserCodeExchangeRequest(BaseModel):
     code: str
-    purpose: str = Field(..., pattern="^(wordpress|app)$")
+    purpose: str = Field(..., pattern="^(wordpress|app|openheat)$")
     app_id: str = ""
     redirect_uri: str = ""
     code_verifier: str = ""
+    state: str = ""
 
 
 class UserLoginResponse(BaseModel):
@@ -785,6 +786,15 @@ _BROWSER_APP_HTTPS_REDIRECTS = {
     for app_id in _BROWSER_APP_IDS
 }
 
+_OPENHEAT_REDIRECT_URI = "https://openheat.dating/auth/callback"
+
+
+def _validate_openheat_redirect(redirect_uri: str) -> str:
+    value = (redirect_uri or "").strip()
+    if value != _OPENHEAT_REDIRECT_URI:
+        raise HTTPException(400, "Invalid OpenHeat redirect_uri")
+    return value
+
 
 def _validate_browser_app_redirect(app_id: str, redirect_uri: str) -> str:
     from urllib.parse import urlparse
@@ -895,15 +905,21 @@ async def create_browser_code(request: BrowserCodeRequest, authorization: str = 
             "code_challenge_method": "S256",
             "state": request.state,
         })
+    elif request.purpose == "openheat":
+        redirect_uri = _validate_openheat_redirect(request.redirect_uri)
+        if not request.state or len(request.state) < 16 or len(request.state) > 256:
+            raise HTTPException(400, "Strong state value required")
+        record.update({
+            "redirect_uri": redirect_uri,
+            "state": request.state,
+        })
 
     code = await _store_browser_code(record)
     response = {"ok": True, "code": code, "expires_in": _BROWSER_CODE_TTL, "state": record.get("state", "")}
-    if request.purpose == "app":
+    if request.purpose in {"app", "openheat"}:
         from urllib.parse import quote
-        # Native HTTPS App Links carry the short-lived authorization code in the
-        # fragment so a browser fallback/proxy never receives it. Desktop loopback
-        # callbacks keep query parameters because a local HTTP listener cannot see
-        # URL fragments.
+        # Native HTTPS App Links and OpenHeat carry the short-lived authorization
+        # code in the fragment so proxies and access logs never receive it.
         separator = "#" if redirect_uri.startswith("https://") else "?"
         response["handoff_url"] = (
             f"{redirect_uri}{separator}code={quote(code, safe='')}"
@@ -941,6 +957,12 @@ async def exchange_browser_code(request: BrowserCodeExchangeRequest):
             raise HTTPException(400, "Invalid PKCE verifier")
         if not secrets.compare_digest(challenge, str(record.get("code_challenge") or "")):
             raise HTTPException(400, "PKCE verification failed")
+    elif request.purpose == "openheat":
+        redirect_uri = _validate_openheat_redirect(request.redirect_uri)
+        if redirect_uri != record.get("redirect_uri"):
+            raise HTTPException(400, "OpenHeat login binding mismatch")
+        if not request.state or not secrets.compare_digest(request.state, str(record.get("state") or "")):
+            raise HTTPException(400, "OpenHeat state verification failed")
 
     email = str(record.get("email") or "").lower().strip()
     user = USER_REGISTRY.get(email)
