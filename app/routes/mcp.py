@@ -50,6 +50,7 @@ from ..mcp.translation import BidirectionalTranslator, APIToMCPTranslator, MCPTo
 from ..mcp.specialists import specialist_router, SPECIALISTS
 from ..mcp.context import context_manager, prompt_library, workflow_manager
 from ..mcp.agent_instructions import build_mcp_instructions
+from ..mcp.compatibility import build_initialize_result, detect_profile, logical_session_id
 from ..mcp.adaptive_code import ADAPTIVE_CODE_TOOLS, ADAPTIVE_CODE_HANDLERS
 from ..mcp.adaptive_code_v4 import ADAPTIVE_CODE_V4_TOOLS, ADAPTIVE_CODE_V4_HANDLERS
 from ..mcp.handlers_group_chat import GROUP_CHAT_HANDLERS
@@ -114,6 +115,38 @@ def _mcp_instructions_for_request(request: Request) -> str:
     except Exception:
         pass
     return build_mcp_instructions()
+
+
+def _build_compatible_initialize_result(
+    params: Dict[str, Any],
+    request: Optional[Request],
+    *,
+    server_info_extra: Optional[Dict[str, Any]] = None,
+    tool_capabilities_extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build and log one provider-neutral MCP initialize response."""
+    client_info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
+    headers = dict(request.headers) if request is not None else {}
+    profile = detect_profile(client_info=client_info, headers=headers)
+    mcp_logger.info(
+        "MCP_COMPAT | Client: %s v%s | Profile: %s | Protocol: %s",
+        client_info.get("name", "unknown"),
+        client_info.get("version", "0.0.0"),
+        profile.name,
+        params.get("protocolVersion", "unspecified"),
+    )
+    return build_initialize_result(
+        params,
+        server_name="ailinux-mcp-server",
+        server_version=VERSION,
+        instructions=(
+            _mcp_instructions_for_request(request)
+            if request is not None
+            else build_mcp_instructions()
+        ),
+        server_info_extra=server_info_extra,
+        tool_capabilities_extra=tool_capabilities_extra,
+    )
 
 
 def _helper_design_css() -> str:
@@ -2082,28 +2115,22 @@ async def handle_initialize(params: Dict[str, Any], request: Optional[Request] =
 
     mcp_logger.info(f"MCP_INITIALIZE | Client: {client_name} v{client_version} | IP: {client_ip}")
 
-    return {
-        "protocolVersion": "2024-11-05",
-        "serverInfo": {
-            "name": "ailinux-mcp-server",
-            "version": VERSION,
+    return _build_compatible_initialize_result(
+        params,
+        request,
+        server_info_extra={
             "tristar": {
                 "enabled": True,
                 "total_models": stats.get("total_models", 0),
                 "initialized_models": stats.get("initialized", 0),
-            },
+            }
         },
-        "capabilities": {
-            "tools": {
-                "tristar": True,
-                "memory": True,
-                "mesh": True,
-            },
-            "prompts": {},
-            "resources": {},
+        tool_capabilities_extra={
+            "tristar": True,
+            "memory": True,
+            "mesh": True,
         },
-        "instructions": (_mcp_instructions_for_request(request) if request is not None else build_mcp_instructions()),
-    }
+    )
 
 
 def _request_has_full_access(request: Optional[Request]) -> bool:
@@ -4491,23 +4518,14 @@ def _close_legacy_sse_session(session_id: str) -> bool:
 
 
 def _logical_transport_session_id(request: Request, explicit_session_id: str | None = None) -> str:
-    """Return a stable logical MCP session id when a trusted connector supplies one.
+    """Return a compatibility-layer logical session id.
 
-    OpenAI's current MCP transport may omit Mcp-Session-Id on later POSTs while
-    preserving x-openai-session/x-openai-subject. Hash those high-entropy values
-    so raw connector identifiers are never persisted in TriForce state or logs.
-    Other clients continue to use the MCP session header normally.
+    Client detection is transport-only and never changes authentication or RBAC.
     """
-    if explicit_session_id:
-        return str(explicit_session_id)
-    openai_session = str(request.headers.get("x-openai-session") or "").strip()
-    openai_subject = str(request.headers.get("x-openai-subject") or "").strip()
-    user_agent = str(request.headers.get("user-agent") or "").lower()
-    if openai_session and openai_subject and "openai-mcp" in user_agent:
-        import hashlib
-        digest = hashlib.sha256((openai_subject + "\0" + openai_session).encode("utf-8")).hexdigest()
-        return "openai-" + digest[:40]
-    return ""
+    return logical_session_id(
+        explicit_session_id=explicit_session_id,
+        headers=dict(request.headers),
+    )
 
 
 def _clear_mcp_session(session_id: str, *, clear_workspace: bool = False) -> None:
@@ -4907,19 +4925,7 @@ async def mcp_messages_handler(request: Request, session_id: Optional[str] = Non
             if session:
                 session["initialized"] = True
 
-            result = {
-                "protocolVersion": params.get("protocolVersion", "2024-11-05"),
-                "serverInfo": {
-                    "name": "ailinux-mcp-server",
-                    "version": VERSION
-                },
-                "capabilities": {
-                    "tools": {"listChanged": True},
-                    "prompts": {"listChanged": True},
-                    "resources": {"listChanged": True}
-                },
-                "instructions": _mcp_instructions_for_request(request)
-            }
+            result = _build_compatible_initialize_result(params, request)
             response = {"jsonrpc": "2.0", "result": result, "id": req_id}
 
             # Queue response for SSE stream if session exists
@@ -5066,19 +5072,7 @@ async def _process_mcp_request(
         if session:
             session["initialized"] = True
 
-        result = {
-            "protocolVersion": params.get("protocolVersion", "2024-11-05"),
-            "serverInfo": {
-                "name": "ailinux-mcp-server",
-                "version": VERSION
-            },
-            "capabilities": {
-                "tools": {"listChanged": True},
-                "prompts": {"listChanged": True},
-                "resources": {"listChanged": True}
-            },
-            "instructions": _mcp_instructions_for_request(request)
-        }
+        result = _build_compatible_initialize_result(params, request)
         latency_ms = (_time.time() - start_time) * 1000
         await multi_logger.log_mcp(method, params, result, latency_ms)
         return {"jsonrpc": "2.0", "result": result, "id": req_id}
