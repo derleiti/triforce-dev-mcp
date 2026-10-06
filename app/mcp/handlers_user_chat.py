@@ -188,13 +188,20 @@ async def _query_model(model_id: str, messages: List[Dict], timeout: int = 30) -
         async with httpx.AsyncClient(timeout=timeout) as client:
             # Ollama — direkt via /api/chat (Cloud-Stubs laufen intern über Ollama)
             if provider == "ollama":
-                r = await client.post(
-                    "http://localhost:11434/api/chat",
-                    json={"model": model_name, "messages": messages, "stream": False},
-                )
-                if r.status_code == 200:
-                    return r.json().get("message", {}).get("content", "") or "[leer]"
-                return f"[Ollama {r.status_code}: {r.text[:100]}]"
+                from app.services.ollama_node_router import ollama_candidates
+                last_error = "[Ollama nicht erreichbar]"
+                for endpoint in ollama_candidates(model_name):
+                    try:
+                        r = await client.post(
+                            f"{endpoint.base_url}/api/chat",
+                            json={"model": model_name, "messages": messages, "stream": False},
+                        )
+                    except (httpx.ConnectError, httpx.TimeoutException):
+                        continue
+                    if r.status_code == 200:
+                        return r.json().get("message", {}).get("content", "") or "[leer]"
+                    last_error = f"[Ollama {r.status_code}: {r.text[:100]}]"
+                return last_error
 
             # Alle anderen Provider — über TriForce /v1/chat/completions
             r = await client.post(

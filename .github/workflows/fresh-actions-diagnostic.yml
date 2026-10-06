@@ -1,0 +1,14 @@
+name: Fresh Actions Diagnostic
+
+on:
+  push:
+    branches:
+      - diag/fresh-workflow-20261006
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke
+        run: echo FRESH_WORKFLOW_OK

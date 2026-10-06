@@ -5,7 +5,7 @@ Tier-basierter Chat:
 - Registered: Ollama + konfigurierte Free-Quota-Provider
 - Pro/Enterprise: alle konfigurierten Chat-Provider
 """
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List
@@ -21,7 +21,7 @@ from ..services.user_tiers import (
     tier_service, UserTier, FREE_MODELS_OLLAMA, LOCAL_FALLBACK_MODEL
 )
 from ..services.model_registry import OPENROUTER_FREE_ROUTER, registry
-from ..services.provider_chat import chat_completion, normalize_tools
+from ..services.provider_chat import chat_completion, normalize_tools, stream_completion
 from ..services.model_availability import availability_service
 from ..mcp.agent_instructions import merge_system_policy
 
@@ -35,7 +35,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # JWT Config - Import from auth module to share secret
-from .client_auth import decode_authorization_header
+from .client_auth import decode_authorization_header, require_admin
 
 
 
@@ -82,12 +82,9 @@ def get_user_and_tier_from_headers(
                 tier = tier_service.get_user_tier(email)
             return email, tier
     
-    # 2. X-User-ID Header
-    if x_user_id and x_user_id not in ("", "anonymous", "none", "null"):
-        tier = tier_service.get_user_tier(x_user_id)
-        return x_user_id, tier
-    
-    # 3. Guest
+    # X-User-ID is untrusted caller metadata, not authentication. Without a
+    # verified bearer JWT the caller is always a guest; otherwise an attacker
+    # could impersonate a known Pro/Enterprise user by sending only this header.
     return "anonymous", UserTier.GUEST
 
 
@@ -218,7 +215,6 @@ NVIDIA_AICODER_FREE_MODELS = {
     "nvidia/nvidia/nemotron-3-nano-30b-a3b",
     "nvidia/nvidia/nemotron-nano-3-30b-a3b",
     "nvidia/nvidia/nvidia-nemotron-nano-9b-v2",
-    "nvidia/mistralai/codestral-22b-instruct-v0.1",
     "nvidia/ibm/granite-34b-code-instruct",
     "nvidia/ibm/granite-8b-code-instruct",
     "nvidia/google/codegemma-7b",
@@ -425,15 +421,11 @@ async def call_ollama(
     tools: Optional[List[dict[str, Any]]] = None,
     tool_choice: Any = "auto",
 ) -> dict:
-    """
-    Call Ollama API (lokal auf Server)
-    
-    Bei Cloud-Proxy Fehlern (502, 503, Timeout) → konfiguriertes lokales Fallback
-    """
+    """Call Ollama with node failover before model fallback."""
 
-    # Normalisiere Model-Name
+    from app.services.ollama_node_router import ollama_candidates
+
     model_name = normalize_ollama_model(model)
-
     payload = {
         "model": model_name,
         "messages": _ollama_multimodal_messages(messages),
@@ -441,126 +433,142 @@ async def call_ollama(
         "options": {
             "temperature": temperature,
             "num_predict": max_tokens,
-        }
+        },
     }
     native_tools = normalize_tools(tools)
     tool_transport = "native" if native_tools else "none"
     if native_tools:
         payload["tools"] = native_tools
 
+    last_status: int | None = None
+    last_error = ""
+    saw_timeout = False
+    endpoints = ollama_candidates(model_name)
+
     async with httpx.AsyncClient(timeout=300.0) as client:
-        try:
-            response = await client.post(
-                f"{OLLAMA_BASE_URL}/api/chat",
-                json=payload
-            )
-            # Not every Ollama model is tool-trained. Preserve chat by retrying
-            # without native tools; ai-coder's textual protocol remains active.
-            if response.status_code in (400, 404, 422) and payload.get("tools"):
-                fallback_payload = dict(payload)
-                fallback_payload.pop("tools", None)
-                tool_transport = "text_fallback"
+        for endpoint in endpoints:
+            try:
+                request_payload = payload
                 response = await client.post(
-                    f"{OLLAMA_BASE_URL}/api/chat",
-                    json=fallback_payload,
+                    f"{endpoint.base_url}/api/chat",
+                    json=request_payload,
                 )
 
-            # Cloud-Proxy Fehler → Fallback auf lokales Modell
-            if response.status_code in (502, 503, 504) and not is_fallback and not _messages_have_images(messages):
-                logger.warning(f"Ollama Cloud-Proxy Error {response.status_code} für {model} - Fallback auf lokales Modell")
-                return await call_ollama(
-                    model=LOCAL_FALLBACK_MODEL,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    is_fallback=True
-                )
-
-            if response.status_code != 200:
-                error_text = response.text
-                logger.error(f"Ollama Error: {error_text}")
-                
-                # Bei anderen Fehlern auch Fallback versuchen
-                if not is_fallback and "cloud" in model.lower() and not _messages_have_images(messages):
-                    logger.warning(f"Cloud-Modell {model} fehlgeschlagen - Fallback auf lokales Modell")
-                    return await call_ollama(
-                        model=LOCAL_FALLBACK_MODEL,
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        is_fallback=True
+                # Not every Ollama model is tool-trained. Preserve chat by
+                # retrying the same node without native tools.
+                if response.status_code in (400, 404, 422) and payload.get("tools"):
+                    fallback_payload = dict(payload)
+                    fallback_payload.pop("tools", None)
+                    tool_transport = "text_fallback"
+                    request_payload = fallback_payload
+                    response = await client.post(
+                        f"{endpoint.base_url}/api/chat",
+                        json=request_payload,
                     )
-                
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Ollama Error: {error_text}"
-                )
 
-            result = response.json()
-            message = result.get("message") or {}
-            content = message.get("content") or ""
-            tool_calls = message.get("tool_calls") or []
-            done_reason = result.get("done_reason")
+                if response.status_code != 200:
+                    last_status = int(response.status_code)
+                    last_error = response.text
+                    logger.warning(
+                        "Ollama node %s returned HTTP %s for %s",
+                        endpoint.node_id, response.status_code, model_name,
+                    )
+                    # Try the next node for transport/server/model-availability
+                    # failures before changing the requested model.
+                    continue
 
-            # Reasoning models can consume a tiny num_predict budget entirely in
-            # hidden/thinking tokens and return HTTP 200 with no assistant text.
-            # Never expose that as a successful empty answer: the caller must be
-            # able to classify it as truncation and retry with a larger budget.
-            if not content and not tool_calls:
-                if done_reason == "length":
+                result = response.json()
+                message = result.get("message") or {}
+                content = message.get("content") or ""
+                tool_calls = message.get("tool_calls") or []
+                done_reason = result.get("done_reason")
+
+                if not content and not tool_calls:
+                    if done_reason == "length":
+                        raise HTTPException(
+                            502,
+                            detail={
+                                "error": "ollama_response_truncated",
+                                "message": "Ollama exhausted max_tokens before producing an answer",
+                                "model": model_name,
+                                "finish_reason": "length",
+                            },
+                        )
                     raise HTTPException(
                         502,
                         detail={
-                            "error": "ollama_response_truncated",
-                            "message": "Ollama exhausted max_tokens before producing an answer",
+                            "error": "empty_ollama_response",
+                            "message": "Ollama returned no assistant content or tool calls",
                             "model": model_name,
-                            "finish_reason": "length",
+                            "finish_reason": done_reason,
                         },
                     )
-                raise HTTPException(
-                    502,
-                    detail={
-                        "error": "empty_ollama_response",
-                        "message": "Ollama returned no assistant content or tool calls",
-                        "model": model_name,
-                        "finish_reason": done_reason,
+
+                return {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": content,
+                            "tool_calls": tool_calls,
+                        },
+                        "finish_reason": done_reason or "stop",
+                    }],
+                    "usage": {
+                        "total_tokens": result.get("eval_count", 0) + result.get("prompt_eval_count", 0)
                     },
-                )
-
-            # Ollama Response in OpenAI-Format konvertieren
-            return {
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": tool_calls,
+                    "model_used": model_name,
+                    "is_fallback": is_fallback,
+                    "tool_transport": tool_transport,
+                    "provider_diagnostics": {
+                        "ollama_node": endpoint.node_id,
                     },
-                    "finish_reason": done_reason or "stop",
-                }],
-                "usage": {
-                    "total_tokens": result.get("eval_count", 0) + result.get("prompt_eval_count", 0)
-                },
-                "model_used": model_name,
-                "is_fallback": is_fallback,
-                "tool_transport": tool_transport
-            }
+                }
+            except HTTPException:
+                raise
+            except httpx.TimeoutException:
+                saw_timeout = True
+                logger.warning("Ollama node %s timed out for %s", endpoint.node_id, model_name)
+                continue
+            except httpx.ConnectError:
+                logger.warning("Ollama node %s unreachable for %s", endpoint.node_id, model_name)
+                continue
 
-        except httpx.ConnectError:
-            logger.error("Ollama nicht erreichbar")
-            raise HTTPException(503, "Ollama Backend nicht erreichbar")
-        except httpx.TimeoutException:
-            # Timeout bei Cloud-Proxy → Fallback
-            if not is_fallback and "cloud" in model.lower() and not _messages_have_images(messages):
-                logger.warning(f"Timeout für {model} - Fallback auf lokales Modell")
-                return await call_ollama(
-                    model=LOCAL_FALLBACK_MODEL,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    is_fallback=True
-                )
-            raise HTTPException(504, "Ollama Timeout")
+    # All nodes failed for the requested model. Only now change models.
+    # This also covers a model hosted exclusively on an optional worker such as
+    # zombie-pc: removing/reinstalling that machine must not make chat depend on
+    # its presence.
+    fallback_name = normalize_ollama_model(LOCAL_FALLBACK_MODEL)
+    if (
+        not is_fallback
+        and model_name != fallback_name
+        and not _messages_have_images(messages)
+    ):
+        logger.warning(
+            "All Ollama nodes failed for %s - falling back to %s",
+            model,
+            LOCAL_FALLBACK_MODEL,
+        )
+        fallback_result = await call_ollama(
+            model=LOCAL_FALLBACK_MODEL,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            is_fallback=True,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+        fallback_result["fallback_from"] = model
+        fallback_result["fallback_to"] = LOCAL_FALLBACK_MODEL
+        return fallback_result
 
+    if saw_timeout and last_status is None:
+        raise HTTPException(504, "Ollama Timeout")
+    if last_status is not None:
+        raise HTTPException(
+            status_code=last_status,
+            detail=f"Ollama Error: {last_error}",
+        )
+    raise HTTPException(503, "Ollama Backend nicht erreichbar")
 
 async def call_openrouter(
     model: str,
@@ -977,6 +985,185 @@ async def client_chat(
     )
 
 
+async def _stream_ollama_text(
+    model: str,
+    messages: List[dict],
+    *,
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+):
+    """Yield genuine Ollama deltas with node failover before streaming starts."""
+    from app.services.ollama_node_router import ollama_candidates
+
+    model_name = normalize_ollama_model(model)
+    payload = {
+        "model": model_name,
+        "messages": _ollama_multimodal_messages(messages),
+        "stream": True,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }
+    last_status: int | None = None
+    last_error = ""
+    saw_timeout = False
+
+    for endpoint in ollama_candidates(model_name):
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                async with client.stream(
+                    "POST", f"{endpoint.base_url}/api/chat", json=payload
+                ) as response:
+                    if response.status_code != 200:
+                        last_status = int(response.status_code)
+                        last_error = (await response.aread()).decode(
+                            "utf-8", errors="replace"
+                        )
+                        logger.warning(
+                            "Ollama stream node %s returned HTTP %s for %s",
+                            endpoint.node_id, response.status_code, model_name,
+                        )
+                        continue
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        message = data.get("message") or {}
+                        text = message.get("content") if isinstance(message, dict) else ""
+                        if text:
+                            yield str(text)
+                    return
+        except httpx.ConnectError:
+            logger.warning("Ollama stream node %s unreachable", endpoint.node_id)
+            continue
+        except httpx.TimeoutException:
+            saw_timeout = True
+            logger.warning("Ollama stream node %s timed out", endpoint.node_id)
+            continue
+
+    if saw_timeout and last_status is None:
+        raise HTTPException(504, "Ollama Timeout")
+    if last_status is not None:
+        raise HTTPException(last_status, f"Ollama Error: {last_error[:1000]}")
+    raise HTTPException(503, "Ollama Backend nicht erreichbar")
+
+
+@router.post("/chat/stream")
+async def client_chat_stream(
+    request: ChatRequest,
+    authorization: str = Header(None, alias="Authorization"),
+    x_user_id: str = Header(None, alias="X-User-ID"),
+):
+    """NDJSON token stream for text chat without native tool-call deltas.
+
+    Tool-enabled conversations deliberately stay on /client/chat so function
+    arguments are complete before Loom's lease and one-shot approval policy sees
+    them. This endpoint never simulates streaming from a completed response.
+    """
+    if request.tools:
+        raise HTTPException(400, "Tool-enabled chat must use /v1/client/chat")
+
+    user_id, tier = get_user_and_tier_from_headers(authorization, x_user_id)
+    if request.messages:
+        messages = [m.model_dump(exclude_none=True) for m in request.messages]
+    elif request.message:
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        messages.append({"role": "user", "content": request.message})
+    else:
+        raise HTTPException(400, "Either 'message' or 'messages' is required")
+
+    caller_system = "\n\n".join(
+        str(item.get("content") or "")
+        for item in messages
+        if item.get("role") == "system" and isinstance(item.get("content"), str)
+    ).strip()
+    messages = [item for item in messages if item.get("role") != "system"]
+    messages.insert(0, {"role": "system", "content": merge_system_policy(caller_system, mode="client")})
+    for item in messages:
+        _validate_chat_content(item.get("content"))
+
+    model = request.model or get_default_model(tier)
+    if tier == UserTier.GUEST and not is_guest_free_model(model):
+        model = LOCAL_FALLBACK_MODEL
+    elif tier == UserTier.REGISTERED and not is_registered_free_model(model):
+        model = LOCAL_FALLBACK_MODEL
+
+    is_ollama = model.startswith("ollama/") or tier_service.is_ollama_model(model)
+    if is_ollama and not model.startswith("ollama/"):
+        model = f"ollama/{model}"
+
+    if tier != UserTier.ENTERPRISE:
+        limit_check = tier_service.check_token_limit(user_id, model)
+        if not limit_check["allowed"]:
+            raise HTTPException(429, f"Token-Limit erreicht ({limit_check['limit']}/Tag)")
+
+    model_info = None
+    if not is_ollama:
+        model_info = await registry.get_model(model)
+        if not model_info or "chat" not in model_info.capabilities:
+            raise HTTPException(404, f"Chat model not available: {model}")
+        if _messages_have_images(messages) and "vision" not in model_info.capabilities:
+            raise HTTPException(400, f"Selected model does not support vision: {model}")
+
+    backend = "ollama" if is_ollama else str(model_info.provider)
+
+    async def ndjson_stream():
+        started = time.monotonic()
+        full: list[str] = []
+        yield json.dumps({"type": "start", "model": model, "backend": backend}, ensure_ascii=False) + "\n"
+        try:
+            source = (
+                _stream_ollama_text(
+                    model, messages,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                )
+                if is_ollama else
+                stream_completion(
+                    model_info, model, messages,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                )
+            )
+            async for text in source:
+                full.append(text)
+                yield json.dumps({"type": "delta", "text": text}, ensure_ascii=False) + "\n"
+            combined = "".join(full)
+            if not combined.strip():
+                raise HTTPException(502, {"error": "empty_stream_response", "model": model})
+            approx_tokens = max(1, len(combined.split()) + sum(len(str(m.get("content", "")).split()) for m in messages))
+            unlimited = tier == UserTier.ENTERPRISE or (tier == UserTier.PRO and is_ollama)
+            if user_id != "anonymous" and not unlimited:
+                tier_service.track_tokens(user_id, approx_tokens, model)
+            if model_info is not None:
+                availability_service.mark_success(model)
+            yield json.dumps({
+                "type": "done", "model": model, "backend": backend,
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "tokens_used": None if unlimited else approx_tokens,
+                "tokens_unlimited": unlimited,
+            }, ensure_ascii=False) + "\n"
+        except HTTPException as exc:
+            if model_info is not None:
+                availability_service.mark_error(model, exc.status_code, str(exc.detail))
+            yield json.dumps({
+                "type": "error", "status": exc.status_code, "detail": exc.detail,
+            }, ensure_ascii=False, default=str) + "\n"
+        except Exception as exc:
+            logger.exception("client chat streaming failed model=%s", model)
+            if model_info is not None:
+                availability_service.mark_error(model, 502, str(exc))
+            yield json.dumps({"type": "error", "status": 502, "detail": str(exc)[:1000]}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        ndjson_stream(), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/models", response_model=ModelsResponse)
 async def get_client_models(
     authorization: str = Header(None, alias="Authorization"),
@@ -1151,7 +1338,7 @@ async def ollama_status():
 # ========= MODEL AVAILABILITY ROUTES =========
 
 @router.get("/models/availability")
-async def get_model_availability():
+async def get_model_availability(_admin: dict = Depends(require_admin)):
     """
     Zeige Model-Availability Status
     - Excluded Models (Quota/Rate-Limit)  
@@ -1161,14 +1348,14 @@ async def get_model_availability():
 
 
 @router.post("/models/availability/reset/{model_id:path}")
-async def reset_model_availability(model_id: str):
+async def reset_model_availability(model_id: str, _admin: dict = Depends(require_admin)):
     """Reset Availability-Status für ein Model (Admin)"""
     availability_service.reset_model(model_id)
     return {"reset": model_id, "status": "ok"}
 
 
 @router.post("/models/availability/exclude")
-async def exclude_model(model_id: str, reason: str = "manual"):
+async def exclude_model(model_id: str, reason: str = "manual", _admin: dict = Depends(require_admin)):
     """Manuell ein Model excluden (Admin)"""
     availability_service.add_exclusion(model_id, reason)
     return {"excluded": model_id, "reason": reason}
@@ -1177,14 +1364,14 @@ async def exclude_model(model_id: str, reason: str = "manual"):
 # ========= TOKEN MANAGEMENT ROUTES =========
 
 @router.post("/tokens/reset/{user_id}")
-async def reset_user_tokens(user_id: str):
+async def reset_user_tokens(user_id: str, _admin: dict = Depends(require_admin)):
     """Reset Token-Usage für einen User (Admin)"""
     result = tier_service.reset_token_usage(user_id)
     return result
 
 
 @router.get("/tokens/usage/{user_id}")
-async def get_user_token_usage(user_id: str):
+async def get_user_token_usage(user_id: str, _admin: dict = Depends(require_admin)):
     """Hole Token-Verbrauch für einen User"""
     return tier_service.get_token_usage(user_id)
 

@@ -5,8 +5,7 @@ transport bridge both import it, so semantic schemas have exactly one owner.
 """
 from __future__ import annotations
 
-WORKSPACE_TOOL_NAMES = ('workspace_status',
- 'workspace_pair',
+WORKSPACE_TOOL_NAMES = ('aihelper_pair',
  'workspace_info',
  'file_read',
  'file_tree',
@@ -16,29 +15,73 @@ WORKSPACE_TOOL_NAMES = ('workspace_status',
  'code_grep',
  'file_ops',
  'code_edit',
- 'computer_observe',
- 'computer_screenshot',
- 'clipboard_read',
- 'clipboard_write',
- 'compute_execute',
+ 'aihelper_observe',
+ 'aihelper_screenshot',
+ 'aihelper_vision_start',
+ 'aihelper_vision_status',
+ 'aihelper_vision_observe',
+ 'aihelper_vision_stop',
+ 'aihelper_clipboard_read',
+ 'aihelper_clipboard_write',
+ 'aihelper_compute_execute',
  'file_edit',
  'directory_create',
  'workspace_clear',
- 'device_info',
- 'process_ops',
- 'service_ops',
- 'app_ops',
- 'window_ops',
- 'computer_input')
+ 'aihelper_device_info',
+ 'aihelper_process_ops',
+ 'aihelper_service_ops',
+ 'aihelper_app_ops',
+ 'aihelper_window_ops',
+ 'aihelper_input')
 
-WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
-  'description': 'Check whether this MCP session is paired with a browser-selected local workspace. If the user '
-                 'message contains a TriForce workspace ID in the form XXXX-XXXX-XXXX-XXXX-XXXX-XXXX, pass it as '
-                 'workspace_id; this tool validates the waiting browser and pairs it automatically.',
+# Public AI-facing names are stable and product-oriented. The Helper wire protocol
+# keeps the older capability names for backward compatibility with already shipped
+# Android/desktop clients; the bridge translates at the boundary.
+AIHELPER_CANONICAL_TO_WIRE = {
+    'aihelper_observe': 'computer_observe',
+    'aihelper_screenshot': 'computer_screenshot',
+    'aihelper_vision_start': 'vision_start',
+    'aihelper_vision_status': 'vision_status',
+    'aihelper_vision_observe': 'vision_observe',
+    'aihelper_vision_stop': 'vision_stop',
+    'aihelper_clipboard_read': 'clipboard_read',
+    'aihelper_clipboard_write': 'clipboard_write',
+    'aihelper_compute_execute': 'compute_execute',
+    'aihelper_device_info': 'device_info',
+    'aihelper_process_ops': 'process_ops',
+    'aihelper_service_ops': 'service_ops',
+    'aihelper_app_ops': 'app_ops',
+    'aihelper_window_ops': 'window_ops',
+    'aihelper_input': 'computer_input',
+}
+AIHELPER_LEGACY_ALIASES = {wire: canonical for canonical, wire in AIHELPER_CANONICAL_TO_WIRE.items()}
+AIHELPER_LEGACY_ALIASES.update({'workspace_status': 'aihelper_pair', 'workspace_pair': 'aihelper_pair'})
+
+AIHELPER_PAIR_TOOL = {
+    'name': 'aihelper_pair',
+    'description': 'Manage the current AILinux Helper share/workspace binding. The Helper generates a one-time Share ID; use action=status to inspect the binding, action=pair to claim that Share ID exactly once, action=reconnect for an existing durable lease, or disconnect/revoke it when the user explicitly asks.',
+    'inputSchema': {
+        'type': 'object',
+        'properties': {
+            'action': {'type': 'string', 'enum': ['status', 'pair', 'reconnect', 'disconnect'], 'default': 'status'},
+            'code': {'type': 'string', 'description': 'One-time AILinux Helper Share ID for action=pair. Reconnect normally uses the durable saved lease credential; use a new Share ID only to replace an expired or revoked lease.'},
+            'workspace_context': {'type': 'string', 'description': 'Optional non-secret selector supplied by an authenticated bridge.'},
+            'wait_seconds': {'type': 'number', 'minimum': 0, 'maximum': 25, 'default': 5},
+        },
+    },
+    'annotations': {'readOnlyHint': False},
+}
+
+WORKSPACE_CONTROL_TOOLS = [AIHELPER_PAIR_TOOL,
+ {'name': 'workspace_status',
+  'description': 'Check whether this MCP session is paired with an AILinux Helper share. If the user '
+                 'message contains a one-time Share ID in the form XXXX-XXXX-XXXX-XXXX-XXXX-XXXX, pass it as '
+                 'workspace_id; this tool validates the waiting Helper and claims that Share ID exactly once. '
+                 "Reconnects use the Helper's durable saved lease credential, not the consumed Share ID.",
   'inputSchema': {'type': 'object',
                   'properties': {'workspace_id': {'type': 'string',
-                                                  'description': 'Optional one-time TriForce workspace ID pasted by '
-                                                                 'the user.'},
+                                                  'description': 'Optional one-time AILinux Helper Share ID pasted by '
+                                                                 'the user; it is consumed after a successful claim.'},
                                  'workspace_token': {'type': 'string'},
                                  'workspace_context': {'type': 'string',
                                                        'description': 'Optional non-secret workspace context '
@@ -46,10 +89,12 @@ WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
                                                                       'bridge.'}}},
   'annotations': {'readOnlyHint': True}},
  {'name': 'workspace_pair',
-  'description': 'Bind this MCP session to the browser workspace waiting under the one-time ID. Use this when the '
-                 'user pastes an ID shown by https://api.ailinux.me/v1/mcp.',
+  'description': 'Bind this MCP session to the AILinux Helper share waiting under a one-time Share ID. Use this when '
+                 'the user sends the Share ID generated by WebMCP, the Android Helper, or the desktop/Linux Helper. '
+                 'The Share ID is claim-once; later reconnects use the durable lease credential.',
   'inputSchema': {'type': 'object',
-                  'properties': {'code': {'type': 'string'},
+                  'properties': {'code': {'type': 'string',
+                                                  'description': 'One-time AILinux Helper Share ID generated by the Helper and consumed after a successful claim.'},
                                  'workspace_context': {'type': 'string',
                                                        'description': 'Optional non-secret workspace context '
                                                                       'selector supplied by an authenticated '
@@ -117,7 +162,7 @@ WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
                                                                       'bridge.'}},
                   'required': ['pattern']},
   'annotations': {'readOnlyHint': True}},
- {'name': 'computer_observe',
+ {'name': 'aihelper_observe',
   'description': 'Observe the explicitly shared primary screen through AILinux Helper. Available only when the user '
                  'enabled screen sharing in the native Helper.',
   'inputSchema': {'type': 'object',
@@ -127,7 +172,7 @@ WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
                                                                       'selector supplied by an authenticated '
                                                                       'bridge.'}}},
   'annotations': {'readOnlyHint': True}},
- {'name': 'computer_screenshot',
+ {'name': 'aihelper_screenshot',
   'description': 'Capture the explicitly shared primary screen through AILinux Helper. Available only when the user '
                  'enabled screen sharing in the native Helper.',
   'inputSchema': {'type': 'object',
@@ -137,7 +182,38 @@ WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
                                                                       'selector supplied by an authenticated '
                                                                       'bridge.'}}},
   'annotations': {'readOnlyHint': True}},
- {'name': 'clipboard_read',
+ {'name': 'aihelper_vision_start',
+  'description': 'Start or reconfigure the low-bandwidth AILinux Live Vision stream for the paired device. The underlying OS screen-capture permission must already be active.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'max_edge': {'type': 'integer', 'minimum': 240, 'maximum': 1920},
+                                 'quality': {'type': 'integer', 'minimum': 20, 'maximum': 85},
+                                 'idle_fps': {'type': 'number', 'minimum': 0.25, 'maximum': 8},
+                                 'active_fps': {'type': 'number', 'minimum': 1, 'maximum': 20},
+                                 'workspace_token': {'type': 'string'},
+                                 'workspace_context': {'type': 'string'}}},
+  'annotations': {'readOnlyHint': False}},
+ {'name': 'aihelper_vision_status',
+  'description': 'Inspect the current AILinux Live Vision stream state, latest frame/scene identifiers, frame age and encoder profile.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'workspace_token': {'type': 'string'},
+                                 'workspace_context': {'type': 'string'}}},
+  'annotations': {'readOnlyHint': True}},
+ {'name': 'aihelper_vision_observe',
+  'description': 'Read the newest cached Live Vision frame and native UI scene. Use after_frame_id plus wait_ms for low-latency long-polling without requesting a fresh screenshot.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'after_frame_id': {'type': 'integer', 'minimum': 0},
+                                 'wait_ms': {'type': 'integer', 'minimum': 0, 'maximum': 1500},
+                                 'visual': {'type': 'boolean', 'default': True},
+                                 'workspace_token': {'type': 'string'},
+                                 'workspace_context': {'type': 'string'}}},
+  'annotations': {'readOnlyHint': True}},
+ {'name': 'aihelper_vision_stop',
+  'description': 'Pause AILinux Live Vision frame production without revoking the operating-system screen-capture grant.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'workspace_token': {'type': 'string'},
+                                 'workspace_context': {'type': 'string'}}},
+  'annotations': {'readOnlyHint': False}},
+ {'name': 'aihelper_clipboard_read',
   'description': 'Read the local clipboard through AILinux Helper only when the user explicitly enabled '
                  'clipboard-read sharing.',
   'inputSchema': {'type': 'object',
@@ -147,7 +223,7 @@ WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
                                                                       'selector supplied by an authenticated '
                                                                       'bridge.'}}},
   'annotations': {'readOnlyHint': True}},
- {'name': 'clipboard_write',
+ {'name': 'aihelper_clipboard_write',
   'description': 'Write text to the local clipboard through AILinux Helper only when the user explicitly enabled '
                  'clipboard-write sharing.',
   'inputSchema': {'type': 'object',
@@ -159,8 +235,8 @@ WORKSPACE_CONTROL_TOOLS = [{'name': 'workspace_status',
                                                                       'bridge.'}},
                   'required': ['text']},
   'annotations': {'readOnlyHint': False}},
- {'name': 'compute_execute',
-  'description': 'Execute a command only inside the explicitly released disposable compute runtime provided by AILinux Helper. This is not a host shell and is available only while the user has enabled the compute share.',
+ {'name': 'aihelper_compute_execute',
+  'description': 'Execute a command only inside an explicitly released disposable compute runtime. TriForce mirrors the paired share at ~/workspace and runs the command in the selected hardened backend (Docker by default, or feature-gated OpenShell with deny-by-default egress). This is never a host shell.',
   'inputSchema': {'type': 'object',
                   'properties': {'command': {'type': 'string'},
                                  'cwd': {'type': 'string', 'default': '.'},

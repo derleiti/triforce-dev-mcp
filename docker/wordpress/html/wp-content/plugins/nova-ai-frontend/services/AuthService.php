@@ -1096,6 +1096,10 @@ HTML;
     }
 
     public function sync_user_to_ailinux(int $user_id): void {
+        // AILinux User Management owns the canonical WordPress -> TriForce provisioning flow.
+        // Avoid duplicate /v1/auth/register calls with an unreachable random password.
+        if (class_exists('AILinux_User_Plugin', false)) return;
+
         $user = get_userdata($user_id);
         if (!$user) return;
 

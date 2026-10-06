@@ -155,6 +155,10 @@ def normalize_entitlements(raw: Any) -> Dict[str, bool]:
     out: Dict[str, bool] = {}
 
     def canon(k: Any) -> str:
+        # bool is a subclass of int in Python; legacy list-shaped metadata may
+        # contain True/False placeholders. They are values, never entitlement IDs.
+        if isinstance(k, bool) or k is None:
+            return ""
         text = str(k).strip()
         return CANONICAL_ENTITLEMENTS.get(text, CANONICAL_ENTITLEMENTS.get(text.lower(), text))
 
@@ -752,6 +756,7 @@ _BROWSER_APP_IDS = {
     "ailinux-copa",
     "ailinux-control-center",
     "ailinux-client",
+    "ailinux-loom",
 }
 _browser_redis = None
 
@@ -983,6 +988,30 @@ async def google_login(request: GoogleLoginRequest):
     return response
 
 
+def _sync_wordpress_profile(email: str, existing: dict, wp_user: dict) -> dict:
+    """Merge authoritative WordPress account state into the local auth mirror."""
+    wp_entitlements = normalize_entitlements(
+        wp_user.get("nova_entitlements") if "nova_entitlements" in wp_user else wp_user.get("entitlements")
+    )
+    user = {
+        **existing,
+        "tier": wp_user.get("tier") or existing.get("tier") or "free",
+        "name": wp_user.get("name") or existing.get("name") or email.split("@", 1)[0],
+        "billing": existing.get("billing", False) or bool(wp_entitlements),
+        "nova_entitlements": wp_entitlements,
+        "entitlements": wp_entitlements,
+        "auth_provider": "wordpress",
+        "wordpress_roles": list(wp_user.get("wordpress_roles") or []),
+        "wordpress_can_admin": bool(wp_user.get("wordpress_can_admin", False)),
+        "authority_role": str(wp_user.get("authority_role") or ""),
+        "wordpress_authority_verified_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+    save_user_to_file(email, user)
+    USER_REGISTRY[email] = user
+    return user
+
+
 @router.post("/auth/login", response_model=UserLoginResponse)  # Compatibility: ai-coder expects /v1/auth/login
 @router.post("/login", response_model=UserLoginResponse)
 async def user_login(request: UserLoginRequest):
@@ -1027,55 +1056,43 @@ async def user_login(request: UserLoginRequest):
                 raise HTTPException(401, "Invalid email or password")
         else:
             existing = user if isinstance(user, dict) else {}
-            wp_entitlements = normalize_entitlements(
-                wp_user.get("nova_entitlements") if "nova_entitlements" in wp_user else wp_user.get("entitlements")
-            )
-            user = {
-                **existing,
-                "tier": wp_user.get("tier") or existing.get("tier") or "free",
-                "name": wp_user.get("name") or existing.get("name") or email.split("@", 1)[0],
-                "billing": existing.get("billing", False),
-                "nova_entitlements": wp_entitlements,
-                "entitlements": wp_entitlements,
-                "auth_provider": "wordpress",
-                "wordpress_roles": list(wp_user.get("wordpress_roles") or []),
-                "wordpress_can_admin": bool(wp_user.get("wordpress_can_admin", False)),
-                "authority_role": str(wp_user.get("authority_role") or ""),
-                "wordpress_authority_verified_at": datetime.now(timezone.utc).isoformat(),
-            }
-            save_user_to_file(email, user)
-            USER_REGISTRY[email] = user
+            user = _sync_wordpress_profile(email, existing, wp_user)
             logger.info(f"WordPress-authenticated user: {email}")
     else:
-        # Existing local TriForce password hash.
-        local_hash_ok = verify_secret(request.password, user["password_hash"])
-        logger.info("COPA_LOGIN_DEBUG local_hash email=%s ok=%s", email, local_hash_ok)
-        if not local_hash_ok:
-            logger.info("COPA_LOGIN_DEBUG wordpress_fallback_start email=%s", email)
+        auth_provider = str(user.get("auth_provider") or "").lower()
+        if auth_provider == "wordpress":
+            # WordPress is authoritative for WordPress-backed passwords. Never accept
+            # a cached TriForce hash here: after a WordPress password change that hash
+            # may represent the old password, and an outage is indistinguishable from
+            # an invalid credential in the validation bridge. Fail closed instead.
             wp_user = verify_wordpress_login(email, request.password)
-            logger.info(
-                "COPA_LOGIN_DEBUG wordpress_fallback_result email=%s ok=%s wp_keys=%s",
-                email,
-                bool(wp_user),
-                list(wp_user.keys()) if isinstance(wp_user, dict) else [],
-            )
             if not wp_user:
-                logger.warning(f"Invalid password for: {email}")
+                logger.warning("WordPress-backed login rejected for %s", email)
                 raise HTTPException(401, "Invalid email or password")
-            user["auth_provider"] = "wordpress"
-            user["tier"] = wp_user.get("tier") or user.get("tier") or "free"
-            user["name"] = wp_user.get("name") or user.get("name") or email.split("@", 1)[0]
-            wp_entitlements = normalize_entitlements(
-                wp_user.get("nova_entitlements") if "nova_entitlements" in wp_user else wp_user.get("entitlements")
+            user = _sync_wordpress_profile(email, user, wp_user)
+            logger.info(
+                "WordPress account state refreshed for %s: tier=%s",
+                email,
+                normalize_tier(user.get("tier")),
             )
-            user["nova_entitlements"] = wp_entitlements
-            user["entitlements"] = wp_entitlements
-            user["wordpress_roles"] = list(wp_user.get("wordpress_roles") or [])
-            user["wordpress_can_admin"] = bool(wp_user.get("wordpress_can_admin", False))
-            user["authority_role"] = str(wp_user.get("authority_role") or "")
-            user["wordpress_authority_verified_at"] = datetime.now(timezone.utc).isoformat()
-            save_user_to_file(email, user)
-            USER_REGISTRY[email] = user
+        else:
+            # Existing local TriForce password hash. Unknown/local accounts may migrate
+            # to WordPress after a failed local password check if WordPress validates it.
+            local_hash_ok = verify_secret(request.password, user["password_hash"])
+            logger.info("COPA_LOGIN_DEBUG local_hash email=%s ok=%s", email, local_hash_ok)
+            if not local_hash_ok:
+                logger.info("COPA_LOGIN_DEBUG wordpress_fallback_start email=%s", email)
+                wp_user = verify_wordpress_login(email, request.password)
+                logger.info(
+                    "COPA_LOGIN_DEBUG wordpress_fallback_result email=%s ok=%s wp_keys=%s",
+                    email,
+                    bool(wp_user),
+                    list(wp_user.keys()) if isinstance(wp_user, dict) else [],
+                )
+                if not wp_user:
+                    logger.warning(f"Invalid password for: {email}")
+                    raise HTTPException(401, "Invalid email or password")
+                user = _sync_wordpress_profile(email, user, wp_user)
 
     response = issue_user_login_response(email, user)
     logger.info(
@@ -1461,20 +1478,56 @@ async def get_current_client(authorization: str = Header(None)) -> dict:
     token = authorization.replace("Bearer ", "")
     payload = decode_jwt_token(token)
     
-    client_id = payload.get("client_id")
+    client_id = str(payload.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(401, "Token has no client identity")
     client = CLIENT_REGISTRY.get(client_id)
-    
+
+    # User login clients are intentionally reconstructible from a still-valid,
+    # server-signed JWT plus the current server-side user registry. CLIENT_REGISTRY
+    # is process-local, so requiring it unconditionally invalidated every desktop
+    # session on a normal TriForce restart. Machine/client-secret identities stay
+    # fail-closed and are never reconstructed from an anonymous token.
+    email = str(payload.get("email") or payload.get("sub") or "").lower().strip()
+    user = USER_REGISTRY.get(email) if email else None
+    if not client and isinstance(user, dict):
+        tier = normalize_tier(user.get("tier") or payload.get("tier") or payload.get("role"))
+        role, allowed, blocked = permissions_for_tier(tier)
+        client = {
+            "secret_hash": "",
+            "name": f"{user.get('name') or email}'s Client",
+            "role": role,
+            "created_at": datetime.now().isoformat(),
+            "email": email,
+            "allowed_tools": allowed,
+            "blocked_tools": blocked,
+            "restored_from_signed_session": True,
+        }
+        CLIENT_REGISTRY[client_id] = client
+        logger.info("Restored user client from signed session after restart: %s", client_id)
     if not client:
         raise HTTPException(401, "Client not found")
-    
-    # Last seen aktualisieren
-    if client_id in ACTIVE_SESSIONS:
-        ACTIVE_SESSIONS[client_id]["last_seen"] = datetime.now().isoformat()
-    
+
+    ACTIVE_SESSIONS.setdefault(client_id, {
+        "email": email or client.get("email"),
+        "connected_at": datetime.now().isoformat(),
+    })["last_seen"] = datetime.now().isoformat()
+
+    user_for_authority = user if isinstance(user, dict) else {}
+    authority_role, authority_level_value, authority_source = resolve_user_authority(
+        email, user_for_authority, payload_role=str(payload.get("authority_role") or "")
+    )
+    role = client.get("role")
+    role_value = role.value if isinstance(role, ClientRole) else str(role or payload.get("role") or "")
     return {
         "client_id": client_id,
-        "role": payload.get("role"),
-        "client": client
+        "role": role_value,
+        "tier": normalize_tier(user_for_authority.get("tier") or payload.get("tier") or payload.get("role")),
+        "email": email,
+        "authority_role": authority_role.value,
+        "authority_level": authority_level_value,
+        "authority_source": authority_source,
+        "client": client,
     }
 
 
@@ -1484,7 +1537,7 @@ async def require_admin(authorization: str = Header(None)) -> dict:
     """
     client = await get_current_client(authorization)
     
-    if client.get("role") != "admin":
+    if client.get("authority_role") not in {AuthorityRole.HUMAN_OWNER.value, AuthorityRole.HUMAN_ADMIN.value}:
         raise HTTPException(403, "Admin access required")
     
     return client

@@ -28,6 +28,7 @@ import aiofiles
 import logging
 
 from app.paths import TRISTAR_DIR
+from app.mcp.agent_instructions import EVIDENCE_REFLECTION_PROTOCOL
 
 logger = logging.getLogger("ailinux.tristar.model_init")
 
@@ -233,8 +234,6 @@ PREDEFINED_MODELS: List[Dict[str, Any]] = [
      "capabilities": ["code", "math", "reasoning"]},
     {"model_id": "qwen-coder", "model_name": "qwen3-coder:32b-cloud", "provider": "ollama", "role": "worker",
      "capabilities": ["code", "tool_use"]},
-    {"model_id": "codestral-worker", "model_name": "mistral/codestral-latest", "provider": "mistral", "role": "worker",
-     "capabilities": ["code", "documentation"]},
 
     # Multilingual
     {"model_id": "qwen-worker", "model_name": "qwen3-vl:235b-cloud", "provider": "ollama", "role": "worker",
@@ -296,8 +295,6 @@ def _generate_model_variants() -> List[Dict[str, Any]]:
         ("mistral:7b", ["code", "multilingual"]),
         ("mistral:7b-instruct", ["code", "multilingual", "analysis"]),
         ("mistral-nemo:12b", ["code", "multilingual", "reasoning"]),
-        ("mixtral:8x7b", ["code", "multilingual", "reasoning"]),
-        ("mixtral:8x22b", ["code", "multilingual", "reasoning", "long_context"]),
 
         # Google Gemma
         ("gemma:2b", ["code", "multilingual"]),
@@ -392,8 +389,6 @@ def _generate_model_variants() -> List[Dict[str, Any]]:
         ("mistral/mistral-small-latest", "mistral", ["code", "multilingual"]),
         ("mistral/mistral-medium-latest", "mistral", ["code", "multilingual", "reasoning"]),
         ("mistral/open-mistral-7b", "mistral", ["code", "multilingual"]),
-        ("mistral/open-mixtral-8x7b", "mistral", ["code", "multilingual", "reasoning"]),
-        ("mistral/open-mixtral-8x22b", "mistral", ["code", "multilingual", "reasoning", "long_context"]),
         ("mistral/pixtral-12b-2409", "mistral", ["vision", "analysis"]),
         ("mistral/pixtral-large-latest", "mistral", ["vision", "analysis", "reasoning"]),
         ("mistral/ministral-3b-latest", "mistral", ["code"]),
@@ -514,10 +509,11 @@ class ModelInitService:
         """Generiert den System-Prompt für ein Modell"""
         template = DEFAULT_SYSTEM_PROMPTS.get(config.role, DEFAULT_SYSTEM_PROMPTS[ModelRole.WORKER])
 
-        return template.format(
+        role_prompt = template.format(
             model_id=config.model_id,
             capabilities=", ".join(c.value for c in config.capabilities),
         )
+        return role_prompt.rstrip() + "\n\n" + EVIDENCE_REFLECTION_PROTOCOL.strip()
 
     def _assign_initial_neighbors(self, config: ModelConfig) -> List[str]:
         """Weist initiale Nachbarn zu (basierend auf Capabilities)"""

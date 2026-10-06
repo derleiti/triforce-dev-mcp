@@ -48,6 +48,7 @@ def bounded_text(text: str, budget: int) -> str:
 class EpisodicMemoryProvider(Protocol):
     async def health(self) -> dict: ...
     async def search(self, query: str, project: str, limit: int) -> list[dict]: ...
+    async def search_global(self, query: str, limit: int) -> list[dict]: ...
     async def timeline(self, anchor: int, project: str, depth: int = 1) -> dict: ...
     async def get_observations(self, ids: list[int], project: str) -> list[dict]: ...
     async def recent(self, project: str, limit: int) -> list[dict]: ...
@@ -93,14 +94,14 @@ class ClaudeMemAdapter:
                 return value
 
     @staticmethod
-    def _rows(value: Any, project: str) -> list[dict]:
+    def _rows(value: Any, project: str | None) -> list[dict]:
         if not isinstance(value, list) or any(not isinstance(row, dict) or
                 type(row.get('id')) is not int or not isinstance(row.get('project'), str)
                 for row in value):
             raise MemoryUnavailable('malformed_response')
         rows = []
         for raw in value:
-            if raw['project'] != project:
+            if project and raw['project'] != project:
                 continue
             row = redact(raw)
             metadata = row.get('metadata') or {}
@@ -139,6 +140,27 @@ class ClaudeMemAdapter:
                 'created_at', 'metadata', 'files_read', 'files_modified'}
         return [{k: v for k, v in row.items() if k in keys}
                 for row in rows[:min(limit, self.settings.memory_max_results)]]
+
+    async def search_global(self, query: str, limit: int) -> list[dict]:
+        """Search across Claude-Mem project scopes for internal evidence mining.
+
+        A non-empty query is mandatory so this cannot become an unbounded history
+        dump.  The caller still has to retrieve selected observations explicitly
+        through their original project scope before using narrative content.
+        """
+        query = bounded_text(redact(str(query or '').strip()), 512)
+        if not query:
+            raise MemoryUnavailable('global_query_required')
+        capped = min(max(int(limit or 1), 1), 100)
+        value = await self._request('GET', '/api/search', params={
+            'query': query, 'format': 'json', 'type': 'observations',
+            'limit': capped, 'orderBy': 'relevance'})
+        if not isinstance(value, dict) or 'observations' not in value:
+            raise MemoryUnavailable('malformed_response')
+        rows = self._rows(value['observations'], None)
+        keys = {'id', 'title', 'subtitle', 'project', 'type', 'created_at_epoch',
+                'created_at', 'metadata', 'files_read', 'files_modified'}
+        return [{k: v for k, v in row.items() if k in keys} for row in rows[:capped]]
 
     async def recent(self, project: str, limit: int) -> list[dict]:
         return await self.search('', project, limit)

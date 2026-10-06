@@ -22,7 +22,7 @@ VISION_PATTERN = re.compile(r"(llava|vision|vl|moondream|llama-vision|bakllava|p
 IMAGE_GEN_PATTERN = re.compile(r"(flux|stable-diffusion|sd-|sdxl|dall-e|dalle|gpt-image|imagen|image-gen|text-to-image)", re.IGNORECASE)
 VIDEO_GEN_PATTERN = re.compile(r"(veo|video-gen|sora)", re.IGNORECASE)
 AUDIO_PATTERN = re.compile(r"(audio|tts|transcribe|voxtral|whisper|orpheus)", re.IGNORECASE)
-CODE_PATTERN = re.compile(r"(codestral|devstral|code|coder)", re.IGNORECASE)
+CODE_PATTERN = re.compile(r"(devstral|code|coder)", re.IGNORECASE)
 EMBEDDING_PATTERN = re.compile(r"(embed)", re.IGNORECASE)
 REASONING_PATTERN = re.compile(r"(thinking|reason|magistral|o1|o3)", re.IGNORECASE)
 MODERATION_PATTERN = re.compile(r"(moderation|safety|guard)", re.IGNORECASE)
@@ -893,7 +893,6 @@ class ModelRegistry:
             ModelInfo(id="mistral/ministral-8b-latest", provider="mistral", capabilities=["chat"], roles=["assistant"]),
             ModelInfo(id="mistral/ministral-3b-latest", provider="mistral", capabilities=["chat"], roles=["assistant"]),
             # Specialist models
-            ModelInfo(id="mistral/codestral-latest", provider="mistral", capabilities=["chat", "code"], roles=["assistant", "code_assistant"]),
             ModelInfo(id="mistral/magistral-medium-latest", provider="mistral", capabilities=["chat", "reasoning"], roles=["assistant", "reasoning_engine"]),
             ModelInfo(id="mistral/mistral-embed", provider="mistral", capabilities=["embedding"], roles=["embedder"]),
             ModelInfo(id="mistral/mistral-ocr-latest", provider="mistral", capabilities=["ocr", "vision"], roles=["document_reader", "vision_analyst"]),
@@ -1378,7 +1377,6 @@ class ModelRegistry:
         return [
             ModelInfo(id="together/meta-llama/Llama-3.3-70B-Instruct-Turbo", provider="together", capabilities=["chat"], roles=["assistant"]),
             ModelInfo(id="together/meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo", provider="together", capabilities=["chat", "vision"], roles=["assistant", "vision_analyst"]),
-            ModelInfo(id="together/mistralai/Mixtral-8x22B-Instruct-v0.1", provider="together", capabilities=["chat"], roles=["assistant"]),
             ModelInfo(id="together/Qwen/Qwen2.5-72B-Instruct-Turbo", provider="together", capabilities=["chat"], roles=["assistant"]),
             ModelInfo(id="together/deepseek-ai/DeepSeek-V3", provider="together", capabilities=["chat", "code"], roles=["assistant", "code_assistant"]),
             ModelInfo(id="together/black-forest-labs/FLUX.1-schnell", provider="together", capabilities=["image_gen"], roles=["image_generator"]),
@@ -1431,7 +1429,6 @@ class ModelRegistry:
         return [
             ModelInfo(id="fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct", provider="fireworks", capabilities=["chat"], roles=["assistant"]),
             ModelInfo(id="fireworks/accounts/fireworks/models/llama-v3p2-90b-vision-instruct", provider="fireworks", capabilities=["chat", "vision"], roles=["assistant", "vision_analyst"]),
-            ModelInfo(id="fireworks/accounts/fireworks/models/mixtral-8x22b-instruct", provider="fireworks", capabilities=["chat"], roles=["assistant"]),
             ModelInfo(id="fireworks/accounts/fireworks/models/qwen2p5-72b-instruct", provider="fireworks", capabilities=["chat"], roles=["assistant"]),
             ModelInfo(id="fireworks/accounts/fireworks/models/deepseek-v3", provider="fireworks", capabilities=["chat", "code"], roles=["assistant", "code_assistant"]),
         ]

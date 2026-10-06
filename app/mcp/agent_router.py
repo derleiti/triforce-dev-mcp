@@ -77,23 +77,29 @@ async def _execute_task_background(task_id: str, model: str, prompt: str) -> Non
             provider = skills_data.get(model, DEFAULT_SKILLS.get(model, {})).get("provider", "")
 
             if provider == "ollama":
-                # Direkt Ollama API — unterstützt alle Modelle inkl. code-only
-                ollama_url = "http://localhost:11434/api/chat"
+                # Direct Ollama API with infrastructure-node failover.
+                from app.services.ollama_node_router import ollama_candidates
                 payload = {
-                    "model": model,  # ohne prefix
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
                 }
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        ollama_url, json=payload,
-                        timeout=aiohttp.ClientTimeout(total=180),
-                    ) as resp:
-                        if resp.status == 200:
-                            body = await resp.json()
-                            result_text = body.get("message", {}).get("content") or str(body)
-                        else:
-                            error_text = f"Ollama HTTP {resp.status}: {await resp.text()}"
+                    for endpoint in ollama_candidates(model):
+                        try:
+                            async with session.post(
+                                f"{endpoint.base_url}/api/chat", json=payload,
+                                timeout=aiohttp.ClientTimeout(total=180),
+                            ) as resp:
+                                if resp.status == 200:
+                                    body = await resp.json()
+                                    result_text = body.get("message", {}).get("content") or str(body)
+                                    break
+                                error_text = f"Ollama HTTP {resp.status}: {await resp.text()}"
+                        except (aiohttp.ClientError, asyncio.TimeoutError):
+                            continue
+                    if result_text is None and error_text is None:
+                        error_text = "Ollama nodes unavailable"
             else:
                 # API-Provider: via /v1/chat mit Provider-Prefix
                 if provider == "mistral" and not model.startswith("mistral/"):

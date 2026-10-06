@@ -1,5 +1,5 @@
 """
-Central Logging v3.0 - Komprimiert & Optimiert
+Central Logging v4.0 - Structured TriForce/Uvicorn Console
 ==============================================
 Logs: ./triforce/logs/ AND /triforce/logs/
 - all.log, auth.log, mcp.log, api.log, llm.log, agents.log, errors.log
@@ -11,6 +11,8 @@ import sys
 from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+from .log_formatters import RedactingFormatter, TriForceConsoleFormatter
 
 # Directories
 _BASE = Path(__file__).parent.parent.parent
@@ -53,7 +55,7 @@ def _handler(path: str, level: int = logging.DEBUG) -> RotatingFileHandler:
     """Cached rotating file handler factory."""
     h = RotatingFileHandler(path, maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     h.setLevel(level)
-    h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     return h
 
 
@@ -81,7 +83,7 @@ def setup_central_logging(console_level: int = logging.INFO, enable_console: boo
     if enable_console:
         console = logging.StreamHandler(sys.stdout)
         console.setLevel(console_level)
-        console.setFormatter(ColorFormatter(FMT, DATE_FMT))
+        console.setFormatter(TriForceConsoleFormatter(include_source=True))
         root.addHandler(console)
 
     # Category loggers
@@ -106,7 +108,7 @@ def setup_central_logging(console_level: int = logging.INFO, enable_console: boo
     _setup_error_debug(root)
 
     root.info("=" * 50)
-    root.info(f"TriForce Logging v3.0 | {LOG_DIR} | {ERROR_DEBUG_DIR}")
+    root.info(f"TriForce Logging v4.0 | structured console + Uvicorn | {LOG_DIR} | {ERROR_DEBUG_DIR}")
     root.info("=" * 50)
 
 
@@ -129,20 +131,20 @@ def _setup_error_debug(root: logging.Logger) -> None:
     # Error handler
     err_h = RotatingFileHandler(target / "error.log", maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     err_h.setLevel(logging.ERROR)
-    err_h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    err_h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     root.addHandler(err_h)
 
     # Debug handler (DEBUG only)
     dbg_h = RotatingFileHandler(target / "debug.log", maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     dbg_h.setLevel(logging.DEBUG)
-    dbg_h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    dbg_h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     dbg_h.addFilter(LevelFilter(logging.DEBUG))
     root.addHandler(dbg_h)
 
     # Warning handler (WARNING only)
     warn_h = RotatingFileHandler(target / "warning.log", maxBytes=MAX_BYTES, backupCount=BACKUP, encoding='utf-8')
     warn_h.setLevel(logging.WARNING)
-    warn_h.setFormatter(logging.Formatter(FMT_DETAIL, DATE_FMT))
+    warn_h.setFormatter(RedactingFormatter(FMT_DETAIL, DATE_FMT))
     warn_h.addFilter(LevelFilter(logging.WARNING))
     root.addHandler(warn_h)
 

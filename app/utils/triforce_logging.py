@@ -25,6 +25,7 @@ from enum import Enum
 from pathlib import Path
 
 from app.paths import LOG_DIR
+from app.utils.log_formatters import redact_sensitive, sanitize_log_data
 from typing import Any, Dict, List, Optional, Set
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -105,12 +106,22 @@ class TriForceLogEntry:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary, excluding None values"""
+        """Convert to a log-safe dictionary, excluding ``None`` values."""
         data = asdict(self)
-        # Handle both Enum and string values for category/level
+        # Handle both Enum and string values for category/level.
         data["category"] = self.category.value if hasattr(self.category, 'value') else str(self.category)
         data["level"] = self.level.value if hasattr(self.level, 'value') else str(self.level)
-        # Remove None values for cleaner output
+        # Defense in depth: direct logger calls can bypass the Python logging
+        # formatter, so sanitize all free-text and structured payloads here too.
+        for field_name in ("message", "error_message", "stack_trace"):
+            if data.get(field_name) is not None:
+                data[field_name] = redact_sensitive(data[field_name])
+        for field_name in ("tool_params", "metadata"):
+            if data.get(field_name) is not None:
+                data[field_name] = sanitize_log_data(data[field_name])
+        # MCP session ids may be bearer-like capabilities on legacy transports.
+        if data.get("session_id") is not None:
+            data["session_id"] = "[REDACTED]"
         return {k: v for k, v in data.items() if v is not None}
 
     def to_json(self) -> str:
@@ -223,7 +234,7 @@ class TriForceLogHandler(logging.Handler):
                 category=category,
                 level=level,
                 source=record.name,
-                message=record.getMessage(),
+                message=redact_sensitive(record.getMessage()),
                 metadata={
                     "filename": record.filename,
                     "lineno": record.lineno,
@@ -235,8 +246,8 @@ class TriForceLogHandler(logging.Handler):
             if record.exc_info:
                 import traceback
                 entry.error_type = record.exc_info[0].__name__ if record.exc_info[0] else None
-                entry.error_message = str(record.exc_info[1]) if record.exc_info[1] else None
-                entry.stack_trace = ''.join(traceback.format_exception(*record.exc_info))
+                entry.error_message = redact_sensitive(record.exc_info[1]) if record.exc_info[1] else None
+                entry.stack_trace = redact_sensitive(''.join(traceback.format_exception(*record.exc_info)))
 
             # Queue for async processing
             self.central_logger.queue_log(entry)
@@ -513,24 +524,9 @@ class TriForceCentralLogger:
         )
 
     def _sanitize_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove sensitive data from params"""
-        if not params:
-            return {}
-
-        sensitive_keys = {"password", "api_key", "secret", "token", "credential", "auth"}
-        safe = {}
-
-        for key, value in params.items():
-            if any(s in key.lower() for s in sensitive_keys):
-                safe[key] = "[REDACTED]"
-            elif isinstance(value, str) and len(value) > 500:
-                safe[key] = value[:500] + "...[truncated]"
-            elif isinstance(value, dict):
-                safe[key] = self._sanitize_params(value)
-            else:
-                safe[key] = value
-
-        return safe
+        """Return a recursive, non-mutating, log-safe parameter copy."""
+        safe = sanitize_log_data(params or {})
+        return safe if isinstance(safe, dict) else {}
 
     async def _periodic_flush(self):
         """Periodically flush logs to disk"""
@@ -806,7 +802,7 @@ class MultiFileLogger:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "mcp",
             "method": method,
-            "params": str(params)[:500] if params else None,
+            "params": sanitize_log_data(params) if params else None,
             "result_size": len(str(result)) if result else 0,
             "latency_ms": round(latency_ms, 2),
             "error": error,
@@ -836,16 +832,8 @@ class MultiFileLogger:
             result_preview: Optional truncated result preview
             error: Error message if failed
         """
-        # Sanitize sensitive params
-        safe_params = {}
-        sensitive_keys = {"password", "api_key", "secret", "token", "credential", "auth"}
-        for k, v in (params or {}).items():
-            if any(s in k.lower() for s in sensitive_keys):
-                safe_params[k] = "[REDACTED]"
-            elif isinstance(v, str) and len(v) > 200:
-                safe_params[k] = v[:200] + "..."
-            else:
-                safe_params[k] = v
+        # Keep protocol/tool audit logs structured and recursively credential-safe.
+        safe_params = sanitize_log_data(params or {})
         
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -925,8 +913,9 @@ class MultiFileLogger:
         async with self._lock:
             try:
                 path = self._get_dated_path(subdir, name)
+                safe_entry = sanitize_log_data(entry)
                 with open(path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+                    f.write(json.dumps(safe_entry, ensure_ascii=False, default=str) + "\n")
             except Exception as e:
                 logger.error(f"Failed to write to {name} log: {e}")
 

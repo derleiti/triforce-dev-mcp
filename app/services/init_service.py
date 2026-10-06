@@ -21,6 +21,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from ..config import VERSION
 
 # Import tool definitions for aggregation
 from ..services.ollama_mcp import OLLAMA_TOOLS
@@ -277,7 +278,7 @@ class InitService:
     """
 
     def __init__(self):
-        self._version = "2.80.0"
+        self._version = VERSION
         self._initialized = False
 
     def _generate_default_system_prompt(self) -> str:
@@ -1006,7 +1007,7 @@ EX:@g>!s"query"=[r]>>@c>!sum@[r] | @g>>@c!code"feat"#urgent"""
         compact = self.generate_compact_init(agent_id, max_tokens=max_tokens)
         return {
             "system": f"MCP-INIT:\n{compact}\n\nUse tool_use blocks for MCP tools.",
-            "metadata": {"mcp_version": "2.80.0"}
+            "metadata": {"mcp_version": self._version}
         }
 
     def get_universal_init(
@@ -1033,7 +1034,7 @@ EX:@g>!s"query"=[r]>>@c>!sum@[r] | @g>>@c!code"feat"#urgent"""
         else:
             # Universal format
             return {
-                "mcp_version": "2.80.0",
+                "mcp_version": self._version,
                 "protocol": "TriForce MCP",
                 "compact_init": compact,
                 "token_count": len(compact) // 4,
