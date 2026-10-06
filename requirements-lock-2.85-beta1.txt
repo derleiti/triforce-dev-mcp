@@ -64,7 +64,7 @@ mdit-py-plugins==0.6.1
 mdurl==0.1.2
 mistralai==2.9.3
 more-itertools==11.1.0
-multidict==6.7.1
+multidict==6.9.1
 mypy==2.3.0
 mypy_extensions==1.1.0
 numpy==2.5.3
