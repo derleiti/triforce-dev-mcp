@@ -292,3 +292,98 @@ logs?category=api|llm|mcp|error|agent
 - [MCP Tools](api/MCP.md)
 - [Federation](architecture/FEDERATION.md)
 - [Episodic Agent Memory](architecture/episodic-memory.md)
+
+
+## Project Memory und synchronisierte Agent-Historie
+
+TriForce und AICoder trennen vier Memory-Ebenen bewusst:
+
+- **Runtime State**: aktueller Run, aktive Tools, aktuelle Code-/Runtime-Evidence.
+- **Project Memory**: kanonischer aktueller Projektzustand (`todo`, `idea`, `decision`, `architecture`, `bug`, `lesson`, `feature`, `project_summary`, `documentation`).
+- **Curated Memory**: explizit verifiziertes dauerhaftes Wissen.
+- **Episodic Memory / Claude-Mem**: append-only historische Revisionen und Erfahrungen.
+
+Aktuelle Code- und Runtime-Evidence hat Vorrang vor Project Memory. Project Memory hat Vorrang vor historischer episodischer Erinnerung. Claude-Mem ist **keine Sync Authority**.
+
+### Sync-Protokoll
+
+`POST /v1/project-memory/sync` verwendet die bestehende authentifizierte Client-Session. Die Owner-ID wird ausschließlich serverseitig aus der Session abgeleitet und niemals aus Client-Daten übernommen. Jeder Project-Memory-Eintrag enthält `entity_id`, `project_key`, `kind`, `title`, `content`, `status`, `version`, `base_version`, `server_seq`, `content_hash`, `device_id`, `source`, `updated_at` und `deleted`.
+
+Optimistic Concurrency:
+
+```text
+base_version == current.version
+  -> Revision akzeptieren
+  -> version + 1
+  -> server_seq serverseitig vergeben
+
+base_version != current.version
+  -> Konflikt
+  -> Serverstand nicht überschreiben
+  -> Konfliktversuch append-only in revisions erhalten
+```
+
+Die Reihenfolge wird ausschließlich über `server_seq` bestimmt. Client-Uhren entscheiden nicht über Gewinner. Löschungen werden als Tombstones (`deleted=true`) synchronisiert; Hard Deletes sind im Sync-Pfad verboten.
+
+### Project Identity und Restore
+
+AICoder verwendet bevorzugt eine normalisierte und gehashte Git-`remote.origin`-Identität. Ohne Remote wird eine persistente Repository-UUID in `.git/ailinux-project-id`, danach eine persistente Workspace-UUID verwendet; ein Pfad-Hash ist nur Fallback. Dadurch erzeugt ein verschobenes Git-Repository kein neues Gedächtnis.
+
+Nach einer Neuinstallation kann sich AICoder erneut anmelden, dieselbe Projektidentität bestimmen und den kanonischen Project-Memory-Stand von TriForce ab Cursor `0` wiederherstellen.
+
+### Datenschutz und Offline-Verhalten
+
+Synchronisiert werden nur strukturierte Project-Memory-Einträge. Chats, Repositories, rohe Tool-Ausgaben, `.env`, Credentials und Tokens werden nicht automatisch hochgeladen. Secret-artige Inhalte werden client- und serverseitig vor Persistenz/Upload blockiert. Source-Dateien werden über Evidence-Metadaten wie Pfad/Hash referenziert, nicht als kompletter Inhalt synchronisiert.
+
+AICoder bleibt local-first: lokale Änderungen landen in der bestehenden `~/.config/ai-coder/evidence.db` und werden als `dirty` markiert. Netzwerk-/Auth-Ausfälle verhindern weder lokale Speicherung noch Coding. Konflikte werden lokal in `project_memory_conflicts` konserviert. Erfolgreicher Push/Pull aktualisiert Cursor und `server_seq`.
+
+### Claude-Mem Mirror
+
+Jede neu akzeptierte Project-Memory-Revision wird best-effort über die bestehende `EpisodicMemoryProvider`-/`ClaudeMemAdapter`-Schicht als `project_memory_revision` gespiegelt. Ein Claude-Mem-Ausfall darf den Project-Memory-Commit oder Sync niemals zurückrollen.
+
+
+## Compute-Offload und Node-Rollen
+
+Die drei festen AILinux-Nodes haben unterschiedliche Betriebsrollen:
+
+- **Hetzner / ailinux** bleibt Public Hub, API-/Control-Plane und zuverlässiger Fallback. Rechenarbeit soll dort nicht bevorzugt landen.
+- **backup** ist der bevorzugte allgemeine Ollama-/Cloud-Proxy-Compute-Node. Er besitzt eigenen Swap und große freie Storage-/RAM-Reserve.
+- **zombie-pc** wird modellabhängig für lokale Compute-Modelle genutzt. Der normale Desktop-/Workspace-Betrieb bleibt davon unabhängig.
+
+Ollama-Anfragen verwenden eine gemeinsame Node-Auswahl. Für normale Modelle ist die Reihenfolge `backup -> hetzner`. Für explizit auf Zombie-PC vorhandene Modelle ist sie `zombie-pc -> backup -> hetzner`. Netzwerk-, Timeout- und Serverfehler führen zuerst zum nächsten Node; erst wenn alle passenden Nodes für das gewünschte Modell versagen, greift ein vorhandener Modell-Fallback.
+
+Die Federation-Gewichtung bevorzugt bei gleicher freier Kapazität Compute-Nodes gegenüber dem Public Hub. Hetzner bleibt trotzdem verfügbar und übernimmt bei Ausfall der Offload-Nodes.
+
+### Memory Storage
+
+Die aktive Claude-Mem-SQLite bleibt auf dem lokalen NVMe des TriForce-Hubs. Sie wird **nicht** über NFS/SSHFS oder ein anderes Netzwerk-Dateisystem gemeinsam schreibbar gemacht. Stattdessen erzeugt Hetzner stündlich mit SQLite-`.backup` einen konsistenten Snapshot und repliziert ihn auf den Backup-Node. Dadurch bleibt die aktive Datenbank lokal schnell und robust, während historische Wiederherstellungskapazität auf dem großen Backup-Datenträger liegt.
+
+### Host-Reserven
+
+Swap und Dateisystemreserve werden vor Compute-/Memory-Wachstum behandelt. Aktueller Zielzustand:
+
+- Hetzner: vorhandener großer Swap als Hub-Reserve.
+- backup: dedizierter Swapfile und niedrige Swappiness.
+- zombie-pc: vorhandene NVMe-Swap-Partition aktiv plus kleiner Swapfile als zusätzliche Reserve.
+
+Compute-Offload darf Root-, Docker-/Service- und Swap-Reserve nicht verdrängen.
+
+
+### Dynamisches Compute-Scheduling und optionale Nodes
+
+Federation-Worker sind **opportunistisch**. Weder `backup` noch `zombie-pc` sind Quorum-, Storage- oder Control-Plane-Abhängigkeiten. Der öffentliche Hub bleibt auch dann funktionsfähig, wenn ein Worker ausgeschaltet, neu installiert oder aus WireGuard entfernt wird.
+
+Jeder Node liefert über den bestehenden `/health`-Pfad einen kleinen Capacity-Snapshot mit CPU-Auslastung, CPU-Anzahl, Load-Ratio, RAM-Auslastung und verfügbarem RAM, freiem Swap sowie freiem Root-Speicher. Diese zusätzlichen Resource-Metriken werden nur bei gültigem `X-Federation-Key` mitgeliefert; der öffentliche Healthcheck verrät sie nicht. Der Hub cached die Werte über parallele Heartbeats und berechnet daraus einen Selection Score. Die Gewichtung berücksichtigt:
+
+- CPU- und RAM-Headroom
+- Load Average relativ zur CPU-Anzahl
+- lokale Request-/Concurrency-Auslastung
+- gemessene Heartbeat-Latenz
+- node-spezifische Placement-Gewichte
+- Mindestreserven für RAM und Swap
+
+Heartbeats laufen parallel und mit kurzem Timeout. Ein langsamer oder verschwundener optionaler Node kann dadurch die Prüfung anderer Nodes nicht verzögern. Nach dem ersten Fehler wird ein Node `degraded`, nach wiederholtem Fehler `offline`; beide Zustände erhalten keinen neuen Compute. Stale Heartbeats und `draining` führen ebenfalls zu Score 0. Sobald ein späterer Healthcheck wieder erfolgreich ist, wird der Node automatisch erneut schedulable.
+
+Für geplante Wartung kann `TRIFORCE_DRAIN_NODES` als kommaseparierte Liste gesetzt werden, beispielsweise `TRIFORCE_DRAIN_NODES=zombie-pc`. Das ist optional: ungeplante Ausfälle werden automatisch abgefangen.
+
+Ollama verwendet dieselben gecachten Federation-Metriken. Bei normaler Last bleibt Backup bevorzugt und Hetzner Control-Plane-Fallback. Wenn Backup stark ausgelastet ist, darf der Hub vorübergehend übernehmen. Ein exklusiv auf Zombie-PC vorhandenes Modell behält Modell-Affinität, solange Zombie gesund ist. Fällt Zombie aus, wird der Node ausgelassen; kann das angeforderte Modell nirgendwo ausgeführt werden, wechselt der Chat-Pfad auf das allgemeine `LOCAL_FALLBACK_MODEL` statt an der optionalen Hardware zu scheitern.

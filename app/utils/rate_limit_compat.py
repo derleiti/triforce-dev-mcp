@@ -121,7 +121,21 @@ class RateLimiter:
         if self._delegate is None:
             return None
         if not self._legacy:
-            return await self._delegate(request=request, response=response)
+            # fastapi-limiter >=0.2 also scans request.app.routes before using
+            # its pyrate-limiter backend. FastAPI 0.116+ may place
+            # _IncludedRouter objects in that list, which do not have .path.
+            # Use the delegate's documented primitives directly and derive a
+            # stable route key from the current request instead of scanning.
+            identifier = self._delegate.identifier
+            callback = self._delegate.callback
+            rate_key = await identifier(request)
+            route_key = f"{request.method}:{request.scope.get('path', '')}"
+            success = await self._delegate.limiter.try_acquire_async(
+                f"{rate_key}:{route_key}", blocking=self._delegate.blocking
+            )
+            if not success:
+                return await callback(request, response)
+            return None
 
         # fastapi-limiter <=0.1 scans request.app.routes and assumes every entry
         # is an APIRoute. FastAPI 0.116+ also stores _IncludedRouter entries.

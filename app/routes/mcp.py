@@ -2,9 +2,12 @@ from __future__ import annotations
 from .widget_handlers import handle_weather, handle_crypto_prices, handle_stock_indices, handle_market_overview, handle_google_deep_search, handle_current_time, handle_list_timezones
 
 import base64
+import hashlib
 import inspect
 import logging
 import os
+import re
+from pathlib import Path
 from datetime import datetime, timezone
 
 # Logger für MCP Routes
@@ -12,7 +15,7 @@ logger = logging.getLogger("ailinux.mcp.routes")
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 import json
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from ..config import VERSION
 
@@ -139,148 +142,129 @@ def _helper_design_css() -> str:
     return f":root{{color-scheme:dark light;{variables(dark)}}}@media(prefers-color-scheme:light){{:root{{{variables(light)}}}}}"
 
 
+
+def _helper_source_root() -> Path:
+    return Path(os.getenv("AILINUX_HELPER_SOURCE", "/home/zombie/workspace/ailinux-helper")).resolve()
+
+
+def _helper_web_root() -> Path:
+    return _helper_source_root() / "apps" / "web"
+
+
+def _helper_release_manifest() -> dict:
+    path = Path(os.getenv("AILINUX_HELPER_RELEASE_MANIFEST", str(_helper_source_root() / "release.json")))
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"AILinux Helper release manifest unavailable: {path}") from exc
+    if int(document.get("schema_version") or 0) != 1:
+        raise RuntimeError("Unsupported AILinux Helper release manifest schema")
+    if not isinstance(document.get("artifacts"), dict):
+        raise RuntimeError("AILinux Helper release manifest has no artifact map")
+    return document
+
+
+def _helper_release_catalog() -> dict:
+    """Project the checked-in Helper release manifest onto the local artifact mirror."""
+    manifest = _helper_release_manifest()
+    release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
+    version = str(manifest.get("helper_version") or "unknown")
+    catalog: dict[str, dict] = {}
+    for platform, meta in manifest["artifacts"].items():
+        if not isinstance(meta, dict):
+            continue
+        filename = str(meta.get("filename") or "")
+        artifact = release_root / filename
+        expected_size = int(meta.get("size") or 0)
+        available = bool(filename and artifact.is_file() and (not expected_size or artifact.stat().st_size == expected_size))
+        artifact_version = str(meta.get("version") or version)
+        catalog[str(platform)] = {
+            "available": available,
+            "platform": str(platform),
+            "version": artifact_version,
+            "filename": filename,
+            "size": expected_size,
+            "media_type": str(meta.get("media_type") or "application/octet-stream"),
+            "sha256": str(meta.get("sha256") or ""),
+            "url": f"/v1/mcp/helper/{platform}",
+        }
+    aliases = manifest.get("aliases") if isinstance(manifest.get("aliases"), dict) else {}
+    for alias, target in aliases.items():
+        base = catalog.get(str(target))
+        if base:
+            projected = dict(base)
+            projected["platform"] = str(alias)
+            projected["alias_for"] = str(target)
+            projected["url"] = f"/v1/mcp/helper/{alias}"
+            catalog[str(alias)] = projected
+    catalog["latest_version"] = version
+    catalog["manifest_schema"] = int(manifest.get("schema_version") or 0)
+    return catalog
+
+
+def _webmcp_build_key() -> str:
+    """Fingerprint the browser executor bundle for cache-safe public asset URLs."""
+    root = _helper_web_root()
+    digest = hashlib.sha256()
+    for name in ("index.html", "styles.css", "app.js", "pyodide-worker.js", "sw.js"):
+        path = root / name
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
 def _workspace_setup_html() -> str:
-    return r'''<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AILinux Helper · TriForce MCP</title><link rel="icon" type="image/png" href="/v1/mcp/helper/icon.png?v=29014"><link rel="apple-touch-icon" href="/v1/mcp/helper/icon.png?v=29014"><link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=29014"><meta name="theme-color" content="#0d1117"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="AILinux Helper">
-<style>
-/*AILINUX_DESIGN_TOKENS*/
-*{box-sizing:border-box}body{font-family:var(--ailinux-typography),system-ui,sans-serif;background:var(--ailinux-background);color:var(--ailinux-text);margin:0}main{max-width:860px;margin:5vh auto;padding:24px}section{background:var(--ailinux-glass);border:1px solid var(--ailinux-glass-border);border-radius:var(--ailinux-radius);box-shadow:var(--ailinux-shadow);padding:22px;margin:16px 0}h1{font-size:2rem;margin:.25rem 0}h2{margin-top:0}p{line-height:1.5;color:var(--ailinux-text-muted)}.muted{color:var(--ailinux-text-muted)}.ok{color:var(--ailinux-success)}.warn{color:var(--ailinux-warning)}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{background:var(--ailinux-accent);color:var(--ailinux-background);border:1px solid var(--ailinux-accent);border-radius:8px;padding:11px 16px;font-weight:650;cursor:pointer}button:hover{background:var(--ailinux-accent-hover);border-color:var(--ailinux-accent-hover)}button.secondary{background:var(--ailinux-surface);color:var(--ailinux-text);border-color:var(--ailinux-glass-border)}button:disabled{opacity:.45;cursor:not-allowed}input[type=text],textarea{width:100%;background:var(--ailinux-surface);border:1px solid var(--ailinux-glass-border);color:var(--ailinux-text);padding:11px;border-radius:8px}textarea{min-height:76px;resize:vertical}code,.mono{font-family:ui-monospace,SFMono-Regular,monospace}.pair{font-size:1.05rem;letter-spacing:.04em}.pill{display:inline-block;border:1px solid var(--ailinux-accent);background:var(--ailinux-glass);color:var(--ailinux-accent);padding:5px 10px;border-radius:999px}.hidden{display:none}.status{font-weight:650}.choice{padding:9px 12px;border:1px solid var(--ailinux-glass-border);border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.drop{margin-top:10px;border-style:dashed;text-align:center}@media(max-width:650px){.grid{grid-template-columns:1fr}}
-</style></head><body><main>
-<span class="pill">AILinux · TriForce MCP</span><h1>AILinux Helper</h1>
-<p>The selected folder stays on this device. Selecting a folder does not enumerate or analyze it. Use the native Android helper for a persistent foreground executor, or install this page as a web app on Android/iOS for automatic resume when the OS suspends it.</p>
-<section id="helperPanel"><div class="row"><img src="/v1/mcp/helper/icon.png?v=29014" width="64" height="64" alt="AILinux Helper icon" style="border-radius:14px"><div><h2 style="margin-bottom:4px">AILinux Helper 2.90.14</h2><span class="pill">AILinux Share & Compute node</span></div></div><p id="helperText" class="muted">Nothing is shared automatically. Choose exactly which local capabilities this device contributes to the AI network; every grant can be revoked again.</p><div id="helperActions" class="row"><button id="openAppBtn" class="hidden">Open AILinux Helper</button><a id="androidDownload" class="hidden" href="/v1/mcp/helper/android"><button>Android APK</button></a><button id="installPwaBtn" class="secondary hidden">Install web app</button><a id="linuxAppImage" href="/v1/mcp/helper/linux-appimage"><button>Linux AppImage</button></a><a id="linuxDeb" href="/v1/mcp/helper/linux-deb"><button class="secondary">Linux .deb</button></a><a id="windowsDownload" href="/v1/mcp/helper/windows"><button class="secondary">Windows</button></a><a id="macDownload" href="/v1/mcp/helper/macos"><button class="secondary">macOS</button></a></div><p id="helperNote" class="muted">The browser/PWA remains the zero-install fallback. Legacy Workspace URLs stay compatible.</p></section>
-<section id="nativeSharePanel"><h2>1 · Choose device capabilities</h2><p class="muted">These switches affect only the native Helper. A disabled capability is neither advertised nor callable by the connected AI. Mutating device actions still require a local confirmation dialog.</p><div class="grid"><label class="choice"><input id="shareClipboardRead" type="checkbox"> Clipboard read</label><label class="choice"><input id="shareClipboardWrite" type="checkbox"> Clipboard write</label><label class="choice"><input id="shareDisplay" type="checkbox"> Display / vision observe</label><label class="choice"><input id="shareSystemObserve" type="checkbox"> System / process observe</label><label class="choice"><input id="shareSystemControl" type="checkbox"> System / app / service control</label><label class="choice"><input id="shareComputerControl" type="checkbox"> Mouse / keyboard control</label><label class="choice"><input id="shareResources" type="checkbox"> CPU / RAM / GPU metadata</label><label class="choice"><input id="shareCompute" type="checkbox"> Docker compute runtime</label><label class="choice"><input id="shareMcp" type="checkbox"> Local MCP bridge</label></div><div class="row" style="margin-top:12px"><button id="saveNativeShares" class="secondary">Apply capability grants</button><button id="refreshResources" class="secondary">Refresh resource inventory</button></div><pre id="resourceInventory" class="muted"></pre></section>
-<section id="dockerPanel"><h2>2 · Docker compute service</h2><p class="muted">Docker is optional and required only for disposable compute. The page never talks to docker.sock or systemd directly; every operation goes through the native Helper broker and mutating actions require its local confirmation dialog.</p><div class="row"><span id="dockerState" class="pill">Helper required</span><span id="dockerVersion" class="muted"></span></div><p id="dockerDetail" class="muted">Open this page inside AILinux Helper to manage Docker.</p><div class="row"><button id="dockerInstallBtn" class="hidden">Install Docker</button><button id="dockerStartBtn" class="secondary hidden">Start</button><button id="dockerStopBtn" class="secondary hidden">Stop</button><button id="dockerRestartBtn" class="secondary hidden">Restart</button><button id="dockerTestBtn" class="secondary hidden">Test disposable container</button><button id="dockerRefreshBtn" class="secondary">Refresh status</button></div><pre id="dockerResult" class="muted"></pre></section>
-<section id="serviceControlPanel"><h2>3 · Local service control</h2><p class="muted">Only fixed, typed Helper operations are exposed. There is no free-form root shell. System services still require the native local confirmation/PolicyKit path.</p><div id="serviceList" class="grid"><div class="choice muted">Open this page inside AILinux Helper to inspect local services.</div></div><div class="row" style="margin-top:12px"><button id="serviceRefreshBtn" class="secondary">Refresh services</button></div><pre id="serviceResult" class="muted"></pre></section>
-<section id="terminalPanel" class="hidden"><h2>Terminal</h2><p id="terminalText" class="muted"></p><div class="row"><label>Backend <select id="terminalBackend"></select></label><button id="releaseTermBtn" class="hidden">Release terminal to the AI</button><button id="revokeTermBtn" class="secondary hidden">Revoke terminal</button></div><p id="terminalHint" class="muted"></p></section>
-<section id="shareBuilderPanel"><h2>4 · Build share</h2><p class="muted">Workspace is optional. A share can contain only native capabilities such as compute, vision, MCP or resource advertisement.</p><div class="grid"><label class="choice">Visibility <select id="shareVisibility"><option value="private" selected>Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label><div class="choice"><strong>Active grants</strong><div id="activeGrants" class="muted">None</div></div></div><div class="row" style="margin-top:12px"><button id="revokeShareBtn" class="secondary">Revoke all grants</button></div></section>
-<section><h2>5 · Share workspace (optional)</h2>
-<div class="grid"><label class="choice"><input type="radio" name="mode" value="read_only" checked> Read only</label><label class="choice"><input id="writeMode" type="radio" name="mode" value="write"> Write</label></div>
-<div class="row" style="margin-top:14px"><button id="chooseBtn">Choose local folder</button><button id="openChromeBtn" class="secondary hidden">Open in Chrome</button><span id="folderName" class="muted">No folder shared</span></div>
-<div id="dropZone" class="choice drop">Desktop fallback: drag a folder here for lazy read-only access</div>
-<p id="browserNote" class="muted"></p><p id="browserCaps" class="muted mono"></p>
-<label for="task" class="muted">Optional task/context for the AI</label><textarea id="task" placeholder="e.g. Review this project and fix the login flow"></textarea>
-<div class="row" style="margin-top:12px"><button id="connectBtn" class="secondary hidden" disabled>Reconnect executor</button><button id="handoffBtn" class="secondary hidden" disabled>Hand off to app</button><button id="disconnectBtn" class="secondary" disabled>Disconnect</button></div>
-<div class="row" style="margin-top:12px"><label class="choice"><input id="wakeLockToggle" type="checkbox"> Keep screen awake while connected</label><span id="wakeLockState" class="muted">Wake Lock off</span></div>
-<p id="status" class="status" aria-live="polite">Choose a folder first.</p><pre id="analysis" class="muted"></pre></section>
-<section id="pairPanel" class="hidden"><h2 class="ok">6 · Share ready</h2><p>Paste this one-time ID into the ChatGPT, Codex or Mistral conversation that uses TriForce. The AI will call <code>workspace_pair</code> and bind this browser workspace to that MCP session.</p><div class="row"><input id="pair" class="pair mono" type="text" readonly value=""><button id="copyBtn">Copy ID</button><img id="pairQr" class="hidden" width="148" height="148" alt="One-time pairing QR code"></div><p class="muted">The pairing ID expires after 15 minutes. After pairing, a persistent workspace session is stored locally and can resume without reusing the pairing ID.</p></section>
-<section><h2>Public MCP URL</h2><div class="row"><input id="mcpUrl" type="text" readonly value="https://api.ailinux.me/v1/mcp"><button id="copyMcp" class="secondary">Copy MCP URL</button></div></section>
-<script data-cfasync="false">
-'use strict';
-const $=id=>document.getElementById(id);
-const READ_TOOLS=['workspace_info','file_read','file_tree','code_read','code_tree','code_search','code_grep','file_ops'];
-const WRITE_TOOLS=['file_edit','directory_create','workspace_clear','code_edit'];
-const HELPER_DEVICE_TOOLS=['computer_observe','computer_screenshot','clipboard_read','clipboard_write','device_info','process_ops','service_ops','app_ops','window_ops','computer_input','device_control','compute_execute'];
-const IGNORE=new Set(['.git','.venv','node_modules','__pycache__','.pytest_cache','.mypy_cache']);
-const MAX_TEXT=2*1024*1024;
-const EXECUTOR_VERSION='2.90.14-browser';
-const urlPair=(new URLSearchParams(location.search).get('pair_code')||'').trim().toUpperCase();let pairCode=urlPair||sessionStorage.getItem('tf_pair_code')||'',rootHandle=null,rootEntry=null,ws=null,workspaceMode=sessionStorage.getItem('tf_workspace_mode')||'read_only',capabilities=[],heartbeatTimer=null,watchdogTimer=null,reconnectTimer=null,reconnectAttempt=0,manualDisconnect=false,lastPongAt=0,workspaceAttached=false,resumeToken='',toolQueue=Promise.resolve(),wakeLockSentinel=null,wakeLockWanted=localStorage.getItem('tf_workspace_wake_lock')==='1',connectPromise=null;if(urlPair){sessionStorage.setItem('tf_pair_code',urlPair);try{history.replaceState({},document.title,location.pathname)}catch{}}
-const directPicker=typeof window.showDirectoryPicker==='function';
-const android=/Android/i.test(navigator.userAgent),ios=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1),firefox=/Firefox\//i.test(navigator.userAgent);let deferredInstallPrompt=null;
-const persistentHandleStore='indexedDB' in window;
-const dropHandleCap=typeof DataTransferItem!=='undefined'&&typeof DataTransferItem.prototype.getAsFileSystemHandle==='function';
-const dropEntryCap=typeof DataTransferItem!=='undefined'&&(typeof DataTransferItem.prototype.getAsEntry==='function'||typeof DataTransferItem.prototype.webkitGetAsEntry==='function');
-const nativeHelper=window.ailinuxHelper||null;let nativeHelperCaps={},nativeShareProfile={};
-async function nativeHelperTools(){if(!nativeHelper||typeof nativeHelper.getCapabilities!=='function')return [];try{nativeHelperCaps=await nativeHelper.getCapabilities()||{};nativeShareProfile=nativeHelperCaps.share_profile||nativeShareProfile||{};return HELPER_DEVICE_TOOLS.filter(name=>nativeHelperCaps[name]===true)}catch(e){nativeHelperCaps={};return []}}
-function syncNativeShareUi(){const p=nativeShareProfile||{},c=p.clipboard||{},d=p.display||{},v=p.device||{},r=p.resources||{},x=p.compute||{},m=p.mcp||{};$('shareClipboardRead').checked=c.read===true;$('shareClipboardWrite').checked=c.write===true;$('shareDisplay').checked=d.observe===true;$('shareSystemObserve').checked=v.observe===true;$('shareSystemControl').checked=v.control===true;$('shareComputerControl').checked=d.control===true;$('shareResources').checked=r.advertise===true;$('shareCompute').checked=x.advertise===true;$('shareCompute').disabled=x.available===false;$('shareMcp').checked=m.advertise===true;for(const id of ['shareClipboardRead','shareClipboardWrite','shareDisplay','shareSystemObserve','shareSystemControl','shareComputerControl','shareResources','shareCompute','shareMcp','saveNativeShares','refreshResources'])$(id).disabled=$(id).disabled||!nativeHelper}
-async function refreshNativeHelperStatus(){const tools=await nativeHelperTools();syncNativeShareUi();if(nativeHelper){$('helperNote').textContent='Native capability broker active · currently shared: '+(tools.length?tools.join(', '):'none')+'. All grants are opt-in.'}else{$('nativeSharePanel').querySelector('p').textContent='Native Helper bridge not detected. Browser workspace sharing below remains available; install/open AILinux Helper for device, vision and compute grants.'}return tools}
-async function applyNativeShares(){if(!nativeHelper||typeof nativeHelper.setShareProfile!=='function')return;nativeShareProfile=await nativeHelper.setShareProfile({clipboardRead:$('shareClipboardRead').checked,clipboardWrite:$('shareClipboardWrite').checked,screenObserve:$('shareDisplay').checked,systemObserve:$('shareSystemObserve').checked,systemControl:$('shareSystemControl').checked,computerControl:$('shareComputerControl').checked,resourceAdvertise:$('shareResources').checked,computeAdvertise:$('shareCompute').checked,mcpAdvertise:$('shareMcp').checked})||{};syncNativeShareUi();await refreshNativeHelperStatus();if(ws&&ws.readyState===WebSocket.OPEN){capabilities=[...READ_TOOLS.filter(()=>rootHandle||rootEntry),...(workspaceMode==='write'&&rootHandle?WRITE_TOOLS:[]),...(await nativeHelperTools())];ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/share',params:shareDescriptor()}))}}
-async function refreshResourceInventory(){if(!nativeHelper||typeof nativeHelper.getResourceInventory!=='function'){$('resourceInventory').textContent='Native resource inventory unavailable.';return}try{const data=await nativeHelper.getResourceInventory();$('resourceInventory').textContent=JSON.stringify(data,null,2)}catch(e){$('resourceInventory').textContent='Resource inventory error: '+e.message}}
-function renderShareSummary(){const grants=[];if(rootHandle||rootEntry)grants.push('workspace:'+workspaceMode);for(const tool of capabilities){if(READ_TOOLS.includes(tool)||WRITE_TOOLS.includes(tool))continue;grants.push(tool)}$('activeGrants').textContent=grants.length?grants.join(' · '):'None';}
-function renderDockerStatus(data){const state=data&&data.engine?String(data.engine):'unknown',installed=!!(data&&data.installed),running=state==='running',stopped=state==='stopped';$('dockerState').textContent=state.replaceAll('_',' ');$('dockerState').className='pill '+(running?'ok':(stopped||state==='not_installed'?'warn':''));$('dockerVersion').textContent=[data&&data.clientVersion?('Client '+data.clientVersion):'',data&&data.serverVersion?('Engine '+data.serverVersion):''].filter(Boolean).join(' · ');$('dockerDetail').textContent=String((data&&data.detail)||'Docker status unavailable.');$('dockerInstallBtn').classList.toggle('hidden',installed);$('dockerStartBtn').classList.toggle('hidden',!installed||running||!(data&&data.canControlService));$('dockerStopBtn').classList.toggle('hidden',!running||!(data&&data.canControlService));$('dockerRestartBtn').classList.toggle('hidden',!running||!(data&&data.canControlService));$('dockerTestBtn').classList.toggle('hidden',!running);for(const id of ['dockerInstallBtn','dockerStartBtn','dockerStopBtn','dockerRestartBtn','dockerTestBtn'])$(id).disabled=!nativeHelper;}
-async function refreshDockerStatus(){if(!nativeHelper||typeof nativeHelper.dockerStatus!=='function'){$('dockerState').textContent='Helper required';$('dockerDetail').textContent='Docker control is available only through the native AILinux Helper broker.';for(const id of ['dockerInstallBtn','dockerStartBtn','dockerStopBtn','dockerRestartBtn','dockerTestBtn'])$(id).classList.add('hidden');return null}try{const data=await nativeHelper.dockerStatus();renderDockerStatus(data||{});await refreshNativeHelperStatus();renderShareSummary();return data}catch(e){$('dockerState').textContent='error';$('dockerDetail').textContent='Docker status error: '+e.message;return null}}
-async function dockerServiceAction(action){if(!nativeHelper||typeof nativeHelper.dockerService!=='function')return;const r=await nativeHelper.dockerService(action);$('dockerResult').textContent=JSON.stringify(r,null,2);await refreshDockerStatus();if(!r||r.ok!==true)status('Docker '+action+' failed or was cancelled: '+String((r&&r.error)||'unknown error'),'warn');else status('Docker '+action+' completed.','ok')}
-async function installDocker(){if(!nativeHelper||typeof nativeHelper.dockerInstall!=='function')return;const r=await nativeHelper.dockerInstall();$('dockerResult').textContent=JSON.stringify(r,null,2);await refreshDockerStatus();if(!r||r.ok!==true)status('Docker install failed or needs manual action: '+String((r&&r.error)||'unknown error'),'warn');else status('Docker installed. Start the engine to enable compute.','ok')}
-async function testDocker(){if(!nativeHelper||typeof nativeHelper.dockerTest!=='function')return;const r=await nativeHelper.dockerTest();$('dockerResult').textContent=JSON.stringify(r,null,2);if(!r||r.ok!==true)status('Docker test failed: '+String((r&&r.error)||'unknown error'),'warn');else status('Disposable Docker test passed.','ok')}
-function serviceCard(svc){const box=document.createElement('div');box.className='choice';const title=document.createElement('strong');title.textContent=String(svc.label||svc.id||'Service');box.appendChild(title);const state=document.createElement('div');state.className=svc.active?'ok':'muted';state.textContent=svc.available?(String(svc.state||'unknown')+(svc.subState?'/'+svc.subState:'')):'not installed';box.appendChild(state);const detail=document.createElement('div');detail.className='muted';detail.textContent=String(svc.detail||'');box.appendChild(detail);if(svc.available){const row=document.createElement('div');row.className='row';row.style.marginTop='8px';for(const action of ['start','stop','restart']){const b=document.createElement('button');b.className='secondary';b.textContent=action[0].toUpperCase()+action.slice(1);b.disabled=(action==='start'&&svc.active)||(action==='stop'&&!svc.active);b.onclick=()=>serviceAction(String(svc.id||''),action);row.appendChild(b)}box.appendChild(row)}return box}
-async function refreshServiceList(){const host=$('serviceList');host.replaceChildren();if(!nativeHelper||typeof nativeHelper.serviceList!=='function'){const note=document.createElement('div');note.className='choice muted';note.textContent='Typed local service control is unavailable in this Helper build.';host.appendChild(note);return []}try{const list=await nativeHelper.serviceList();for(const svc of (Array.isArray(list)?list:[]))host.appendChild(serviceCard(svc));if(!host.children.length){const note=document.createElement('div');note.className='choice muted';note.textContent='No allowlisted local services reported.';host.appendChild(note)}return list}catch(e){const note=document.createElement('div');note.className='choice warn';note.textContent='Service status error: '+e.message;host.appendChild(note);return []}}
-async function serviceAction(id,action){if(!nativeHelper||typeof nativeHelper.serviceAction!=='function')return;const r=await nativeHelper.serviceAction(id,action);$('serviceResult').textContent=JSON.stringify(r,null,2);await refreshServiceList();if(!r||r.ok!==true)status('Service '+action+' failed or was cancelled: '+String((r&&r.error)||'unknown error'),'warn');else status('Service '+action+' completed.','ok')}
-async function revokeAllShare(){if(nativeHelper&&typeof nativeHelper.setShareProfile==='function'){nativeShareProfile=await nativeHelper.setShareProfile({clipboardRead:false,clipboardWrite:false,screenObserve:false,systemObserve:false,systemControl:false,computerControl:false,resourceAdvertise:false,computeAdvertise:false,mcpAdvertise:false})||{};}capabilities=[];renderShareSummary();await disconnect(true);syncNativeShareUi();status('All workspace and native capability grants revoked.','warn')}
-function shareDescriptor(){return {task:$('task').value.trim(),visibility:$('shareVisibility').value,access_mode:(rootHandle||rootEntry)?workspaceMode:'off',mode:(rootHandle||rootEntry)?workspaceMode:'off',capabilities,resources:{workspace:{enabled:Boolean(rootHandle||rootEntry),mode:(rootHandle||rootEntry)?workspaceMode:'off'},native:nativeShareProfile||{}}}}
-if(!directPicker){$('writeMode').disabled=true;if(android)$('openChromeBtn').classList.remove('hidden');$('browserNote').textContent=(android?'Android: ':'')+(firefox?'Firefox: ':'')+'this browser does not expose showDirectoryPicker(), so full lazy Read/Write workspace selection is unavailable. '+(android?'Open this page in Chrome/Chromium to share a folder lazily with Read/Write access. ':'Use a Chromium browser with File System Access support. Desktop drag-and-drop may still provide lazy read-only access.');}else{$('browserNote').textContent='Direct directory handles are available. Choose Read only or Write, then choose the folder. No file list is built during selection.';}
-$('browserCaps').textContent='Origin: '+location.origin+' · secure='+((window.isSecureContext)?'yes':'no')+' · directory-picker='+(directPicker?'yes':'no')+' · persistent-handle='+(persistentHandleStore?'yes':'no')+' · drop-handle='+(dropHandleCap?'yes':'no')+' · drop-entry='+(dropEntryCap?'yes':'no')+' · wake-lock='+(('wakeLock' in navigator)?'yes':'no')+' · android='+(android?'yes':'no')+' · ios='+(ios?'yes':'no')+' · firefox='+(firefox?'yes':'no');$('wakeLockToggle').checked=wakeLockWanted;
-const HELPER_DOWNLOAD_IDS=['androidDownload','linuxAppImage','linuxDeb','windowsDownload','macDownload'];
-function detectedHelperOs(){const ua=String(navigator.userAgent||''),platform=String((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||'');if(/Android/i.test(ua))return 'android';if(ios)return 'ios';if(/Windows|Win32|Win64/i.test(platform)||/Windows/i.test(ua))return 'windows';if(/Mac/i.test(platform)||/Macintosh|Mac OS X/i.test(ua))return 'macos';if(/Linux/i.test(platform)||/Linux/i.test(ua))return 'linux';return 'unknown';}
-function showHelperDownloads(ids){const visible=new Set(ids);for(const id of HELPER_DOWNLOAD_IDS)$(id).classList.toggle('hidden',!visible.has(id));}
-function setupMobileUi(){const os=detectedHelperOs(),downloads={android:['androidDownload'],linux:['linuxAppImage','linuxDeb'],windows:['windowsDownload'],macos:['macDownload'],ios:[],unknown:HELPER_DOWNLOAD_IDS};showHelperDownloads(downloads[os]||HELPER_DOWNLOAD_IDS);$('openAppBtn').classList.toggle('hidden',os!=='android');if(os==='android'){$('helperText').textContent='Android detected · use the native APK with the native foreground executor. The workspace can remain active after the UI is closed and connection controls stay in the system notification.';}else if(os==='ios'){$('helperText').textContent='iPhone/iPad detected · install this page as the AILinux Helper web app. The durable lease survives transport suspension and reconnects when iOS allows the app to resume.';$('helperNote').textContent='Detected OS: iOS · no native iOS package is available. iOS may suspend background networking and cannot guarantee an arbitrary WebSocket after force-quit.';}else if(os==='linux'){$('helperText').textContent='Linux detected · choose AppImage for a portable launch or the .deb package for Debian/Ubuntu/AILinux integration.';}else if(os==='windows'){$('helperText').textContent='Windows detected · the Windows Helper package is selected for this system.';}else if(os==='macos'){$('helperText').textContent='macOS detected · the macOS Helper disk image is selected for this system.';}else{$('helperText').textContent='Operating system not recognized reliably · all AILinux Helper packages are shown so you can choose the correct one.';$('helperNote').textContent='Detected OS: unknown · Android APK, Linux AppImage/.deb, Windows and macOS downloads are all available.';}if(os!=='ios'&&os!=='unknown')$('helperNote').textContent='Detected OS: '+os+' · showing the recommended Helper package'+(os==='linux'?'s':'')+'. The browser/PWA remains the zero-install fallback.';if('serviceWorker' in navigator)navigator.serviceWorker.register('/v1/mcp/sw.js?v=29014',{scope:'/v1/mcp',updateViaCache:'none'}).catch(()=>{});}
-setupMobileUi();
-refreshNativeHelperStatus().then(()=>{renderShareSummary();refreshDockerStatus().catch(()=>{});refreshServiceList().catch(()=>{})}).catch(()=>{});
-const native=(typeof window!=='undefined'&&window.ailinuxNative)||null;let nativeShell=null;
-async function refreshNativeShell(){if(!native)return null;try{nativeShell=await native.shellStatus()}catch{nativeShell=null}renderTerminalUi();return nativeShell;}
-async function nativeShellReleased(){const s=await refreshNativeShell();return !!(s&&s.released);}
-async function runNativeShell(args){if(!native)throw new Error('no native host: a browser tab cannot open a terminal');const r=await native.runShell({command:String(args.command||''),cwd:String(args.cwd||'.'),timeout:Number(args.timeout||120)});if(!r||r.isError)throw new Error(String((r&&r.text)||'shell failed'));return {text:String(r.text||'')};}
-function renderTerminalUi(){const panel=$('terminalPanel'),select=$('terminalBackend');if(!panel)return;panel.classList.remove('hidden');if(!native){select.innerHTML='';select.disabled=true;$('terminalText').textContent='This is a browser tab, so no terminal is possible here. Use the AILinux Workspace desktop app or the Android helper to release a shell.';$('terminalHint').textContent='Workspace file sharing works without a terminal.';return}const state=nativeShell,released=!!(state&&state.released),backends=Array.isArray(state&&state.backends)?state.backends:[];select.innerHTML='';for(const backend of backends){const option=document.createElement('option');option.value=String(backend.name||'');option.textContent=String(backend.label||backend.name||'');option.selected=option.value===String((state&&state.backend)||'');select.appendChild(option)}select.disabled=!backends.length;$('releaseTermBtn').classList.toggle('hidden',released);$('revokeTermBtn').classList.toggle('hidden',!released);$('terminalText').textContent=released?('Terminal released: '+(state.label||state.backend)+(state.sandboxed?' (sandboxed)':' (not sandboxed)')):'The AI has no terminal on this machine.';$('terminalHint').textContent=state?((state.workspace?('Command folder: '+state.workspace+' \u00b7 '):'')+(state.detail||'')):'';}
-function setupTerminalUi(){if(!$('terminalPanel'))return;if(!native){renderTerminalUi();return}$('terminalBackend').onchange=async event=>{if(!native.setShellBackend)return;nativeShell=await native.setShellBackend(String(event.target.value||''));renderTerminalUi()};$('releaseTermBtn').onclick=async()=>{nativeShell=await native.releaseShell();renderTerminalUi();if(nativeShell&&nativeShell.released)status('Terminal released to the AI. Reconnect the workspace so the capability is announced.','ok')};$('revokeTermBtn').onclick=async()=>{nativeShell=await native.revokeShell();renderTerminalUi();status('Terminal revoked. Reconnect the workspace to drop the capability.','warn')};if(native.onShellChanged)native.onShellChanged(state=>{nativeShell=state;renderTerminalUi()});refreshNativeShell();}
-setupTerminalUi();
-let lastStatusText='';function status(text,cls=''){if(text===lastStatusText&&$('status').className==='status '+cls)return;lastStatusText=text;$('status').textContent=text;$('status').className='status '+cls;}
-function executorLifecycle(event,extra={}){if(!ws||ws.readyState!==WebSocket.OPEN)return;try{ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/lifecycle',params:{event,visibility:document.visibilityState,hidden:document.hidden,online:navigator.onLine,platform:navigator.platform||'browser',ts:Date.now(),...extra}}))}catch{}}
-function wakeState(text,cls='muted'){$('wakeLockState').textContent=text;$('wakeLockState').className=cls;}
-async function requestWakeLock(){if(!wakeLockWanted||document.hidden||!('wakeLock' in navigator)||!ws||ws.readyState!==WebSocket.OPEN)return false;if(wakeLockSentinel&&!wakeLockSentinel.released)return true;try{const sentinel=await navigator.wakeLock.request('screen');wakeLockSentinel=sentinel;wakeState('Wake Lock active','ok');sentinel.addEventListener('release',()=>{if(wakeLockSentinel===sentinel)wakeLockSentinel=null;wakeState(wakeLockWanted?'Wake Lock paused until this tab is visible':'Wake Lock off','muted')});return true}catch(e){wakeState('Wake Lock unavailable: '+String(e?.name||'browser policy'),'warn');return false}}
-async function releaseWakeLock(){const sentinel=wakeLockSentinel;wakeLockSentinel=null;if(sentinel&&!sentinel.released){try{await sentinel.release()}catch{}}wakeState('Wake Lock off','muted')}
-async function setWakeLockWanted(enabled){wakeLockWanted=Boolean(enabled);localStorage.setItem('tf_workspace_wake_lock',wakeLockWanted?'1':'0');if(wakeLockWanted){if(!('wakeLock' in navigator))wakeState('Wake Lock unsupported by this browser','warn');else await requestWakeLock()}else await releaseWakeLock()}
-function openWorkspaceDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('triforce-browser-workspace',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('state'))r.result.createObjectStore('state')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-async function saveDirectoryHandle(handle){if(!persistentHandleStore)return {ok:false,error:'IndexedDB unavailable'};try{const db=await openWorkspaceDb();await new Promise((resolve,reject)=>{const tx=db.transaction('state','readwrite');tx.objectStore('state').put(handle,'directoryHandle');tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)});db.close();const restored=await loadDirectoryHandle();if(!restored||restored.kind!=='directory')return {ok:false,error:'directory handle did not survive IndexedDB round-trip'};if(typeof handle.isSameEntry==='function'&&!(await handle.isSameEntry(restored)))return {ok:false,error:'restored directory handle does not match selection'};return {ok:true,error:''}}catch(e){return {ok:false,error:String(e?.message||e||'unknown persistence error')}}}
-async function loadWorkspaceState(key){try{const db=await openWorkspaceDb();const value=await new Promise((resolve,reject)=>{const tx=db.transaction('state','readonly');const r=tx.objectStore('state').get(key);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>reject(r.error)});db.close();return value}catch{return null}}
-async function saveWorkspaceState(key,value){if(!persistentHandleStore)return;try{const db=await openWorkspaceDb();await new Promise((resolve,reject)=>{const tx=db.transaction('state','readwrite');tx.objectStore('state').put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)});db.close()}catch{}}
-async function deleteWorkspaceState(key){try{const db=await openWorkspaceDb();await new Promise((resolve,reject)=>{const tx=db.transaction('state','readwrite');tx.objectStore('state').delete(key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)});db.close()}catch{}}
-async function loadDirectoryHandle(){return await loadWorkspaceState('directoryHandle')}
-async function clearDirectoryHandle(){await deleteWorkspaceState('directoryHandle')}
-function cleanPath(value){let p=String(value||'.').replaceAll('\\','/').replace(/^\.\//,'');if(!p||p==='.')return '';if(p.startsWith('/')||p.includes('\0'))throw new Error('absolute or invalid path rejected');const parts=p.split('/').filter(Boolean);if(parts.some(x=>x==='..'))throw new Error('path traversal rejected');return parts.join('/');}
-function ignored(path){return path.split('/').some(x=>IGNORE.has(x));}
-function globRe(glob){const esc=String(glob||'*').replace(/[.+^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*').replace(/\?/g,'.');return new RegExp('^'+esc+'$');}
-async function modernDir(path='',create=false){let cur=rootHandle;for(const part of cleanPath(path).split('/').filter(Boolean))cur=await cur.getDirectoryHandle(part,{create});return cur;}
-async function modernFileHandle(path,create=false){const p=cleanPath(path),parts=p.split('/').filter(Boolean),name=parts.pop();if(!name)throw new Error('file path required');const dir=await modernDir(parts.join('/'),create);return await dir.getFileHandle(name,{create});}
-function legacyEntries(dir){return new Promise((resolve,reject)=>{const reader=dir.createReader(),out=[];const next=()=>reader.readEntries(batch=>{if(!batch.length)return resolve(out);out.push(...batch);next()},reject);next()})}
-function legacyGetDirectory(dir,name){return new Promise((resolve,reject)=>dir.getDirectory(name,{},resolve,reject))}
-function legacyGetFileEntry(dir,name){return new Promise((resolve,reject)=>dir.getFile(name,{},resolve,reject))}
-async function legacyDir(path=''){let cur=rootEntry;for(const part of cleanPath(path).split('/').filter(Boolean))cur=await legacyGetDirectory(cur,part);return cur;}
-async function legacyFile(path){const p=cleanPath(path),parts=p.split('/').filter(Boolean),name=parts.pop();if(!name)throw new Error('file path required');const dir=await legacyDir(parts.join('/'));const entry=await legacyGetFileEntry(dir,name);return await new Promise((resolve,reject)=>entry.file(resolve,reject));}
-async function fileObj(path){if(rootHandle)return await (await modernFileHandle(path,false)).getFile();if(rootEntry)return await legacyFile(path);throw new Error('workspace not shared');}
-async function readText(path){const f=await fileObj(path);if(f.size>MAX_TEXT)throw new Error('file exceeds 2 MiB text limit');return await f.text();}
-function lineSlice(text,args){const lines=text.split(/\r?\n/),start=Math.max(1,Number(args.start_line||1)),end=args.end_line?Math.min(lines.length,Number(args.end_line)):lines.length;return {text:lines.slice(start-1,end).join('\n'),total_lines:lines.length,start_line:start,end_line:end};}
-async function walkModern(dir,prefix,out,maxEntries){for await(const [name,h] of dir.entries()){const path=prefix?prefix+'/'+name:name;if(ignored(path))continue;out.push({path,kind:h.kind,handle:h});if(out.length>=maxEntries)return;if(h.kind==='directory'){await walkModern(h,path,out,maxEntries);if(out.length>=maxEntries)return}}}
-async function walkLegacy(dir,prefix,out,maxEntries){for(const e of await legacyEntries(dir)){const path=prefix?prefix+'/'+e.name:e.name;if(ignored(path))continue;out.push({path,kind:e.isDirectory?'directory':'file',entry:e});if(out.length>=maxEntries)return;if(e.isDirectory){await walkLegacy(e,path,out,maxEntries);if(out.length>=maxEntries)return}}}
-async function fullEntries(maxEntries=20000){const out=[];if(rootHandle)await walkModern(rootHandle,'',out,maxEntries);else if(rootEntry)await walkLegacy(rootEntry,'',out,maxEntries);return out;}
-async function treeModern(dir,prefix,depth,maxDepth,maxEntries,out){for await(const [name,h] of dir.entries()){const path=prefix?prefix+'/'+name:name;if(ignored(path))continue;out.push(path+(h.kind==='directory'?'/':''));if(out.length>=maxEntries)return;if(h.kind==='directory'&&depth<maxDepth){await treeModern(h,path,depth+1,maxDepth,maxEntries,out);if(out.length>=maxEntries)return}}}
-async function treeLegacy(dir,prefix,depth,maxDepth,maxEntries,out){for(const e of await legacyEntries(dir)){const path=prefix?prefix+'/'+e.name:e.name;if(ignored(path))continue;out.push(path+(e.isDirectory?'/':''));if(out.length>=maxEntries)return;if(e.isDirectory&&depth<maxDepth){await treeLegacy(e,path,depth+1,maxDepth,maxEntries,out);if(out.length>=maxEntries)return}}}
-async function tree(args){const base=cleanPath(args.path||''),maxDepth=Math.min(8,Math.max(1,Number(args.max_depth||args.depth||3))),maxEntries=Math.min(1000,Math.max(1,Number(args.max_entries||300))),out=[];if(rootHandle)await treeModern(await modernDir(base),base,1,maxDepth,maxEntries,out);else if(rootEntry)await treeLegacy(await legacyDir(base),base,1,maxDepth,maxEntries,out);return {path:base||'.',entries:out,truncated:out.length>=maxEntries};}
-async function workspaceInfo(){const sample=await tree({path:'',max_depth:1,max_entries:100});return {workspace:rootHandle?.name||rootEntry?.name||'local',mode:workspaceMode,access:rootHandle?'directory-handle':'legacy-read-only-entry',top_level:sample.entries,capabilities};}
-async function searchableFiles(){const entries=await fullEntries(20000);return entries.filter(e=>e.kind==='file').map(e=>e.path);}
-async function search(args,forceRegex=false){const base=cleanPath(args.path||''),max=Math.min(500,Math.max(1,Number(args.max_results||100))),pattern=forceRegex?String(args.pattern||''):String(args.query||'');if(!pattern)throw new Error('search pattern required');const regexMode=forceRegex||Boolean(args.regex),flags=args.case_sensitive?'g':'gi',re=regexMode?new RegExp(pattern,flags):null,glob=globRe(args.file_pattern||args.glob||'*'),needle=args.case_sensitive?pattern:pattern.toLowerCase(),hits=[];for(const path of await searchableFiles()){if(base&&!(path===base||path.startsWith(base+'/')))continue;if(!glob.test(path.split('/').pop()))continue;let text;try{text=await readText(path)}catch{continue}for(const [i,line] of text.split(/\r?\n/).entries()){let ok;if(re){re.lastIndex=0;ok=re.test(line)}else ok=(args.case_sensitive?line:line.toLowerCase()).includes(needle);if(ok){hits.push({path,line:i+1,text:line.slice(0,500)});if(hits.length>=max)return {results:hits,truncated:true}}}}return {results:hits,truncated:false};}
-async function ensureHandlePermission(mode='read'){if(!rootHandle)throw new Error('a real directory handle is required');const opts={mode};if(typeof rootHandle.queryPermission==='function'&&await rootHandle.queryPermission(opts)==='granted')return true;if(typeof rootHandle.requestPermission==='function'&&await rootHandle.requestPermission(opts)==='granted')return true;throw new Error(mode==='readwrite'?'write permission was not granted by the browser':'folder permission was not granted by the browser');}
-async function ensureWritePermission(){return ensureHandlePermission('readwrite');}
-async function editFile(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');await ensureWritePermission();const path=cleanPath(args.path),op=String(args.operation||'write');let old='';try{old=await readText(path)}catch(e){if(!['create','write'].includes(op))throw e}let next;if(op==='create')next=String(args.content||'');else if(op==='write')next=String(args.content||'');else if(op==='append')next=old+String(args.content||'');else if(op==='replace'){const needle=String(args.old_text||'');if(!needle)throw new Error('old_text required');const count=old.split(needle).length-1;if(count!==1)throw new Error('old_text must occur exactly once');next=old.replace(needle,String(args.new_text||''))}else throw new Error('unknown edit operation');const h=await modernFileHandle(path,true),w=await h.createWritable();await w.write(next);await w.close();return {path,operation:op,bytes:new Blob([next]).size};}
-async function createDir(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');await ensureWritePermission();const p=cleanPath(args.path);await modernDir(p,true);return {path:p,created:true};}
-async function childHandle(dir,name){for await(const [entryName,h] of dir.entries())if(entryName===name)return h;throw new Error('entry not found: '+name);}
-async function removeEntryCompat(parent,name,recursive=false){const h=await childHandle(parent,name);if(recursive){try{await parent.removeEntry(name,{recursive:true});return h.kind}catch(e){const n=String(e?.name||'');if(!['TypeError','NotSupportedError','TypeMismatchError','InvalidModificationError','InvalidStateError'].includes(n))throw e}}if(h.kind==='directory'){const children=[];for await(const [childName] of h.entries())children.push(childName);if(children.length&&!recursive)throw new Error('directory is not empty; use recursive=true');for(const childName of children)await removeEntryCompat(h,childName,true);}await parent.removeEntry(name);return h.kind;}
-function backupStamp(){return new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,14)+'-'+Math.random().toString(16).slice(2,10)}
-async function copyHandleRecursive(source,destParent,name){if(source.kind==='file'){const src=await source.getFile(),dst=await destParent.getFileHandle(name,{create:true}),w=await dst.createWritable();await w.write(src);await w.close();return}const dst=await destParent.getDirectoryHandle(name,{create:true});for await(const [childName,child] of source.entries())await copyHandleRecursive(child,dst,childName)}
-async function createBrowserBackup(targetNames,tool){const backupRoot=await rootHandle.getDirectoryHandle('.workspacebackup',{create:true}),action=await backupRoot.getDirectoryHandle(backupStamp()+'-'+String(tool||'mutation').replace(/[^a-z0-9_.-]/gi,'-'),{create:true}),files=await action.getDirectoryHandle('files',{create:true}),copied=[];for(const name of targetNames){if(name==='.workspacebackup')continue;const h=await childHandle(rootHandle,name);await copyHandleRecursive(h,files,name);copied.push(name)}const meta={created_at:new Date().toISOString(),tool,workspace:rootHandle.name||'workspace',targets:copied};const doc=await action.getFileHandle('backup.md',{create:true}),w=await doc.createWritable();await w.write('# Workspace backup\n\n- Created: '+meta.created_at+'\n- Workspace: `'+meta.workspace+'`\n- Trigger: `'+tool+'`\n- Targets: `'+copied.join(', ')+'`\n\n## Recovery\n\nCopy the required entries from this backup `files/` directory back to the workspace root after inspecting current state.\n');await w.close();return {dir:action.name,targets:copied}}
-async function fileOps(args){const action=String(args.action||'read').toLowerCase(),path=cleanPath(args.path||'');if(action==='read')return {path,...lineSlice(await readText(path),args)};if(action==='size'){const f=await fileObj(path);return {path,size:f.size}}if(action==='list')return await tree({path,max_depth:1,max_entries:Math.min(1000,Number(args.max_entries||300))});if(action==='find')return await search({query:String(args.pattern||args.query||''),path,max_results:Number(args.max_results||100)},false);if(action==='write'||action==='append')return await editFile({path,operation:action,content:String(args.content||'')});if(action==='delete'||action==='remove'){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');await ensureWritePermission();if(!path)throw new Error('file_ops cannot delete the workspace root; use workspace_clear');if(path==='.workspacebackup'||path.startsWith('.workspacebackup/'))throw new Error('recovery store is protected');const parts=path.split('/').filter(Boolean),name=parts.pop(),parentPath=parts.join('/'),parent=await modernDir(parentPath,false),recursive=Boolean(args.recursive),top=path.split('/')[0],backup=await createBrowserBackup([top],'file_ops-'+action),kind=await removeEntryCompat(parent,name,recursive);return {ok:true,path,deleted:true,recursive,kind,backup:backup.dir};}throw new Error('unsupported file_ops action: '+action);}
-async function codeEdit(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');await ensureWritePermission();const path=cleanPath(args.path),mode=String(args.mode||'replace'),old=await readText(path);let next=old;if(mode==='replace'){const needle=String(args.old_text||'');if(!needle)throw new Error('old_text required');const count=old.split(needle).length-1;if(count!==1)throw new Error('old_text must occur exactly once');next=old.replace(needle,String(args.new_text||''))}else if(mode==='append'){next=old+String(args.new_text||'')}else if(mode==='insert'){const lines=old.split(/\r?\n/),line=Math.max(1,Number(args.line||1));lines.splice(Math.min(lines.length,line-1),0,String(args.new_text||''));next=lines.join('\n')}else if(mode==='delete'){const lines=old.split(/\r?\n/),line=Math.max(1,Number(args.line||1));if(line>lines.length)throw new Error('line outside file');lines.splice(line-1,1);next=lines.join('\n')}else throw new Error('unsupported code_edit mode: '+mode);if(args.dry_run)return {ok:true,dry_run:true,path,mode,changed:next!==old,preview:next.slice(0,20000)};const h=await modernFileHandle(path,false),w=await h.createWritable();await w.write(next);await w.close();return {ok:true,path,mode,bytes:new Blob([next]).size};}
-async function clearWorkspace(args){if(workspaceMode!=='write'||!rootHandle)throw new Error('workspace is read-only');if(String(args.confirm||'')!=='DELETE_ALL')throw new Error('workspace_clear requires confirm=DELETE_ALL');await ensureWritePermission();const names=[];for await(const [name] of rootHandle.entries())if(name!=='.workspacebackup')names.push(name);const backup=await createBrowserBackup(names,'workspace_clear'),removed=[],failed=[];for(const name of names){try{await removeEntryCompat(rootHandle,name,true);removed.push(name)}catch(e){failed.push({entry:name,error:String(e?.name||'Error')+': '+String(e?.message||e)})}}if(failed.length&&!removed.length)throw new Error('workspace_clear removed nothing: '+failed.map(f=>f.entry+' ('+f.error+')').join('; '));return {ok:failed.length===0,removed_entries:removed.length,removed,failed,backup:backup.dir,root_preserved:true,recovery_store_preserved:true};}
-function result(data,isError=false){const structured=(data&&typeof data==='object'&&!Array.isArray(data))?data:{result:data};return {content:[{type:'text',text:typeof data==='string'?data:JSON.stringify(data)}],structuredContent:structured,isError};}
-async function execute(tool,args){if(!capabilities.includes(tool))throw new Error('tool not available in this workspace: '+tool);if(tool==='workspace_info')return result(await workspaceInfo());if(tool==='computer_observe'||tool==='computer_screenshot'){if(!nativeHelper)throw new Error('native AILinux Helper bridge unavailable');return result(await nativeHelper.screenshot())}if(tool==='compute_execute'){if(!nativeHelper||typeof nativeHelper.runCompute!=='function')throw new Error('native compute bridge unavailable');return result(await nativeHelper.runCompute(args))}if(tool==='device_info'){if(!nativeHelper||typeof nativeHelper.deviceInfo!=='function')throw new Error('native device info bridge unavailable');return result(await nativeHelper.deviceInfo())}if(tool==='process_ops'){if(!nativeHelper||typeof nativeHelper.processOps!=='function')throw new Error('native process bridge unavailable');return result(await nativeHelper.processOps(args))}if(tool==='service_ops'){if(!nativeHelper||typeof nativeHelper.serviceOps!=='function')throw new Error('native service bridge unavailable');return result(await nativeHelper.serviceOps(args))}if(tool==='app_ops'){if(!nativeHelper||typeof nativeHelper.appOps!=='function')throw new Error('native app bridge unavailable');return result(await nativeHelper.appOps(args))}if(tool==='window_ops'){if(!nativeHelper||typeof nativeHelper.windowOps!=='function')throw new Error('native window bridge unavailable');return result(await nativeHelper.windowOps(args))}if(tool==='computer_input'){if(!nativeHelper||typeof nativeHelper.computerInput!=='function')throw new Error('native input bridge unavailable');return result(await nativeHelper.computerInput(args))}if(tool==='shell'){if(native)return result(await runNativeShell(args));throw new Error('native shell unavailable')}if(tool==='clipboard_read'){if(!nativeHelper)throw new Error('native AILinux Helper bridge unavailable');return result(await nativeHelper.clipboardRead())}if(tool==='clipboard_write'){if(!nativeHelper)throw new Error('native AILinux Helper bridge unavailable');return result(await nativeHelper.clipboardWrite(String(args.text||'')))}if(tool==='file_read'||tool==='code_read')return result({path:cleanPath(args.path),...lineSlice(await readText(args.path),args)});if(tool==='file_tree'||tool==='code_tree')return result(await tree(args));if(tool==='code_search')return result(await search(args,false));if(tool==='code_grep')return result(await search(args,true));if(tool==='file_edit')return result(await editFile(args));if(tool==='directory_create')return result(await createDir(args));if(tool==='workspace_clear')return result(await clearWorkspace(args));if(tool==='file_ops')return result(await fileOps(args));if(tool==='code_edit')return result(await codeEdit(args));throw new Error('unsupported browser tool');}
-async function chooseFolder(){await disconnect(true);$('pairPanel').classList.add('hidden');workspaceMode=document.querySelector('input[name=mode]:checked').value;if(!directPicker){status('This browser cannot create a lazy local directory handle from a picker. For full browser workspace access use Chrome/Chromium/Edge.','warn');return}try{const h=await window.showDirectoryPicker({mode:workspaceMode==='write'?'readwrite':'read',id:'triforce-workspace'});rootHandle=h;rootEntry=null;sessionStorage.setItem('tf_workspace_mode',workspaceMode);await saveWorkspaceState('workspaceMode',workspaceMode);let permission='unknown';try{if(typeof h.queryPermission==='function')permission=await h.queryPermission({mode:workspaceMode==='write'?'readwrite':'read'})}catch{}const persisted=await saveDirectoryHandle(h);$('folderName').textContent=(h.name||'Local folder')+' · '+(workspaceMode==='write'?'Read/Write':'Read only');$('connectBtn').disabled=false;const persistenceText=persisted.ok?'persistent handle verified':'handle persistence unavailable: '+persisted.error;$('analysis').textContent='Sandbox executor ready · permission='+permission+' · '+persistenceText;status('Folder shared. Starting sandbox executor automatically…','ok');await connect();}catch(e){if(e.name==='AbortError')status('Folder was not shared. The browser may have cancelled the selection or rejected a sensitive directory such as the filesystem/home root.','warn');else status('Folder selection failed: '+e.message,'warn')}}
-function useDroppedHandle(h){rootHandle=h;rootEntry=null;workspaceMode='read_only';document.querySelector('input[name=mode][value=read_only]').checked=true;$('folderName').textContent=(h.name||'Dropped folder')+' · lazy Read only';$('connectBtn').disabled=false;status('Folder handle shared. Starting sandbox executor automatically…','ok');$('analysis').textContent='Lazy directory handle ready.';connect().catch(e=>status('Executor start failed: '+e.message,'warn'));}
-function useDroppedEntry(e){rootEntry=e;rootHandle=null;workspaceMode='read_only';document.querySelector('input[name=mode][value=read_only]').checked=true;$('folderName').textContent=(e.name||'Dropped folder')+' · lazy Read only';$('connectBtn').disabled=false;status('Folder entry shared. Starting sandbox executor automatically…','ok');$('analysis').textContent='Lazy read-only directory entry ready.';connect().catch(err=>status('Executor start failed: '+err.message,'warn'));}
-const dz=$('dropZone');for(const ev of ['dragenter','dragover'])dz.addEventListener(ev,e=>{e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect='copy';dz.style.borderColor='#58a6ff'});dz.addEventListener('dragleave',()=>dz.style.borderColor='');dz.addEventListener('drop',async e=>{e.preventDefault();e.stopPropagation();dz.style.borderColor='';const items=[...(e.dataTransfer?.items||[])];const handlePromises=items.map(i=>typeof i.getAsFileSystemHandle==='function'?i.getAsFileSystemHandle().catch(()=>null):Promise.resolve(null));const legacy=items.map(i=>{try{const fn=i.getAsEntry||i.webkitGetAsEntry;return typeof fn==='function'?fn.call(i):null}catch{return null}}).filter(Boolean);const handles=(await Promise.all(handlePromises)).filter(Boolean),dirHandle=handles.find(h=>h.kind==='directory'),dirEntry=legacy.find(x=>x.isDirectory);if(dirHandle)return useDroppedHandle(dirHandle);if(dirEntry)return useDroppedEntry(dirEntry);status('The browser did not expose a directory handle/entry for this drop.','warn')});
-async function runQueuedToolCall(msg,responseSocket){let r;const outer=msg.params?.arguments||{},tool=String(outer.tool||''),requestId=String(msg.id||'');try{if(msg.params?.name!=='client_workspace_tool')throw new Error('unexpected tool');if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/tool_stage',params:{request_id:requestId,tool,stage:'started'}}));r=await execute(tool,outer.arguments||{});if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/tool_stage',params:{request_id:requestId,tool,stage:'finished'}}))}catch(e){if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/tool_stage',params:{request_id:requestId,tool,stage:'failed'}}));r=result({ok:false,error:String(e.message||e)},true)}if(responseSocket?.readyState===WebSocket.OPEN)responseSocket.send(JSON.stringify({jsonrpc:'2.0',id:msg.id,result:r}));}
-function queueToolCall(msg){const responseSocket=ws;toolQueue=toolQueue.then(()=>runQueuedToolCall(msg,responseSocket)).catch(()=>{});}
-async function handleServer(msg){lastPongAt=Date.now();if(msg.error&&/(pairing code|workspace credential|resume token)/i.test(String(msg.error))){pairCode='';sessionStorage.removeItem('tf_pair_code');workspaceAttached=false;$('pairPanel').classList.add('hidden');status('Workspace pairing expired. Creating a fresh pairing ID…','warn');try{if(ws)ws.close(4001,'pairing expired')}catch{}setTimeout(()=>connect(),250);return}if(msg.method==='connected'){ws.send(JSON.stringify({jsonrpc:'2.0',method:'client/info',params:{client:'triforce-browser-workspace',platform:navigator.platform||'browser',hostname:'browser',server_version:EXECUTOR_VERSION,mode:'workspace',workspace:rootHandle?.name||rootEntry?.name||'local',access_mode:workspaceMode,remote_profile:workspaceMode}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'tools/list',params:{tools:['client_workspace_tool']}}));ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/share',params:shareDescriptor()}));return}if(msg.method==='workspace/shared'){if(msg.params?.ok){if(msg.params?.resume_token){resumeToken=String(msg.params.resume_token);await saveWorkspaceState('resumeToken',resumeToken);if(pairCode)await saveWorkspaceState('joinCode',pairCode);$('handoffBtn').disabled=false}reconnectAttempt=0;lastPongAt=Date.now();workspaceAttached=!msg.params?.waiting_for_session;if(pairCode&&!urlPair){$('pair').value=pairCode;$('pairPanel').classList.remove('hidden')}else if(urlPair){$('pairPanel').classList.add('hidden')}status(workspaceAttached?(msg.params?.reconnected?'Workspace reconnected and AI-reachable.':'Workspace connected and AI-reachable.'):'Browser connected. Waiting for the AI chat to pair this ID.','ok');$('connectBtn').disabled=true;$('disconnectBtn').disabled=false}else status('TriForce rejected workspace: '+(msg.params?.error||'unknown error'),'warn');return}if(msg.method==='workspace/paired'){if(msg.params?.resume_token){resumeToken=String(msg.params.resume_token);await saveWorkspaceState('resumeToken',resumeToken);if(pairCode)await saveWorkspaceState('joinCode',pairCode);$('handoffBtn').disabled=false}workspaceAttached=true;status('Workspace lease paired; this Join ID remains valid until disconnect or workspace replacement.','ok');return}if(msg.method==='workspace/handoff_complete'){manualDisconnect=true;workspaceAttached=false;resumeToken='';pairCode='';sessionStorage.removeItem('tf_pair_code');await deleteWorkspaceState('resumeToken');await deleteWorkspaceState('joinCode');$('handoffBtn').disabled=true;$('pairPanel').classList.add('hidden');status('Workspace handed off to the app. This browser no longer owns the resume credential.','ok');return}if(msg.method==='workspace/detached'){workspaceAttached=false;status('AI transport detached; workspace lease is retained. The same pairing ID remains reconnectable.','warn');return}if(msg.method==='tools/call'){queueToolCall(msg);return}if(msg.method==='ping'){ws.send(JSON.stringify({jsonrpc:'2.0',method:'pong'}));return}if(msg.method==='pong'){lastPongAt=Date.now();return}}
-function stopHeartbeat(){if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}if(watchdogTimer){clearInterval(watchdogTimer);watchdogTimer=null}}
-function startHeartbeat(){stopHeartbeat();lastPongAt=Date.now();const ping=()=>{if(ws&&ws.readyState===WebSocket.OPEN){try{ws.send(JSON.stringify({jsonrpc:'2.0',method:'ping',params:{ts:Date.now()}}))}catch{}}};ping();heartbeatTimer=setInterval(ping,20000);watchdogTimer=setInterval(()=>{if(document.hidden||!ws||ws.readyState!==WebSocket.OPEN)return;if(Date.now()-lastPongAt>70000){status('Workspace transport is stale; reconnecting…','warn');try{ws.close(4002,'heartbeat stale')}catch{}}},15000)}
-async function websocketPairCode(){if(!resumeToken)return pairCode;const r=await fetch('/v1/mcp/workspace/resume-ticket',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({resume_token:resumeToken})});if(!r.ok)throw new Error('workspace resume ticket failed: '+r.status);const data=await r.json();const ticket=String(data.pair_code||'');if(!ticket)throw new Error('server returned no workspace resume ticket');return ticket;}
-async function openWorkspaceSocket(){if(ws&&ws.readyState<=1)return;if(connectPromise)return connectPromise;connectPromise=(async()=>{const proto=location.protocol==='https:'?'wss:':'ws:';let socketCode;try{socketCode=await websocketPairCode()}catch(e){status('Persistent workspace resume failed: '+e.message,'warn');return}if(ws&&ws.readyState<=1)return;const credential='&pair_code='+encodeURIComponent(socketCode);manualDisconnect=false;workspaceAttached=false;ws=new WebSocket(proto+'//'+location.host+'/v1/mcp/node/connect?mode=workspace'+credential+'&machine_id=browser&client_version='+encodeURIComponent(EXECUTOR_VERSION));ws.onopen=()=>{status('Transport connected. Verifying workspace lease…');startHeartbeat();requestWakeLock()};ws.onmessage=async e=>{try{await handleServer(JSON.parse(e.data))}catch(err){status('Workspace error: '+err.message,'warn')}};ws.onerror=()=>{if(!document.hidden)status('Workspace transport error. Waiting for reconnect…','warn')};ws.onclose=()=>{stopHeartbeat();workspaceAttached=false;ws=null;$('disconnectBtn').disabled=true;if(manualDisconnect)return;if(rootHandle||rootEntry)$('connectBtn').disabled=false;if(resumeToken||pairCode){status(document.hidden?'Browser transport suspended in background; pairing ID retained for reconnect.':'Browser transport disconnected; persistent Join ID retained. Reconnecting the same workspace lease…','warn');scheduleReconnect()}};})();try{return await connectPromise}finally{connectPromise=null}}
-async function startAppHandoff(){if(!resumeToken){status('Pair this workspace before handing it off to an app.','warn');return}status('Creating one-time app handoff…');$('handoffBtn').disabled=true;try{const r=await fetch('/v1/mcp/workspace/handoff-ticket',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({resume_token:resumeToken,target:android?'android':'app'})});if(!r.ok)throw new Error('handoff ticket failed: '+r.status);const data=await r.json();const url=String(data.handoff_url||'');if(!url)throw new Error('server returned no handoff URL');status('Opening app handoff. Browser ownership remains until the app connects…','ok');location.href=url}catch(e){$('handoffBtn').disabled=!resumeToken;status('App handoff failed: '+e.message,'warn')}}
-async function connect(){await refreshNativeHelperStatus();const nativeTools=await nativeHelperTools();if(!rootHandle&&!rootEntry&&!nativeTools.length){status('Select a workspace or enable at least one native capability first.','warn');return}workspaceMode=rootEntry?'read_only':document.querySelector('input[name=mode]:checked').value;sessionStorage.setItem('tf_workspace_mode',workspaceMode);await saveWorkspaceState('workspaceMode',workspaceMode);if(rootHandle)await ensureHandlePermission(workspaceMode==='write'?'readwrite':'read');capabilities=[...(rootHandle||rootEntry?READ_TOOLS:[]),...(workspaceMode==='write'&&rootHandle?WRITE_TOOLS:[]),...nativeTools];renderShareSummary();if(resumeToken||pairCode){status(resumeToken?'Resuming persistent workspace session…':'Reconnecting workspace with the same pairing ID…');await openWorkspaceSocket();return}status('Creating one-time workspace ID…');$('connectBtn').disabled=true;try{const r=await fetch('/v1/mcp/workspace/pair-ticket',{method:'POST',headers:{Accept:'application/json'}});if(!r.ok)throw new Error('ticket request failed: '+r.status);const ticket=await r.json();pairCode=String(ticket.pair_code||'');if(!pairCode)throw new Error('server returned no pairing ID');const qr=String(ticket.qr_data_uri||'');$('pairQr').src=qr;$('pairQr').classList.toggle('hidden',!qr);sessionStorage.setItem('tf_pair_code',pairCode);await saveWorkspaceState('joinCode',pairCode)}catch(e){status('Could not create pairing ID: '+e.message,'warn');$('connectBtn').disabled=false;return}status('Connecting browser workspace to TriForce…');await openWorkspaceSocket();}
-function scheduleReconnect(){if(manualDisconnect||(!resumeToken&&!pairCode)||reconnectTimer||!navigator.onLine)return;const delay=Math.min(10000,500*Math.pow(2,Math.min(reconnectAttempt++,4)));reconnectTimer=setTimeout(async()=>{reconnectTimer=null;await autoResume()},delay)}
-async function autoResume(){if(manualDisconnect||(!resumeToken&&!pairCode)||!navigator.onLine||(ws&&ws.readyState<=1))return;if(!rootHandle&&!rootEntry&&!(await nativeHelperTools()).length)return;if(rootHandle&&typeof rootHandle.queryPermission==='function'){const needed=workspaceMode==='write'?'readwrite':'read';let perm='prompt';try{perm=await rootHandle.queryPermission({mode:needed})}catch{}if(perm!=='granted'){status('Workspace is paused. Tap Connect workspace to restore browser permission.','warn');$('connectBtn').disabled=false;return}}status('Restoring workspace connection…');await openWorkspaceSocket()}
-async function restoreSavedWorkspace(){if(!directPicker||rootHandle||rootEntry||!persistentHandleStore)return;const savedResumeToken=String(await loadWorkspaceState('resumeToken')||''),savedJoinCode=String(await loadWorkspaceState('joinCode')||'');if(urlPair){resumeToken='';pairCode=urlPair}else{resumeToken=savedResumeToken;pairCode=savedJoinCode||pairCode||''}$('handoffBtn').disabled=!resumeToken;if(pairCode&&!urlPair){$('pair').value=pairCode;$('pairPanel').classList.remove('hidden')}else if(urlPair){$('pairPanel').classList.add('hidden')}const h=await loadDirectoryHandle();if(!h||h.kind!=='directory')return;rootHandle=h;workspaceMode=String(await loadWorkspaceState('workspaceMode')||sessionStorage.getItem('tf_workspace_mode')||'read_only');const radio=document.querySelector('input[name=mode][value='+workspaceMode+']');if(radio)radio.checked=true;$('folderName').textContent=(h.name||'Local folder')+' · saved '+(workspaceMode==='write'?'Read/Write':'Read only');$('connectBtn').disabled=false;let permission='prompt';try{if(typeof h.queryPermission==='function')permission=await h.queryPermission({mode:workspaceMode==='write'?'readwrite':'read'})}catch{}$('analysis').textContent='Saved directory handle restored · permission='+permission;if(permission==='granted'){status('Saved local folder restored. Reconnecting workspace…','ok');await autoResume()}else status('Saved folder handle restored, but browser permission must be renewed. Tap Connect workspace.','warn')}
-async function disconnect(clearHandle=true){manualDisconnect=true;stopHeartbeat();await releaseWakeLock();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(ws){try{ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/revoke',params:{}}));ws.close()}catch{}ws=null}pairCode='';resumeToken='';sessionStorage.removeItem('tf_pair_code');await deleteWorkspaceState('resumeToken');await deleteWorkspaceState('joinCode');if(clearHandle){sessionStorage.removeItem('tf_workspace_mode');await deleteWorkspaceState('workspaceMode');await clearDirectoryHandle();rootHandle=null;rootEntry=null;$('folderName').textContent='No folder shared'}$('disconnectBtn').disabled=true;$('handoffBtn').disabled=true;$('pairPanel').classList.add('hidden');$('pairQr').classList.add('hidden');$('pairQr').removeAttribute('src');$('connectBtn').disabled=!(rootHandle||rootEntry);if(clearHandle)status('Workspace disconnected.','warn')}
-$('saveNativeShares').onclick=()=>applyNativeShares().then(()=>renderShareSummary()).catch(e=>status('Capability update failed: '+e.message,'warn'));$('refreshResources').onclick=()=>refreshResourceInventory();$('shareVisibility').onchange=()=>{renderShareSummary();if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({jsonrpc:'2.0',method:'workspace/share',params:shareDescriptor()}))};$('revokeShareBtn').onclick=()=>revokeAllShare().catch(e=>status('Revoke failed: '+e.message,'warn'));$('dockerRefreshBtn').onclick=()=>refreshDockerStatus();$('dockerInstallBtn').onclick=()=>installDocker().catch(e=>status('Docker install failed: '+e.message,'warn'));$('dockerStartBtn').onclick=()=>dockerServiceAction('start').catch(e=>status('Docker start failed: '+e.message,'warn'));$('dockerStopBtn').onclick=()=>dockerServiceAction('stop').catch(e=>status('Docker stop failed: '+e.message,'warn'));$('dockerRestartBtn').onclick=()=>dockerServiceAction('restart').catch(e=>status('Docker restart failed: '+e.message,'warn'));$('dockerTestBtn').onclick=()=>testDocker().catch(e=>status('Docker test failed: '+e.message,'warn'));$('serviceRefreshBtn').onclick=()=>refreshServiceList();if(nativeHelper&&typeof nativeHelper.onShareProfileChanged==='function')nativeHelper.onShareProfileChanged(p=>{nativeShareProfile=p||{};syncNativeShareUi();refreshNativeHelperStatus().then(()=>renderShareSummary()).catch(()=>{})});$('chooseBtn').onclick=chooseFolder;$('openChromeBtn').onclick=()=>{const target='intent://'+location.host+location.pathname+location.search+'#Intent;scheme=https;package=com.android.chrome;end';location.href=target};$('openAppBtn').onclick=()=>{const q='?code='+encodeURIComponent(urlPair||'');const fallback=encodeURIComponent(location.origin+'/v1/mcp/workspace/android.apk');location.href='intent://pair'+q+'#Intent;scheme=ailinux-workspace;package=me.ailinux.workspace;S.browser_fallback_url='+fallback+';end'};$('installPwaBtn').onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;$('installPwaBtn').classList.add('hidden')}else if(ios){$('helperNote').textContent='On iPhone/iPad: Share → Add to Home Screen.'}};$('connectBtn').onclick=connect;$('handoffBtn').onclick=startAppHandoff;$('disconnectBtn').onclick=disconnect;$('wakeLockToggle').onchange=e=>setWakeLockWanted(e.target.checked);async function copyText(value,label){const text=String(value||'');try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text)}else{throw new Error('Clipboard API unavailable')}}catch(e){const input=document.createElement('textarea');input.value=text;input.setAttribute('readonly','');input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();const ok=document.execCommand('copy');input.remove();if(!ok)throw e}status(label+' copied.','ok')}$('copyBtn').onclick=()=>copyText(pairCode,'Pair ID').catch(e=>status('Copy failed: '+e.message,'warn'));$('copyMcp').onclick=()=>copyText($('mcpUrl').value,'MCP URL').catch(e=>status('Copy failed: '+e.message,'warn'));window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;$('installPwaBtn').classList.remove('hidden')});if(ios)$('installPwaBtn').classList.remove('hidden');document.addEventListener('visibilitychange',()=>{executorLifecycle(document.hidden?'hidden':'visible');if(!document.hidden){requestWakeLock();if(ws&&ws.readyState===WebSocket.OPEN&&Date.now()-lastPongAt>70000){try{ws.close(4002,'resume stale transport')}catch{}}autoResume()}});document.addEventListener('freeze',()=>{executorLifecycle('freeze');try{if(ws&&ws.readyState===WebSocket.OPEN)ws.close(4005,'page freeze')}catch{}});document.addEventListener('resume',()=>{executorLifecycle('resume');autoResume()});window.addEventListener('pageshow',e=>{executorLifecycle('pageshow',{persisted:Boolean(e.persisted)});requestWakeLock();autoResume()});window.addEventListener('focus',()=>{executorLifecycle('focus');requestWakeLock();autoResume()});window.addEventListener('online',()=>{executorLifecycle('online');autoResume()});window.addEventListener('offline',()=>executorLifecycle('offline'));window.addEventListener('error',e=>{status('Browser script error: '+(e.message||'unknown error'),'warn')});window.addEventListener('unhandledrejection',e=>{status('Browser script error: '+String(e.reason?.message||e.reason||'unknown error'),'warn')});restoreSavedWorkspace().catch(e=>status('Workspace restore error: '+e.message,'warn'));
-</script></main></body></html>'''.replace("/*AILINUX_DESIGN_TOKENS*/", _helper_design_css())
+    """Load WebMCP and bind mutable browser assets to their content fingerprint."""
+    path = _helper_web_root() / "index.html"
+    try:
+        content = path.read_text(encoding="utf-8")
+        build = _webmcp_build_key()
+        for asset in ("/v1/mcp/web/styles.css", "/v1/mcp/web/app.js", "/v1/mcp/manifest.webmanifest"):
+            content = re.sub(re.escape(asset) + r"\?v=[^\"'\s>]+", f"{asset}?v={build}", content)
+        marker = '<meta name="ailinux-webmcp-build"'
+        if marker not in content:
+            content = content.replace("</head>", f'<meta name="ailinux-webmcp-build" content="{build}"></head>', 1)
+        return content
+    except Exception as exc:
+        raise RuntimeError(f"WebMCP index unavailable: {path}") from exc
+
+
+def _webmcp_handoff_build_key() -> str:
+    """Fingerprint the browser-to-native handoff document and assets."""
+    root = _helper_web_root()
+    digest = hashlib.sha256()
+    for name in ("handoff.html", "handoff.css", "handoff.js"):
+        path = root / name
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def _webmcp_no_store_headers() -> Dict[str, str]:
+    """Keep mutable WebMCP control assets out of browser and CDN caches."""
+    return {
+        "Cache-Control": "no-store, max-age=0, must-revalidate",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+        "Pragma": "no-cache",
+    }
+
+
+def _workspace_setup_contract_source() -> str:
+    """Concatenate external WebMCP sources for source-contract regression tests only."""
+    root = _helper_web_root()
+    parts = [
+        _workspace_setup_html(),
+        (root / "styles.css").read_text(encoding="utf-8"),
+        (root / "app.js").read_text(encoding="utf-8"),
+        (root / "pyodide-worker.js").read_text(encoding="utf-8"),
+    ]
+    return "\n".join(parts)
+
 
 def _build_tool_result(result: Any, *, is_error: bool = False) -> Dict[str, Any]:
     """Build an MCP tool result compatible with legacy and structured clients.
@@ -302,6 +286,67 @@ def _build_tool_result(result: Any, *, is_error: bool = False) -> Dict[str, Any]
         "structuredContent": structured_content,
         "isError": is_error,
     }
+
+
+def _is_dual_surface_tool(tool_name: str) -> bool:
+    """True for tools that exist BOTH server-side (v4) and on a paired workspace.
+
+    For these eight names (shell, git, code_*, file_ops, file_read) the target
+    machine depends solely on whether this MCP session holds a workspace lease.
+    The name alone does not reveal it, so results get tagged with
+    ``execution_target``. Derived at call time from the live registries, so the
+    set cannot drift out of sync with a hand-maintained list.
+    """
+    try:
+        from ..services.mcp_workspace_bridge import LOCAL_TOOL_NAMES
+        from ..mcp.handlers_v4 import get_tool_handler as _get_v4_handler
+    except Exception:  # pragma: no cover - transparency must never break a call
+        return False
+    return tool_name in LOCAL_TOOL_NAMES and _get_v4_handler(tool_name) is not None
+
+
+def _tag_execution_target(result: Any, tool_name: str, target: str) -> Any:
+    """Tag a raw handler result before serialization (server-side path).
+
+    Applied pre-serialization so the text block and structuredContent produced
+    by _build_tool_result stay byte-identical in meaning.
+    """
+    if not isinstance(result, dict) or "execution_target" in result:
+        return result
+    if _is_dual_surface_tool(tool_name):
+        result["execution_target"] = target
+    return result
+
+
+def _tag_local_execution_target(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
+    """Tag an already-built MCP result coming back from the workspace bridge.
+
+    The bridge returns a finished MCP envelope, so both representations are
+    updated together. Non-JSON text blocks (e.g. screenshot payloads) and image
+    blocks are left untouched.
+    """
+    if not isinstance(result, dict) or not _is_dual_surface_tool(tool_name):
+        return result
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict) or "execution_target" in structured:
+        return result
+    structured["execution_target"] = "local_workspace"
+    content = result.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "text"):
+                continue
+            try:
+                parsed = json.loads(block.get("text") or "")
+            except (ValueError, TypeError):
+                break
+            if isinstance(parsed, dict):
+                parsed["execution_target"] = "local_workspace"
+                block["text"] = json.dumps(
+                    parsed, separators=(",", ":"), ensure_ascii=False, default=str
+                )
+            break
+    return result
 
 
 def _maybe_block_write_tool(
@@ -365,6 +410,7 @@ def _finish_tools_list(
     version: str,
     request: Optional[Request] = None,
     note: Optional[str] = None,
+    discovery_profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     filtered_tools = []
     for tool in _filter_tools_for_client(tools, request):
@@ -374,11 +420,57 @@ def _finish_tools_list(
         annotations = dict(decorated.get("annotations") or {})
         annotations.setdefault("readOnlyHint", is_readonly_tool(str(decorated.get("name") or "")))
         decorated["annotations"] = annotations
+        try:
+            from ..mcp.tool_registry_unified import usage_hint_for_tool
+            decorated["x_usage_hint"] = usage_hint_for_tool(decorated)
+        except Exception:
+            pass
         filtered_tools.append(decorated)
     if request is not None:
         try:
             from app.services.mcp_workspace_bridge import merge_workspace_tools
             filtered_tools = merge_workspace_tools(filtered_tools, request)
+            # Re-apply server-tool authorization after the workspace/public
+            # overlay, but do not feed explicitly leased local-workspace tools
+            # back through the server RBAC filter. Local tools are authorized by
+            # the workspace bridge from the live capability + share manifest;
+            # filtering them here makes a valid Helper lease undiscoverable.
+            local_workspace_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") == "local_workspace"
+            ]
+            server_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") != "local_workspace"
+            ]
+            allowed_server_names = {
+                str(tool.get("name") or "")
+                for tool in _filter_tools_for_client(server_tools, request)
+            }
+            filtered_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") == "local_workspace"
+                or str(tool.get("name") or "") in allowed_server_names
+            ]
+            # Workspace/public overlays may only narrow or decorate the requested
+            # discovery view. They must never inflate a semantic inventory back
+            # into the full public catalogue.
+            if discovery_profile:
+                from ..mcp.tool_registry_unified import filter_tools_for_profile
+                filtered_tools = filter_tools_for_profile(filtered_tools, discovery_profile)
+            # The public/workspace overlay can replace canonical entries. Reapply
+            # effective read-only metadata and the short model-facing hint after
+            # the overlay so discovery text matches the enforced route policy.
+            from ..mcp.tool_registry_unified import usage_hint_for_tool
+            refreshed_tools = []
+            for overlaid in filtered_tools:
+                refreshed = dict(overlaid)
+                refreshed_annotations = dict(refreshed.get("annotations") or {})
+                refreshed_annotations["readOnlyHint"] = is_readonly_tool(str(refreshed.get("name") or ""))
+                refreshed["annotations"] = refreshed_annotations
+                refreshed["x_usage_hint"] = usage_hint_for_tool(refreshed)
+                refreshed_tools.append(refreshed)
+            filtered_tools = refreshed_tools
         except Exception as exc:
             mcp_logger.warning("Public workspace tool merge failed: %s", exc)
     from ..mcp.tool_registry_audit import advertised_toolset_descriptor
@@ -395,9 +487,17 @@ def _finish_tools_list(
 
 
 def _filter_tools_for_client(tools: List[Dict[str, Any]], request: Optional[Request] = None) -> List[Dict[str, Any]]:
-    """Apply normal MCP authorization; ai-coder is an identity, not a deny profile."""
+    """Apply normal MCP authorization plus the claimed web-worker capability profile."""
     if request is None:
         return tools
+    try:
+        from app.mcp.web_worker import filter_restricted_worker_tools, worker_mode_for_request
+        if worker_mode_for_request(request) in {"ticket", "market"}:
+            return filter_restricted_worker_tools(tools, request)
+    except Exception:
+        state = getattr(request, "state", None)
+        if str(getattr(state, "mcp_worker_mode", "") or "") in {"ticket", "market"}:
+            return []
     if is_internal_full_request(request):
         return tools
     return filter_tools_for_external(tools, request=request)
@@ -426,9 +526,10 @@ async def create_browser_workspace_pair_ticket(request: Request) -> JSONResponse
     from urllib.parse import urlencode
     import qrcode
     import qrcode.image.svg
-    from app.services.mcp_workspace_sessions import PAIR_TTL_SECONDS, create_web_pair_code
+    from app.services.mcp_workspace_sessions import PAIR_TTL_SECONDS, create_web_pair_code, create_workspace_socket_ticket
 
     code = create_web_pair_code()
+    socket_ticket = create_workspace_socket_ticket(code)
     mcp_url = str(request.base_url).rstrip("/") + "/v1/mcp"
     pair_uri = "ailinux-helper://pair?" + urlencode({"url": mcp_url, "pair_code": code})
     image = qrcode.make(pair_uri, image_factory=qrcode.image.svg.SvgPathImage, border=2)
@@ -436,9 +537,26 @@ async def create_browser_workspace_pair_ticket(request: Request) -> JSONResponse
     image.save(buf)
     qr_data_uri = "data:image/svg+xml;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
     return JSONResponse(
-        {"pair_code": code, "pair_uri": pair_uri, "qr_data_uri": qr_data_uri, "expires_seconds": PAIR_TTL_SECONDS},
+        {"pair_code": code, "socket_ticket": socket_ticket, "pair_uri": pair_uri, "qr_data_uri": qr_data_uri, "expires_seconds": PAIR_TTL_SECONDS},
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
+
+
+@public_router.post("/mcp/workspace/socket-ticket", tags=["MCP"], summary="Create one-shot browser workspace socket ticket")
+async def create_browser_workspace_socket_ticket(request: Request) -> JSONResponse:
+    from app.services.mcp_workspace_sessions import SOCKET_TICKET_TTL_SECONDS, create_workspace_socket_ticket
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    pair_code = str(body.get("pair_code") or "").strip().upper() if isinstance(body, dict) else ""
+    if not pair_code:
+        return JSONResponse({"error": "pair_code required"}, status_code=400, headers={"Cache-Control": "no-store"})
+    try:
+        ticket = create_workspace_socket_ticket(pair_code)
+    except ValueError:
+        return JSONResponse({"error": "invalid or expired workspace pairing code"}, status_code=403, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"socket_ticket": ticket, "expires_seconds": SOCKET_TICKET_TTL_SECONDS}, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
 @public_router.post("/mcp/workspace/resume-ticket", tags=["MCP"], summary="Create one-shot browser workspace reconnect ticket")
@@ -459,7 +577,7 @@ async def create_browser_workspace_resume_ticket(request: Request) -> JSONRespon
     except ValueError:
         return JSONResponse({"error": "invalid or expired workspace session"}, status_code=403, headers={"Cache-Control": "no-store"})
     return JSONResponse(
-        {"pair_code": ticket, "expires_seconds": RESUME_TICKET_TTL_SECONDS},
+        {"pair_code": ticket, "socket_ticket": ticket, "expires_seconds": RESUME_TICKET_TTL_SECONDS},
         headers={"Cache-Control": "no-store"},
     )
 
@@ -489,25 +607,82 @@ async def create_browser_workspace_handoff_ticket(request: Request) -> JSONRespo
 
 @public_router.get("/mcp/workspace/handoff", tags=["MCP"], summary="Native app handoff landing page")
 async def browser_workspace_handoff_landing() -> HTMLResponse:
-    html = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='theme-color' content='#0d1117'><title>AILinux Workspace Handoff</title><style>body{font-family:system-ui;background:#0d1117;color:#e6edf3;margin:0}main{max-width:680px;margin:10vh auto;padding:28px}button{padding:12px 18px;border:0;border-radius:9px;background:#238636;color:#fff;font-weight:700}a{color:#79c0ff}code{display:block;padding:12px;background:#161b22;border-radius:8px;margin:16px 0}</style></head><body><main><h1>Open AILinux Workspace</h1><p>The handoff is a short-lived one-time ticket. The durable workspace credential is never placed in this URL.</p><code id='code'></code><p><button id='open'>Open Android helper</button></p><p><a href='/v1/mcp/workspace/android.apk'>Download Android APK</a> · <a href='/v1/mcp'>Browser / iOS web app</a></p></main><script data-cfasync='false'>const p=new URLSearchParams(location.hash.slice(1)),code=p.get('code')||'';document.getElementById('code').textContent=code||'No handoff code';const open=()=>{if(!code)return;location.href='ailinux-helper://handoff?code='+encodeURIComponent(code)};document.getElementById('open').onclick=open;if(code&&/Android/i.test(navigator.userAgent))setTimeout(open,100);</script></body></html>"""
-    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+    path = _helper_web_root() / "handoff.html"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="Workspace handoff page unavailable")
+    content = path.read_text(encoding="utf-8")
+    build = _webmcp_handoff_build_key()
+    for asset in ("/v1/mcp/web/handoff.css", "/v1/mcp/web/handoff.js"):
+        content = re.sub(re.escape(asset) + r"\?v=[^\"'\s>]+", f"{asset}?v={build}", content)
+    return HTMLResponse(content, headers=_webmcp_no_store_headers())
 
 
+@public_router.head("/mcp/workspace/android.apk", tags=["MCP"], include_in_schema=False)
 @public_router.get("/mcp/workspace/android.apk", tags=["MCP"], summary="Download AILinux Android workspace helper")
 async def download_android_workspace_helper() -> Response:
-    apk_path = os.getenv("AILINUX_ANDROID_WORKSPACE_APK", "/home/zombie/workspace/triforce/releases/helper/AILinux-Helper-latest.apk")
-    if not os.path.isfile(apk_path):
-        return JSONResponse(
-            {"error": "Android helper APK is not built yet", "build": "android_workspace", "version": "2.90.13"},
-            status_code=404,
-            headers={"Cache-Control": "no-store"},
-        )
-    return FileResponse(
-        apk_path,
-        media_type="application/vnd.android.package-archive",
-        filename="AILinux-Helper-2.90.13-android.apk",
-        headers={"Cache-Control": "no-cache"},
-    )
+    return await download_ailinux_helper("android")
+
+
+@public_router.get("/mcp/web/styles.css", tags=["MCP"], include_in_schema=False)
+async def webmcp_stylesheet() -> Response:
+    path = _helper_web_root() / "styles.css"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="WebMCP stylesheet unavailable")
+    content = _helper_design_css() + "\n" + path.read_text(encoding="utf-8")
+    return Response(content=content, media_type="text/css", headers=_webmcp_no_store_headers())
+
+
+@public_router.get("/mcp/web/handoff.css", tags=["MCP"], include_in_schema=False)
+async def webmcp_handoff_stylesheet() -> Response:
+    path = _helper_web_root() / "handoff.css"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="Workspace handoff stylesheet unavailable")
+    return FileResponse(path, media_type="text/css", headers=_webmcp_no_store_headers())
+
+
+@public_router.get("/mcp/web/handoff.js", tags=["MCP"], include_in_schema=False)
+async def webmcp_handoff_script() -> Response:
+    path = _helper_web_root() / "handoff.js"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="Workspace handoff script unavailable")
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
+
+
+@public_router.get("/mcp/web/app.js", tags=["MCP"], include_in_schema=False)
+async def webmcp_script() -> Response:
+    path = _helper_web_root() / "app.js"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="WebMCP script unavailable")
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
+
+
+@public_router.get("/mcp/web/pyodide-worker.js", tags=["MCP"], include_in_schema=False)
+async def webmcp_pyodide_worker() -> Response:
+    path = _helper_web_root() / "pyodide-worker.js"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="WebMCP worker unavailable")
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
+
+
+@public_router.get("/mcp/pyodide/{version}/{filename}", tags=["MCP"], include_in_schema=False)
+async def webmcp_pyodide_asset(version: str, filename: str) -> Response:
+    manifest = _helper_release_manifest()
+    pyodide = ((manifest.get("webmcp") or {}).get("pyodide") or {})
+    expected_version = str(pyodide.get("version") or "")
+    files = pyodide.get("files") if isinstance(pyodide.get("files"), dict) else {}
+    if version != expected_version or filename not in files:
+        raise HTTPException(status_code=404, detail="Pyodide asset unavailable")
+    path = _helper_web_root() / "vendor" / "pyodide" / version / filename
+    meta = files[filename]
+    if not path.is_file() or (int(meta.get("size") or 0) and path.stat().st_size != int(meta["size"])):
+        raise HTTPException(status_code=503, detail="Pyodide asset mirror incomplete")
+    media = "application/wasm" if filename.endswith(".wasm") else "application/json" if filename.endswith(".json") else "application/zip" if filename.endswith(".zip") else "text/javascript"
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "public, max-age=31536000, immutable", "X-Content-SHA256": str(meta.get("sha256") or "")})
+
+
+@public_router.get("/mcp/helper/release.json", tags=["MCP"], summary="AILinux Helper release manifest")
+async def ailinux_helper_release_manifest() -> JSONResponse:
+    return JSONResponse(_helper_release_manifest(), headers={"Cache-Control": "no-store"})
 
 
 @public_router.get("/mcp/helper/icon.png", tags=["MCP"], summary="AILinux Helper app icon")
@@ -518,65 +693,58 @@ async def ailinux_helper_icon() -> Response:
     return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=86400, immutable"})
 
 
+@public_router.get("/mcp/helper/releases", tags=["MCP"], summary="Current AILinux Helper release catalog")
+async def ailinux_helper_release_catalog() -> JSONResponse:
+    return JSONResponse(_helper_release_catalog(), headers={"Cache-Control": "no-store"})
+
+
+@public_router.head("/mcp/helper/{platform}", tags=["MCP"], include_in_schema=False)
 @public_router.get("/mcp/helper/{platform}", tags=["MCP"], summary="Download current AILinux Helper")
 async def download_ailinux_helper(platform: str):
+    catalog = _helper_release_catalog()
+    spec = catalog.get(platform.lower())
+    if not spec or not spec.get("available"):
+        raise HTTPException(status_code=404, detail="AILinux Helper build unavailable for this platform")
     release_root = Path(os.getenv("AILINUX_HELPER_RELEASES", "/home/zombie/workspace/triforce/releases/helper"))
-    artifacts = {
-        "android": ("AILinux-Helper-latest.apk", "AILinux-Helper-2.90.13-android.apk", "application/vnd.android.package-archive"),
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.14-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.14-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.13-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.13-mac-arm64.dmg", "application/x-apple-diskimage"),
-    }
-    spec = artifacts.get(platform)
-    if not spec:
-        raise HTTPException(status_code=404, detail="Unknown AILinux Helper platform")
-    source_name, download_name, media_type = spec
-    artifact = release_root / source_name
-    if not artifact.is_file():
-        return JSONResponse(status_code=404, content={"error": f"{platform} AILinux Helper build is pending", "version": "2.90.13", "repository": "ailinux-helper"})
-    return FileResponse(artifact, filename=download_name, media_type=media_type, headers={"Cache-Control": "no-store"})
+    artifact = release_root / spec["filename"]
+    return FileResponse(
+        artifact,
+        filename=spec["filename"],
+        media_type=spec["media_type"],
+        headers={"Cache-Control": "no-store", "X-AILinux-Helper-Version": spec["version"], "X-Content-SHA256": spec.get("sha256", "")},
+    )
 
 
 @public_router.get("/mcp/workspace/desktop/{platform}", tags=["MCP"], summary="Download AILinux desktop workspace helper")
 async def download_desktop_workspace_helper(platform: str) -> Response:
-    root = os.getenv("AILINUX_DESKTOP_WORKSPACE_RELEASES", "/home/zombie/workspace/triforce/releases/helper")
-    artifacts = {
-        "linux-appimage": ("AILinux-Helper-latest.AppImage", "AILinux-Helper-2.90.14-linux-x86_64.AppImage", "application/vnd.appimage"),
-        "linux-deb": ("AILinux-Helper-latest.deb", "AILinux-Helper-2.90.14-linux-amd64.deb", "application/vnd.debian.binary-package"),
-        "windows": ("AILinux-Helper-latest.exe", "AILinux-Helper-2.90.13-win-x64.exe", "application/vnd.microsoft.portable-executable"),
-        "macos": ("AILinux-Helper-latest.dmg", "AILinux-Helper-2.90.13-mac-arm64.dmg", "application/x-apple-diskimage"),
-    }
-    item = artifacts.get(platform.lower())
-    if not item:
-        return JSONResponse({"error": "Unknown desktop platform", "platform": platform}, status_code=404)
-    source, filename, media_type = item
-    path = os.path.join(root, source)
-    if not os.path.isfile(path):
-        return JSONResponse({"error": f"{platform} helper build is pending", "version": "2.90.13", "workflow": "ailinux-helper/build.yml"}, status_code=404, headers={"Cache-Control": "no-store"})
-    return FileResponse(path, media_type=media_type, filename=filename, headers={"Cache-Control": "no-cache"})
+    return await download_ailinux_helper(platform)
 
 
 @public_router.get("/mcp/manifest.webmanifest", tags=["MCP"], summary="AILinux workspace PWA manifest")
 async def workspace_pwa_manifest() -> JSONResponse:
+    build = _webmcp_build_key()
     return JSONResponse({
         "name": "AILinux Helper",
         "short_name": "AILinux Helper",
         "id": "/v1/mcp",
-        "start_url": "/v1/mcp",
+        "start_url": f"/v1/mcp?app={build}",
         "scope": "/v1/mcp",
         "display": "standalone",
         "background_color": "#0d1117",
         "theme_color": "#0d1117",
         "description": "AILinux cross-platform local MCP companion and workspace executor",
-        "icons": [{"src": "/v1/mcp/helper/icon.png?v=29014", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
-    }, media_type="application/manifest+json", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store"})
+        "icons": [{"src": f"/v1/mcp/helper/icon.png?v={build}", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+    }, media_type="application/manifest+json", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/sw.js", tags=["MCP"], summary="AILinux workspace PWA service worker")
 async def workspace_pwa_service_worker() -> Response:
-    script = """'use strict';const CACHE='ailinux-helper-v29014';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.14')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.14'))))});"""
-    return Response(script, media_type="application/javascript", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store", "Service-Worker-Allowed": "/v1/mcp"})
+    path = _helper_web_root() / "sw.js"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="WebMCP service worker unavailable")
+    headers = _webmcp_no_store_headers()
+    headers["Service-Worker-Allowed"] = "/v1/mcp"
+    return FileResponse(path, media_type="application/javascript", headers=headers)
 
 
 @public_router.get("/.well-known/mcp")
@@ -920,7 +1088,7 @@ async def handle_llm_invoke(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("'message' or 'messages' is required")
     
     if not model_id:
-        model_id = "gemini/gemini-2.0-flash"
+        model_id = os.environ.get("TRIFORCE_DEFAULT_CHAT_MODEL", "groq/groq/compound-mini")
     
     # Auto-prefix: wenn kein Provider angegeben, versuche bekannte Prefixe
     if "/" not in model_id:
@@ -1110,8 +1278,8 @@ async def handle_models_list(_: Dict[str, Any]) -> Dict[str, Any]:
         "video_gen": [],       # Veo 3.1, Sora
         "audio": [],           # Whisper / Voxtral STT, Gemini TTS, Live API, native-audio
         "audio_gen": [],       # Lyria 3, Suno-style music generators
-        "embedding": [],       # gemini-embedding-001, mistral-embed, codestral-embed, BGE
-        "code": [],             # Codestral, DeepSeek-Coder, qwen-coder, codex
+        "embedding": [],       # gemini-embedding-001, mistral-embed, BGE
+        "code": [],             # DeepSeek-Coder, qwen-coder, codex
         "reasoning": [],       # o1/o3, DeepSeek-R1, Magistral, thinking variants
         "function_calling": [], # Models advertising native tool use
         "moderation": [],      # llama-guard, mistral-moderation
@@ -1938,13 +2106,43 @@ async def handle_initialize(params: Dict[str, Any], request: Optional[Request] =
     }
 
 
+def _request_has_full_access(request: Optional[Request]) -> bool:
+    """True only for a client that already authenticated with full access.
+
+    Used to pick the tools/list discovery default. This is a *visibility*
+    decision, never an authorization one - every privileged tool is still
+    checked against RBAC at call time.
+    """
+    if request is None:
+        return False
+    try:
+        return bool(getattr(request.state, "mcp_auth_full_access", False))
+    except Exception:
+        return False
+
+
 async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] = None) -> Dict[str, Any]:
     """MCP tools/list with a minimal default and canonical inventory profiles.
 
     Legacy handlers remain callable for compatibility, but duplicate/dead tools
     are intentionally not advertised to models.
     """
-    inventory = str(params.get("inventory", "core"))
+    inventory = str(params.get("inventory", "")).strip()
+    if not inventory:
+        # Discovery default. "core" keeps an unauthenticated or narrow client's
+        # context small, but for a client that already proved full access it is
+        # only context thrift, not a security boundary: RBAC in
+        # runtime_registry/mcp_security still gates every privileged call.
+        #
+        # Hiding the surface from a full-access client is actively harmful: the
+        # execution and federation tools (shell, binary_exec, task_runner,
+        # remote_exec, remote_admin) exist and are registered, but a client that
+        # sends tools/list without an inventory parameter never learns they are
+        # callable, and reports them as "deleted".
+        # External/public MCP clients also need the complete canonical non-admin
+        # vocabulary so separate TriForce MCP and WebMCP connectors can coexist in
+        # one AI session without schema drift. Authorization remains call-time.
+        inventory = "all" if request is not None else "core"
     # Check if client wants legacy (v3) tools
     use_legacy = inventory in {"legacy", "v3"} or params.get("legacy", False) or params.get("v3", False)
     
@@ -1958,19 +2156,32 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
     
     # Primary: unified inventory (Pre-Killer style, full toolbox with handlers)
     try:
-        from ..mcp.tool_registry_unified import get_canonical_all_tools, filter_tools_for_profile
-        tools = filter_tools_for_profile(get_canonical_all_tools(), inventory)
+        from ..mcp.tool_registry_unified import (
+            get_canonical_all_tools, filter_tools_for_profile, get_inventory_catalog,
+        )
+        canonical_tools = get_canonical_all_tools()
+        tools = filter_tools_for_profile(canonical_tools, inventory)
 
         for tool in tools:
             if isinstance(tool, dict) and "outputSchema" not in tool:
                 tool["outputSchema"] = {"type": "object", "additionalProperties": True}
 
-        return _finish_tools_list(
+        result = _finish_tools_list(
             tools,
             "unified",
             request,
             note=f"canonical MCP surface profile={inventory}",
+            # Preserve the selected discovery profile even through the public/local
+            # workspace overlay. Pairing/device schemas are explicitly part of core,
+            # so there is no reason to inflate a small model-facing inventory back
+            # to the complete global catalogue.
+            discovery_profile=(None if inventory.strip().lower() in {"all", "full", "*"} else inventory),
         )
+        # Compact semantic index for clients that implement progressive disclosure.
+        # These are discovery labels only; RBAC and per-tool policy remain authoritative.
+        result["inventories"] = get_inventory_catalog(canonical_tools)
+        result["selected_inventory"] = inventory
+        return result
     except Exception as e:
         logger.warning(f"Unified tools failed, falling back to v4: {e}")
     
@@ -2689,9 +2900,10 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     if request is not None and tool_name:
         from app.services.mcp_workspace_bridge import call_workspace_tool, should_route_tool_locally
         if should_route_tool_locally(request, str(tool_name)):
-            return await call_workspace_tool(
+            local_result = await call_workspace_tool(
                 request, str(tool_name), arguments if isinstance(arguments, dict) else {}
             )
+            return _tag_local_execution_target(local_result, str(tool_name))
 
     # Resolve unified registry aliases before legacy/v4 normalization.
     from ..mcp.tool_registry_unified import resolve_tool_name_for_call
@@ -2811,12 +3023,43 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     if not handler and "_" in tool_name:
         handler = tool_map.get(tool_name.replace("_", "."))
 
-    # Try v4 handlers first
+    # Workspace-only tools have no server-side v4 handler by design. Detect
+    # this before entering handlers_v4 so an expected unpaired-workspace state
+    # does not get logged as a backend ERROR.
     if not handler:
+        from ..services.mcp_workspace_bridge import LOCAL_TOOL_NAMES
+        from ..mcp.handlers_v4 import get_tool_handler as _get_v4_handler
+
+        if tool_name in LOCAL_TOOL_NAMES and _get_v4_handler(tool_name) is None:
+            mcp_logger.info(
+                f"workspace tool '{tool_name}' called without a paired workspace lease"
+            )
+            return _build_tool_result(
+                {
+                    "error": (
+                        f"'{tool_name}' executes on your paired local workspace, but this "
+                        "MCP session has no active workspace lease. Pair a workspace or "
+                        "AILinux Helper for THIS session first (workspace_status / "
+                        "aihelper_pair), then retry. A lease paired on a different MCP "
+                        "endpoint or session does not apply here."
+                    ),
+                    "tool_name": tool_name,
+                    "source": "workspace_bridge",
+                    "code": "workspace_not_paired",
+                },
+                is_error=True,
+            )
+
         try:
-            v4_result = await call_v4_tool(tool_name, arguments)
+            v4_handler = _get_v4_handler(tool_name)
+            if v4_handler is not None and _tool_handler_accepts_request(v4_handler):
+                v4_result = await _call_tool_handler(v4_handler, arguments, request)
+            else:
+                v4_result = await call_v4_tool(tool_name, arguments)
             if v4_result is not None:
-                return _build_tool_result(v4_result)
+                return _build_tool_result(
+                    _tag_execution_target(v4_result, tool_name, "server")
+                )
         except Exception as e:
             mcp_logger.error(f"v4 handler failed for {tool_name}: {e}")
             return _build_tool_result(
@@ -2828,7 +3071,7 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
         raise ValueError(f"Unknown tool: {tool_name}")
 
     result = await _call_tool_handler(handler, arguments, request)
-    return _build_tool_result(result)
+    return _build_tool_result(_tag_execution_target(result, tool_name, "server"))
 
 
 # ============================================================================
@@ -2940,7 +3183,6 @@ async def handle_tristar_memory_search(params: Dict[str, Any]) -> Dict[str, Any]
 # ============================================================================
 
 import unicodedata
-from pathlib import Path
 import logging
 
 _mcp_logger = logging.getLogger("ailinux.mcp.security")
@@ -3166,7 +3408,10 @@ def _log_edit(action: str, path: str, details: Dict[str, Any]):
 
 
 async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Edit a file in the codebase with safety checks."""
+    """Compatibility wrapper around the canonical MCP service edit handler."""
+    from app.services.mcp_service import handle_codebase_edit as service_handle_codebase_edit
+    return await service_handle_codebase_edit(params)
+
     file_path = params.get("path")
     mode = params.get("mode")
 
@@ -3218,11 +3463,11 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
         new_content = original_content.replace(old_text, new_text, 1)
 
     elif mode == "insert":
-        line_number = params.get("line_number")
+        line_number = params.get("line_number") or params.get("line")
         new_text = params.get("new_text", "")
 
         if not line_number or line_number < 1:
-            raise ValueError("'line_number' (>= 1) required for insert mode")
+            raise ValueError("'line' (>= 1) required for insert mode")
 
         lines = original_lines.copy()
         insert_idx = min(line_number - 1, len(lines))
@@ -3247,12 +3492,13 @@ async def handle_codebase_edit(params: Dict[str, Any]) -> Dict[str, Any]:
         if not new_content.endswith("\n"):
             new_content += "\n"
 
-    elif mode == "delete_lines":
-        start_line = params.get("start_line")
-        end_line = params.get("end_line")
+    elif mode in {"delete", "delete_lines"}:
+        single_line = params.get("line") or params.get("line_number")
+        start_line = params.get("start_line") or single_line
+        end_line = params.get("end_line") or single_line
 
         if not start_line or not end_line:
-            raise ValueError("'start_line' and 'end_line' required for delete_lines mode")
+            raise ValueError("'line' (or start_line/end_line) required for delete mode")
         if start_line < 1 or end_line < start_line:
             raise ValueError("Invalid line range")
 
@@ -4129,6 +4375,9 @@ MCP_REQUEST_BODY_TIMEOUT_SECONDS = float(os.getenv("MCP_REQUEST_BODY_TIMEOUT_SEC
 
 # In-memory session store with response queues
 _mcp_sessions: Dict[str, Dict[str, TypingAny]] = {}
+# Private queue sentinel used to wake a legacy SSE generator immediately when
+# a client explicitly terminates its transport. It is never serialized.
+_LEGACY_SSE_CLOSE = object()
 
 
 def _get_session(session_id: str) -> Dict[str, TypingAny]:
@@ -4142,6 +4391,39 @@ def _get_session(session_id: str) -> Dict[str, TypingAny]:
             "initialized": False,
         }
     return _mcp_sessions[session_id]
+
+
+def _workspace_call_changes_tool_inventory(tool_name: str, arguments: TypingAny, result: TypingAny) -> bool:
+    """Return True when a successful workspace control call changes visible MCP tools."""
+    if not isinstance(result, dict) or bool(result.get("isError")):
+        return False
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict):
+        return False
+    name = str(tool_name or "")
+    args = arguments if isinstance(arguments, dict) else {}
+    if name == "workspace_pair":
+        return bool(structured.get("ok"))
+    if name == "workspace_status":
+        return bool(args.get("workspace_id")) and bool(structured.get("connected"))
+    if name == "aihelper_pair":
+        action = str(args.get("action") or "status").strip().lower()
+        return action in {"pair", "reconnect", "disconnect"} and bool(structured.get("ok", structured.get("connected")))
+    return False
+
+
+async def _queue_tools_list_changed(session_id: str | None) -> bool:
+    """Notify an initialized MCP transport that its session-scoped tool list changed."""
+    if not session_id:
+        return False
+    session = _mcp_sessions.get(str(session_id))
+    if not session or not bool(session.get("initialized")):
+        return False
+    queue = session.get("queue")
+    if queue is None:
+        return False
+    await queue.put({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+    return True
 
 
 def _store_session_request_state(session: Dict[str, TypingAny], request: Request) -> None:
@@ -4165,6 +4447,47 @@ def _restore_session_request_state(session: Dict[str, TypingAny], request: Reque
     request.state.mcp_authority_source = session.get("authority_source")
     request.state.mcp_auth_client_id = session.get("auth_client_id")
     request.state.mcp_workspace_subject = session.get("workspace_subject")
+
+
+def _legacy_sse_session_matches_request(session: Dict[str, TypingAny], request: Request) -> bool:
+    """Match an authenticated DELETE to its legacy SSE session without guessing.
+
+    A few legacy MCP clients terminate ``/sse`` without echoing the session id.
+    In that case we only infer a session from authenticated identity fields that
+    were captured on the original GET. The caller must still resolve to exactly
+    one live session before it may be closed.
+    """
+    state = request.state
+    comparisons = (
+        ("auth_client_id", "mcp_auth_client_id"),
+        ("workspace_subject", "mcp_workspace_subject"),
+        ("auth_user", "mcp_auth_user"),
+    )
+    matched = False
+    for session_key, state_key in comparisons:
+        expected = session.get(session_key)
+        if expected in (None, ""):
+            continue
+        actual = getattr(state, state_key, None)
+        if actual in (None, "") or str(actual) != str(expected):
+            return False
+        matched = True
+    return matched
+
+
+def _close_legacy_sse_session(session_id: str) -> bool:
+    """Wake and detach one legacy SSE transport, preserving workspace leases."""
+    session = _mcp_sessions.get(session_id)
+    if session is None:
+        return False
+    queue = session.get("queue")
+    if queue is not None:
+        try:
+            queue.put_nowait(_LEGACY_SSE_CLOSE)
+        except (AttributeError, asyncio.QueueFull):
+            pass
+    _clear_mcp_session(session_id, clear_workspace=False)
+    return True
 
 
 def _logical_transport_session_id(request: Request, explicit_session_id: str | None = None) -> str:
@@ -4259,8 +4582,9 @@ async def mcp_health_or_sse(request: Request):
     await require_mcp_auth(request)
 
     accept_header = request.headers.get("Accept", "")
-    if "text/html" in accept_header and "text/event-stream" not in accept_header:
-        return HTMLResponse(_workspace_setup_html(), headers={"Cache-Control": "no-store"})
+    app_shell_request = bool(request.query_params.get("app"))
+    if ("text/html" in accept_header or app_shell_request) and "text/event-stream" not in accept_header:
+        return HTMLResponse(_workspace_setup_html(), headers=_webmcp_no_store_headers())
     client_ip = request.client.host if request.client else "unknown"
 
     if "text/event-stream" in accept_header:
@@ -4348,6 +4672,58 @@ async def mcp_sse_post(request: Request):
     return await mcp_unified_endpoint(request)
 
 
+@router.delete("/mcp/sse", tags=["MCP"], summary="Terminate legacy SSE transport")
+@router.delete("/mcp/sse/", tags=["MCP"], summary="Terminate legacy SSE transport")
+@router.delete("/sse", tags=["MCP"], summary="Terminate legacy SSE transport (alias)")
+@router.delete("/sse/", tags=["MCP"], summary="Terminate legacy SSE transport (alias)")
+async def mcp_sse_delete(request: Request):
+    """Idempotently terminate a Cursor-compatible legacy SSE transport."""
+    await require_mcp_auth(request)
+    session_id = str(
+        request.query_params.get("session_id")
+        or request.headers.get("Mcp-Session-Id")
+        or ""
+    ).strip()
+
+    if getattr(request.state, "mcp_auth_method", None) == "public_guest" and not session_id:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Public guest DELETE requires Mcp-Session-Id"},
+        )
+
+    if session_id:
+        session = _mcp_sessions.get(session_id)
+        if session is not None and not _legacy_sse_session_matches_request(session, request):
+            # Older token-auth sessions may not have identity metadata. Their
+            # high-entropy session id remains a capability, matching /messages.
+            has_owner = any(session.get(key) not in (None, "") for key in (
+                "auth_client_id", "workspace_subject", "auth_user"
+            ))
+            if has_owner:
+                raise HTTPException(status_code=403, detail="MCP session ownership mismatch")
+    else:
+        matches = [
+            sid for sid, session in _mcp_sessions.items()
+            if _legacy_sse_session_matches_request(session, request)
+        ]
+        if len(matches) > 1:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "Multiple legacy SSE sessions match; provide Mcp-Session-Id"},
+            )
+        if len(matches) == 1:
+            session_id = matches[0]
+
+    closed = bool(session_id) and _close_legacy_sse_session(session_id)
+    mcp_logger.info(
+        "SSE_DELETE | Session: %s | closed=%s",
+        session_id if session_id else "none",
+        closed,
+    )
+    headers = {"Mcp-Session-Id": session_id} if session_id else None
+    return Response(status_code=204, headers=headers)
+
+
 @router.get("/mcp/sse", tags=["MCP"], summary="SSE endpoint for Cursor/MCP clients")
 @router.get("/mcp/sse/", tags=["MCP"], summary="SSE endpoint for Cursor/MCP clients")
 @router.get("/sse", tags=["MCP"], summary="SSE endpoint (alias)")
@@ -4415,6 +4791,9 @@ async def mcp_sse_connect(request: Request):
                             session["queue"].get(),
                             timeout=wait_timeout,
                         )
+                        if response is _LEGACY_SSE_CLOSE:
+                            mcp_logger.info(f"SSE_DELETE_CLOSE | Session: {session_id}")
+                            break
                         # Send response as SSE message
                         yield f"event: message\ndata: {json.dumps(response)}\n\n"
                         mcp_logger.debug(f"SSE_RESPONSE | Session: {session_id} | Response sent")
@@ -4446,7 +4825,9 @@ async def mcp_sse_connect(request: Request):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id",
+            "Access-Control-Expose-Headers": "Mcp-Session-Id",
+            "Mcp-Session-Id": session_id,
         }
     )
 
@@ -4726,6 +5107,11 @@ async def _process_mcp_request(
         result = await _call_mcp_method_handler(method, handler, params, request)
         latency_ms = (_time.time() - start_time) * 1000
         await multi_logger.log_mcp(method, params, result, latency_ms)
+        if method == "tools/call" and isinstance(params, dict):
+            tool_name = str(params.get("name") or "")
+            tool_args = params.get("arguments", {})
+            if _workspace_call_changes_tool_inventory(tool_name, tool_args, result):
+                await _queue_tools_list_changed(session_id)
         return {"jsonrpc": "2.0", "result": result, "id": req_id}
     except Exception as e:
         return {

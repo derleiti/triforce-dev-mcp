@@ -1,5 +1,27 @@
-triforce-backend (1:2.86.4-1) noble; urgency=medium
+triforce-backend (1:2.86.8-1) noble; urgency=medium
 
+  * Fix Control Center dependency floor to follow the actual backend Debian version.
+  * Supersede the 2.86.7 Control Center package, whose generated dependency floor was too high.
+
+ -- AILinux <admin@ailinux.me>  Mon, 14 Sep 2026 14:31:00 +0200
+
+triforce-backend (1:2.86.7-1) noble; urgency=medium
+
+  * Redact pair, handoff, resume and API credentials from console and file logs.
+  * Add tool-call IDs, durations and structured execution outcome context.
+  * Prefer workspace pairing credentials in WebSocket headers with URL fallback compatibility.
+  * Remove duplicate Flarum V5 schema definitions from model discovery.
+  * Make repository package publishing normalize directory/file permissions for nginx.
+  * Fix kernel meta-package builds under restrictive service umasks.
+
+ -- AILinux <admin@ailinux.me>  Mon, 14 Sep 2026 13:45:00 +0200
+
+triforce-backend (1:2.86.6-1) noble; urgency=medium
+
+  * Add structured, color-organized Uvicorn/TriForce operator logging with subsystem badges, HTTP method/status highlighting and source context.
+  * Consolidate MCP discovery into global, aihelper, authenticated and admin scopes.
+  * Add canonical aihelper_* device tools with legacy Helper wire compatibility.
+  * Add aihelper_pair lifecycle actions for status, pair, reconnect and disconnect.
   * Harden browser workspace reconnects after Android/background suspension.
   * Add server-originated workspace heartbeat and opt-in Screen Wake Lock.
   * Add one-shot browser-to-app workspace handoff with resume-key rotation.

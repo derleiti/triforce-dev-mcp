@@ -17,13 +17,21 @@ set -euo pipefail
 
 NODE="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/../.env"
+ENV_FILE="${SCRIPT_DIR}/../config/triforce.env"
 
-[[ -f "$ENV_FILE" ]] && source "$ENV_FILE" 2>/dev/null || true
+# Never source configuration as shell code. Read only the small allow-listed
+# values needed by this firewall helper.
+read_env_value() {
+    local key="$1"
+    [[ -r "$ENV_FILE" ]] || return 0
+    awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); gsub(/^['"'"']|['"'"']$/, ""); print; exit }' "$ENV_FILE"
+}
 
-# Auto-detect node role from FEDERATION_NODE_ID
+# Auto-detect node role from FEDERATION_NODE_ID. Explicit process environment
+# remains the highest-priority override.
 if [[ "$NODE" == "--auto" || -z "$NODE" ]]; then
-    NODE="${FEDERATION_NODE_ID:-hetzner}"
+    NODE="${FEDERATION_NODE_ID:-$(read_env_value FEDERATION_NODE_ID)}"
+    NODE="${NODE:-hetzner}"
     echo "[INFO] Auto-detected node: $NODE"
 fi
 
@@ -56,12 +64,9 @@ if ip link show wg0 &>/dev/null; then
     echo "[UFW] 9000 allowed on wg0 (VPN)"
 fi
 
-# Docker bridge networks
-for DOCKER_NET in 172.17.0.0/16 172.18.0.0/16 172.19.0.0/16; do
-    ufw allow from "$DOCKER_NET" to any port 9000 proto tcp \
-        comment "MCP backend Docker" 2>/dev/null || true
-    echo "[UFW] 9000 allowed from $DOCKER_NET"
-done
+# Reverse proxy is the only Docker peer which needs direct backend access.
+ufw allow from 172.18.0.10 to 172.17.0.1 port 9000 proto tcp \
+    comment "Apache to TriForce" 2>/dev/null || true
 
 # ── Node-specific rules ────────────────────────────────────────────────────
 case "$NODE" in
@@ -71,23 +76,27 @@ case "$NODE" in
         # Public web
         ufw_allow "80/tcp"
         ufw_allow "443/tcp"
-        # SSH (non-standard)
-        ufw_allow "8022/tcp"
-        ufw_allow "22/tcp"
+        # SSH is management-only and must stay on WireGuard.
+        ufw_delete "8022/tcp"
+        ufw_delete "22/tcp"
+        ufw allow in on wg0 to any port 22 proto tcp comment "SSH via WireGuard" 2>/dev/null || true
         # WireGuard
         ufw_allow "51820/udp"
         # Mail
         for MAIL_PORT in 25 465 587 993 143; do ufw_allow "${MAIL_PORT}/tcp"; done
-        # Services (LAN/internal only ideally - keep current for now)
-        ufw_allow "9080/tcp"   # Flarum
-        ufw_allow "8888/tcp"   # Searxng
+        # App backends are reverse-proxy only; never expose their host ports.
+        ufw_delete "9080/tcp"
+        ufw_delete "8888/tcp"
+        ufw_delete "5678/tcp"
+        ufw_delete "8080/tcp"
         # NO direct 9100 access from outside
         echo "[INFO] Port 9100 is NOT exposed (auth-marker only, not listening)"
         ;;
 
     backup)
         echo "[STEP 3] Backup (hub) rules..."
-        ufw_allow "22/tcp"
+        ufw_delete "22/tcp"
+        ufw allow in on wg0 to any port 22 proto tcp comment "SSH via WireGuard" 2>/dev/null || true
         ufw_allow "51820/udp"
         # 9000: only VPN + localhost (already set above)
         # No public web ports
@@ -96,10 +105,12 @@ case "$NODE" in
 
     zombie-pc)
         echo "[STEP 3] Zombie-PC (hub) rules..."
-        ufw_allow "22/tcp"
+        ufw_delete "22/tcp"
+        ufw allow in on wg0 to any port 22 proto tcp comment "SSH via WireGuard" 2>/dev/null || true
         ufw_allow "51820/udp"
         # LAN access to 9000
-        if [[ -n "${LAN_SUBNET:-}" ]]; then
+        LAN_SUBNET="${LAN_SUBNET:-$(read_env_value LAN_SUBNET)}"
+        if [[ -n "${LAN_SUBNET:-}" && "$LAN_SUBNET" =~ ^[0-9.]+/[0-9]{1,2}$ ]]; then
             ufw allow from "$LAN_SUBNET" to any port 9000 proto tcp \
                 comment "MCP backend LAN" 2>/dev/null || true
         else

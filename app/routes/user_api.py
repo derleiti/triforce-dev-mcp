@@ -39,6 +39,7 @@ if not _JWT_SECRET_MODULE:
     _JWT_SECRET_MODULE = secrets.token_hex(32)
 
 router = APIRouter()
+webhook_router = APIRouter()
 
 # ============================================================================
 # Pydantic Models
@@ -87,7 +88,7 @@ class WebhookPayload(BaseModel):
 def _get_webhook_secret() -> str:
     """Lädt Webhook Secret aus Environment"""
     import os
-    return os.environ.get("AILINUX_WEBHOOK_SECRET", "ailinux-webhook-secret-change-me")
+    return (os.environ.get("AILINUX_WEBHOOK_SECRET") or os.environ.get("WEBHOOK_SECRET") or "").strip()
 
 async def verify_webhook_signature(request: Request, x_webhook_signature: str = Header(None)) -> bool:
     """
@@ -100,6 +101,9 @@ async def verify_webhook_signature(request: Request, x_webhook_signature: str = 
         return False
 
     webhook_secret = _get_webhook_secret()
+    if not webhook_secret:
+        logger.error("Webhook authentication unavailable: webhook secret is not configured")
+        return False
 
     # Body für HMAC-Berechnung lesen
     body = await request.body()
@@ -126,12 +130,21 @@ async def verify_webhook_signature(request: Request, x_webhook_signature: str = 
     return is_valid
 
 
+async def require_webhook_signature(
+    request: Request,
+    x_webhook_signature: str = Header(None),
+) -> None:
+    """Fail closed unless the WordPress webhook carries a valid HMAC."""
+    if not await verify_webhook_signature(request, x_webhook_signature):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+
 # ============================================================================
 # WordPress Integration Endpoints (Webhooks)
 # ============================================================================
 
-@router.post("/webhook/user-created")
-async def webhook_user_created(payload: WebhookPayload):
+@webhook_router.post("/webhook/user-created")
+async def webhook_user_created(payload: WebhookPayload, _: None = Depends(require_webhook_signature)):
     """
     WordPress ruft diesen Endpoint auf wenn ein neuer User registriert wird.
     
@@ -162,8 +175,8 @@ async def webhook_user_created(payload: WebhookPayload):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/webhook/payment-success")
-async def webhook_payment_success(payload: WebhookPayload):
+@webhook_router.post("/webhook/payment-success")
+async def webhook_payment_success(payload: WebhookPayload, _: None = Depends(require_webhook_signature)):
     """
     WordPress ruft diesen Endpoint auf bei erfolgreicher Zahlung.
     
@@ -203,8 +216,8 @@ async def webhook_payment_success(payload: WebhookPayload):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/webhook/subscription-cancelled")
-async def webhook_subscription_cancelled(payload: WebhookPayload):
+@webhook_router.post("/webhook/subscription-cancelled")
+async def webhook_subscription_cancelled(payload: WebhookPayload, _: None = Depends(require_webhook_signature)):
     """Downgrade auf Free bei Abo-Kündigung"""
     try:
         success = await user_manager.upgrade_tier(

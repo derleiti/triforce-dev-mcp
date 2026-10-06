@@ -146,6 +146,11 @@ function nova_copa_normalize_entitlements($raw): array {
 
     foreach ($raw as $k => $v) {
         if (is_int($k)) {
+            // Legacy list-shaped metadata may contain boolean placeholders.
+            // Only actual scalar IDs/slugs are entitlement names.
+            if (is_bool($v) || $v === null) {
+                continue;
+            }
             $key = sanitize_key((string)$v);
             if ($key !== '') {
                 $out[$key] = true;
@@ -190,7 +195,7 @@ function nova_copa_set_user_state(int $uid, array $data): array {
 
     return [
         'tier' => get_user_meta($uid, 'nova_tier', true) ?: 'free',
-        'nova_entitlements' => (array)(get_user_meta($uid, 'nova_entitlements', true) ?: []),
+        'nova_entitlements' => nova_copa_normalize_entitlements(get_user_meta($uid, 'nova_entitlements', true) ?: []),
     ];
 }
 

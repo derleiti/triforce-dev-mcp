@@ -68,6 +68,7 @@ def test_openai_compatible_provider_prefixes_are_stripped():
         "kimi/moonshot-v1-8k": "moonshot-v1-8k",
         "huggingface/allenai/Olmo-3-7B-Instruct:fastest": "allenai/Olmo-3-7B-Instruct:fastest",
         "github/openai/gpt-4.1-mini": "openai/gpt-4.1-mini",
+        "nvidia/z-ai/glm-5.3": "z-ai/glm-5.3",
     }
     for model_id, expected in cases.items():
         assert strip_provider_prefix(model_id) == expected

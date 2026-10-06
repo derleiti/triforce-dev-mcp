@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from copy import deepcopy
 
-from ..utils.tool_normalizer import normalize_tool_name
+from ..utils.tool_normalizer import is_readonly_tool, normalize_tool_name
 # v4 shim - no longer needed, all aliases in V5_ALIASES
 from .tool_registry_v5 import get_all_tools as v5_get_all_tools, V5_ALIASES
-from .workspace_tool_contract import WORKSPACE_CONTROL_TOOLS
+from .workspace_tool_contract import WORKSPACE_CONTROL_TOOLS, AIHELPER_LEGACY_ALIASES
 from .portable_tool_contract import PORTABLE_DEVICE_TOOLS
 
 
@@ -36,6 +36,7 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "mail_inbox": "mail",
     "mail_read": "mail",
     "mail_send": "mail",
+    "web_worker": "agents",
     "mail_mark_seen": "mail",
     "flarum_discussions": "forum",
     "flarum_discussion": "forum",
@@ -57,9 +58,12 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "logs": "observability",
     "log_viewer": "observability",
     "health": "observability",
-    "status": "admin",
+    "status": "observability",
+    "debug": "admin",
+    "hot_reload": "admin",
     "restart": "admin",
     "service_control": "admin",
+    "server_control": "admin",
     "container_control": "admin",
     "docker_stack": "admin",
     "safe_probe": "admin",
@@ -67,10 +71,17 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "container_status": "admin",
     "remote_hosts": "network",
     "remote_task": "network",
+    "mesh_status": "network",
+    "mesh_task": "network",
     "remote_status": "network",
     "remote_exec": "network",
     "remote_admin": "network",
     "network_info": "network",
+    "vault_status": "security",
+    "vault_keys": "security",
+    "vault_add": "security",
+    "git": "code",
+    "evolve": "code",
     "file_read": "filesystem",
     "file_ops": "filesystem",
     "code_read": "filesystem",
@@ -83,7 +94,6 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "custom_binary": "execution",
     "custom_exec": "execution",
     "shell": "execution",
-    "compute_execute": "execution",
     "chat": "ai",
     "models": "ai",
     "specialist": "ai",
@@ -124,22 +134,28 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "workspace_pair": "workspace",
     "workspace_info": "workspace",
     "workspace_clear": "workspace",
+    "aihelper_pair": "aihelper",
+    "aihelper_compute_execute": "aihelper",
     "file_read": "filesystem",
     "file_tree": "filesystem",
     "code_read": "filesystem",
     "code_grep": "filesystem",
     "file_edit": "filesystem",
     "directory_create": "filesystem",
-    "computer_observe": "device",
-    "computer_input": "device",
-    "window_ops": "device",
-    "app_ops": "device",
-    "service_ops": "device",
-    "process_ops": "device",
-    "device_info": "device",
-    "computer_screenshot": "device",
-    "clipboard_read": "device",
-    "clipboard_write": "device",
+    "aihelper_observe": "aihelper",
+    "aihelper_input": "aihelper",
+    "aihelper_window_ops": "aihelper",
+    "aihelper_app_ops": "aihelper",
+    "aihelper_service_ops": "aihelper",
+    "aihelper_process_ops": "aihelper",
+    "aihelper_device_info": "aihelper",
+    "aihelper_screenshot": "aihelper",
+    "aihelper_vision_start": "aihelper",
+    "aihelper_vision_status": "aihelper",
+    "aihelper_vision_observe": "aihelper",
+    "aihelper_vision_stop": "aihelper",
+    "aihelper_clipboard_read": "aihelper",
+    "aihelper_clipboard_write": "aihelper",
     # Group Chat (Multi-AI Orchestration) — Added 2026-03-15
     "group_chat_create": "group_chat",
     "group_chat_ask": "group_chat",
@@ -158,28 +174,75 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
 
 
 
+# Tool ownership/surface scopes. This is orthogonal to semantic inventories:
+# inventory answers "what task is this for?" while scope answers "who owns it?".
+TOOL_SCOPE_GLOBAL = "global"
+TOOL_SCOPE_TRIFORCE_ADMIN = "triforce_admin"
+TOOL_SCOPE_TRIFORCE_AUTH = "triforce_auth"
+TOOL_SCOPE_AIHELPER = "aihelper"
+
+TRIFORCE_GLOBAL_TOOLS = frozenset({"status"})
+TRIFORCE_AUTH_INVENTORIES = frozenset({"mail", "forum", "wordpress", "mercatai"})
+TRIFORCE_AUTH_TOOLS = frozenset({
+    "nova_chat_agent", "n8n_mcp_call", "web_worker",
+    "notify_list", "notify_read", "notify_send", "notify_clear",
+})
+TRIFORCE_ADMIN_INVENTORIES = frozenset({
+    "admin", "agents", "group_chat", "network", "settings", "observability",
+})
+TRIFORCE_ADMIN_TOOLS = frozenset({
+    "shell", "binary_exec", "task_runner", "server_control", "service_control", "container_control", "docker_stack", "hot_reload",
+    "config", "config_set", "debug", "evolve", "prompt_set",
+    "ollama_status", "ollama_pull", "ollama_delete",
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin",
+    "vault_status", "vault_keys", "vault_add",
+    "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_close",
+    "memory_clear", "memory_history", "memory_training", "feature_experience_store",
+})
+
+def tool_scope(name: str, inventory: str = "") -> str:
+    """Return product ownership/authorization scope for one canonical tool.
+
+    Callers that only have a tool name still receive the same classification as
+    tools/list; derive the canonical primary inventory instead of silently
+    falling back to ``global``.
+    """
+    name = str(name or "")
+    inventory = str(inventory or _inventory_for_tool(name))
+    if name.startswith("aihelper_"):
+        return TOOL_SCOPE_AIHELPER
+    if name in TRIFORCE_GLOBAL_TOOLS:
+        return TOOL_SCOPE_GLOBAL
+    if inventory in TRIFORCE_AUTH_INVENTORIES or name in TRIFORCE_AUTH_TOOLS or name.startswith(("mail_", "wp_", "flarum_")):
+        return TOOL_SCOPE_TRIFORCE_AUTH
+    if inventory in TRIFORCE_ADMIN_INVENTORIES or name in TRIFORCE_ADMIN_TOOLS or name.startswith(("agent_", "group_chat_")):
+        return TOOL_SCOPE_TRIFORCE_ADMIN
+    return TOOL_SCOPE_GLOBAL
+
+
 # Canonical advertised MCP surface. Legacy/duplicate handlers may remain callable
 # for compatibility, but are intentionally hidden from model discovery.
 CANONICAL_TOOL_NAMES = frozenset({
     # Core operations
-    "shell", "status", "service_control", "container_control", "docker_stack", "hot_reload",
+    "shell", "binary_exec", "task_runner", "status", "server_control", "service_control", "container_control", "docker_stack", "hot_reload",
     "log_viewer", "mcp_analytics", "config", "config_set",
+    "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status", "bug_report_resolve",
     # Files/code
     "file_ops", "code_search", "code_edit", "code_tree", "git",
     # AI/agents
-    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast",
+    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast", "web_worker",
     "agent_start", "agent_stop", "evolve", "nova_chat_agent",
     # Search/browser
-    "search", "crawl", "browser_navigate", "browser_click", "browser_type",
+    "search", "crawl", "current_time", "browser_navigate", "browser_click", "browser_type",
     "browser_screenshot", "browser_close",
     # Ollama/model operations
     "ollama_status", "ollama_pull", "ollama_delete",
     # Mesh/remote
-    "mesh_status", "mesh_task", "remote_hosts", "remote_task",
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin",
     # Vault
     "vault_status", "vault_keys", "vault_add",
     # Memory
-    "memory_store", "memory_search", "memory_clear", "memory_history",
+    "memory_store", "memory_search", "memory_clear", "memory_history", "memory_training", "feature_experience_store",
     # Settings/debug
     "prompts", "prompt_set", "debug",
     # Mail
@@ -197,34 +260,243 @@ CANONICAL_TOOL_NAMES = frozenset({
     "group_chat_create", "group_chat_ask", "group_chat_message", "group_chat_read",
     "group_chat_list", "group_chat_consolidate", "group_chat_assign",
     # Workspace / device controls (one canonical pool; execution remains target-specific)
-    "workspace_status", "workspace_pair", "workspace_info", "workspace_clear",
+    "aihelper_pair", "workspace_info", "workspace_clear",
     "file_read", "file_tree", "code_read", "code_grep", "file_edit", "directory_create",
-    "computer_observe", "computer_screenshot", "clipboard_read", "clipboard_write", "compute_execute",
-    "device_info", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input",
+    "aihelper_observe", "aihelper_screenshot", "aihelper_vision_start", "aihelper_vision_status", "aihelper_vision_observe", "aihelper_vision_stop", "aihelper_clipboard_read", "aihelper_clipboard_write", "aihelper_compute_execute",
+    "aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops", "aihelper_window_ops", "aihelper_input",
     # Integrations
     "n8n_mcp_call",
+    "mercatai_market", "mercatai_tasks", "mercatai_bid", "mercatai_deliver",
+    "mercatai_agent", "mercatai_stripe", "mercatai_report", "mercatai_developer",
 })
 
 # Small default surface for LLMs. Specialized capabilities stay available through
 # inventory-specific tools/list calls without flooding every model context.
 CORE_TOOL_NAMES = frozenset({
-    "shell", "status", "service_control", "container_control", "hot_reload",
-    "log_viewer", "mcp_analytics", "config", "config_set",
-    "file_ops", "code_search", "code_edit", "code_tree", "git",
-    "chat", "models", "specialist", "agents", "agent_call", "agent_broadcast",
-    "agent_start", "agent_stop", "search", "crawl", "ollama_status",
-    "mesh_status", "mesh_task", "remote_hosts", "remote_task",
-    "memory_store", "memory_search", "memory_history", "prompts", "prompt_set",
-    "notify_list", "notify_send", "group_chat_create", "group_chat_ask",
-    "group_chat_read",
+    # Global AI primitives.
+    "chat", "models", "specialist", "search", "crawl", "current_time", "memory_store", "memory_search",
+    # Portable workspace/code semantics. Execution remains local/share-scoped when paired.
+    "workspace_info", "file_read", "file_tree", "file_edit", "file_ops", "directory_create",
+    "workspace_clear", "code_read", "code_tree", "code_search", "code_grep", "code_edit", "git",
+    # Pairing bootstrap and all currently important AILinux Helper capabilities.
+    # Static/cached MCP clients must learn these schemas before a share exists.
+    "aihelper_pair", "aihelper_observe", "aihelper_screenshot", "aihelper_vision_start",
+    "aihelper_vision_status", "aihelper_vision_observe", "aihelper_vision_stop",
+    "aihelper_clipboard_read", "aihelper_clipboard_write", "aihelper_compute_execute",
+    "aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops",
+    "aihelper_window_ops", "aihelper_input",
+    # Stable Local-MCP compatibility names for hosts that cache an older schema.
+    "workspace_status", "workspace_pair", "computer_observe", "computer_screenshot",
+    "vision_start", "vision_status", "vision_observe", "vision_stop", "app_ops", "computer_input",
 })
 
 
+SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
+    "debug": {
+        "description": "Failure analysis, logs, telemetry, MCP diagnostics and bounded status evidence.",
+        "tools": {"debug", "log_viewer", "mcp_analytics", "status"},
+    },
+    "code": {
+        "description": "Source inspection, search, structured code edits and version-control work.",
+        "tools": {"code_read", "code_search", "code_tree", "code_edit", "code_grep", "git"},
+    },
+    "files": {
+        "description": "General file and directory inspection or mutation without implying code semantics.",
+        "tools": {"file_read", "file_tree", "file_edit", "file_ops", "directory_create"},
+    },
+    "vision": {
+        "description": "Screen/browser observation and screenshots; input control remains a separate device-control capability.",
+        "tools": {"aihelper_observe", "aihelper_screenshot", "aihelper_vision_start", "aihelper_vision_status", "aihelper_vision_observe", "aihelper_vision_stop", "browser_screenshot"},
+    },
+    "system": {
+        "description": "Portable host/device state, processes, services, applications and container/system control.",
+        "tools": {"aihelper_device_info", "aihelper_process_ops", "aihelper_service_ops", "aihelper_app_ops", "status", "server_control", "service_control", "container_control", "docker_stack"},
+    },
+    "research": {
+        "description": "Current web/document research plus scoped memory recall for evidence-backed work.",
+        "tools": {"search", "crawl", "memory_search", "memory_history", "memory_training", "feature_experience_store"},
+    },
+    "automation": {
+        "description": "Execution and workflow automation primitives. Prefer typed tools over shell-like execution.",
+        "inventories": {"execution", "integration"},
+    },
+    "mercatai": {
+        "description": "Mercatai marketplace discovery, paid-task bidding, server-authorized delivery, agent reputation, Stripe onboarding and developer earnings.",
+        "inventories": {"mercatai"},
+    },
+    "communication": {
+        "description": "Mail, notifications, forum and publishing surfaces.",
+        "inventories": {"mail", "forum", "wordpress", "observability"},
+        "exclude_tools": {"log_viewer", "mcp_analytics"},
+    },
+    "collaboration": {
+        "description": "TriForce agents and group orchestration tools.",
+        "inventories": {"agents", "group_chat", "swarm"},
+    },
+    "aihelper": {
+        "description": "AILinux Helper pairing, vision, device control, clipboard and shared compute.",
+        "tools": {name for name in CANONICAL_TOOL_NAMES if name.startswith("aihelper_")},
+    },
+    "workspace": {
+        "description": "Pairing plus shared workspace/file operations.",
+        "tools": {"aihelper_pair", "workspace_info", "workspace_clear", "file_read", "file_tree", "file_edit", "file_ops", "directory_create", "code_read", "code_tree", "code_search", "code_grep", "code_edit"},
+    },
+    "models": {
+        "description": "Model discovery/chat plus TriForce model-runtime administration when authorized.",
+        "tools": {"chat", "models", "specialist", "nova_chat_agent", "ollama_status", "ollama_pull", "ollama_delete"},
+    },
+    "network": {
+        "description": "TriForce mesh and remote-node operations.",
+        "inventories": {"network"},
+        "tools": {"mesh_status", "mesh_task"},
+    },
+    "security": {
+        "description": "TriForce vault and security-owned capabilities.",
+        "tools": {"vault_status", "vault_keys", "vault_add"},
+    },
+    "admin": {
+        "description": "TriForce engine/service administration and diagnostics.",
+        "inventories": {"admin", "settings", "integration"},
+        "tools": {"debug", "hot_reload", "log_viewer", "mcp_analytics", "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status", "bug_report_resolve", "memory_training", "feature_experience_store"},
+    },
+}
+
+
+def _task_inventory(name: str, inventory: str) -> str:
+    if name == "aihelper_pair": return "workspace"
+    if name.startswith("aihelper_vision_") or name in {"aihelper_observe", "aihelper_screenshot"}: return "vision"
+    if name.startswith("aihelper_"): return "device"
+    if name.startswith("code_") or name in {"git", "evolve"}: return "code"
+    if name.startswith("file_") or name in {"directory_create", "workspace_info", "workspace_clear"}: return "files"
+    if name.startswith("memory_"): return "memory"
+    if name in {"search", "crawl"}: return "research"
+    if inventory in {"mail", "forum", "wordpress", "observability"} and name.startswith(("mail_", "flarum_", "wp_", "notify_")): return "communication"
+    if inventory in {"agents", "group_chat"}: return "collaboration"
+    if inventory == "browser": return "browser"
+    if inventory == "network" or name.startswith("mesh_"): return "network"
+    if name.startswith("vault_"): return "security"
+    if name.startswith("ollama_"): return "models"
+    if inventory == "settings": return "settings"
+    if inventory in {"admin"} or name in {"debug", "hot_reload", "log_viewer", "mcp_analytics"}: return "admin"
+    if inventory == "integration": return "automation"
+    if inventory == "execution": return "execution"
+    if inventory == "ai": return "ai"
+    return inventory or "misc"
+
+
+def _semantic_inventory_groups(tool: Dict[str, Any]) -> List[str]:
+    name = str(tool.get("name") or "")
+    inventory = str(tool.get("x_inventory") or _inventory_for_tool(name))
+    groups: List[str] = []
+    for profile, rule in SEMANTIC_INVENTORY_PROFILES.items():
+        tools = set(rule.get("tools") or ())
+        inventories = set(rule.get("inventories") or ())
+        excluded = set(rule.get("exclude_tools") or ())
+        if name in excluded:
+            continue
+        if name in tools or inventory in inventories:
+            groups.append(profile)
+    task_inventory = _task_inventory(name, inventory)
+    if task_inventory:
+        groups.append(task_inventory)
+    return sorted(set(groups))
+
+
+def usage_hint_for_tool(tool: Dict[str, Any]) -> str:
+    name = str(tool.get("name") or "")
+    annotations = tool.get("annotations") or {}
+    if annotations.get("readOnlyHint") is True or (
+        "readOnlyHint" not in annotations and is_readonly_tool(name)
+    ):
+        effect = "read-only"
+    elif annotations.get("destructiveHint") is True:
+        effect = "destructive; verify target and backup first"
+    else:
+        effect = "may change state; use approval/backup workflow"
+    groups = _semantic_inventory_groups(tool)
+    group_hint = ", ".join(groups[:3]) or str(tool.get("x_inventory") or "misc")
+    return f"{group_hint}; {effect}"
+
+
+def tooltip_for_tool(tool: Dict[str, Any]) -> str:
+    name = str(tool.get("name") or "")
+    display = str(tool.get("x_display_name") or name)
+    task = str(tool.get("x_task_inventory") or tool.get("x_inventory") or "misc")
+    scope = str(tool.get("x_scope") or tool_scope(name, str(tool.get("x_inventory") or "")))
+    access = str(tool.get("x_access") or "policy")
+    usage = usage_hint_for_tool(tool)
+    description = " ".join(str(tool.get("description") or "").split())
+    if len(description) > 220:
+        description = description[:217].rstrip() + "..."
+    return f"{display} | task={task} | scope={scope} | access={access} | {usage} | {description}".strip()
+
+
+def _decorate_tool_metadata(tool: Dict[str, Any]) -> Dict[str, Any]:
+    name = str(tool.get("name") or "")
+    inventory = str(tool.get("x_inventory") or _inventory_for_tool(name))
+    scope = tool_scope(name, inventory)
+    namespace = "aihelper" if scope == TOOL_SCOPE_AIHELPER else ("triforce" if scope.startswith("triforce_") else "global")
+    tool["x_inventory"] = inventory
+    tool["x_task_inventory"] = _task_inventory(name, inventory)
+    tool["x_inventory_groups"] = _semantic_inventory_groups(tool)
+    tool["x_scope"] = scope
+    tool["x_namespace"] = namespace
+    tool["x_access"] = {
+        TOOL_SCOPE_AIHELPER: "share",
+        TOOL_SCOPE_TRIFORCE_AUTH: "authenticated",
+        TOOL_SCOPE_TRIFORCE_ADMIN: "admin",
+    }.get(scope, "policy")
+    tool["x_usage_hint"] = usage_hint_for_tool(tool)
+    tool["x_display_name"] = f"aihelper.{name.removeprefix('aihelper_')}" if namespace == "aihelper" else name
+    tool["x_tooltip"] = tooltip_for_tool(tool)
+    return tool
+
+
+def get_inventory_catalog(tools: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Task-oriented discovery index for progressive/scrollable tool selection."""
+    catalog: Dict[str, Dict[str, Any]] = {}
+    canonical = get_inventory_map(tools)
+
+    def item(tool: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "name": str(tool.get("name") or ""),
+            "display_name": str(tool.get("x_display_name") or tool.get("name") or ""),
+            "scope": str(tool.get("x_scope") or "global"),
+            "access": str(tool.get("x_access") or "policy"),
+            "tooltip": str(tool.get("x_tooltip") or tool.get("x_usage_hint") or ""),
+        }
+
+    for name, members in canonical.items():
+        rows = sorted((tool for tool in tools if str(tool.get("x_inventory") or _inventory_for_tool(str(tool.get("name") or ""))) == name), key=lambda t: str(t.get("x_display_name") or t.get("name") or ""))
+        catalog[name] = {
+            "count": len(members),
+            "description": f"Canonical {name} ownership inventory.",
+            "tools": [item(tool) for tool in rows],
+        }
+    for profile, rule in SEMANTIC_INVENTORY_PROFILES.items():
+        members = sorted(filter_tools_by_inventory(tools, profile), key=lambda t: str(t.get("x_display_name") or t.get("name") or ""))
+        catalog[profile] = {
+            "count": len(members),
+            "description": str(rule.get("description") or ""),
+            "tools": [item(tool) for tool in members],
+        }
+    scope_descriptions = {
+        TOOL_SCOPE_GLOBAL: "Portable/global AI tools shared across MCP consumers.",
+        TOOL_SCOPE_AIHELPER: "AILinux Helper share/device tools; require an explicit user share/lease.",
+        TOOL_SCOPE_TRIFORCE_AUTH: "TriForce account/integration tools; require authenticated service access.",
+        TOOL_SCOPE_TRIFORCE_ADMIN: "TriForce engine administration; admin/internal authority required.",
+    }
+    for scope, description in scope_descriptions.items():
+        members = sorted(
+            (tool for tool in tools if str(tool.get("x_scope") or "") == scope),
+            key=lambda t: str(t.get("x_display_name") or t.get("name") or ""),
+        )
+        catalog[scope] = {"count": len(members), "description": description, "tools": [item(tool) for tool in members]}
+    return dict(sorted(catalog.items()))
+
+
 INVENTORY_SYNONYMS: Dict[str, str] = {
-    "code": "filesystem",
-    "files": "filesystem",
     "fs": "filesystem",
-    "system": "admin",
     "ops": "admin",
     "config": "settings",
     "prompts": "settings",
@@ -255,8 +527,11 @@ INVENTORY_SYNONYMS: Dict[str, str] = {
     "browser": "browser",
     "n8n": "integration",
     "integration": "integration",
+    "mercatai": "mercatai",
+    "marketplace": "mercatai",
     "workspace": "workspace",
     "device": "device",
+    "aihelper": "aihelper",
 }
 
 
@@ -299,11 +574,16 @@ def _inventory_for_tool(name: str) -> str:
         return "browser"
     if name.startswith(("n8n_",)):
         return "integration"
+    if name.startswith(("mercatai_",)):
+        return "mercatai"
     return "misc"
 
 
+LEGACY_CANONICAL_ALIASES: Dict[str, str] = dict(AIHELPER_LEGACY_ALIASES)
+
 def resolve_tool_name_for_call(name: str) -> str:
     normalized = normalize_tool_name(name or "")
+    normalized = LEGACY_CANONICAL_ALIASES.get(normalized, normalized)
     # Once a compatibility alias becomes a first-class canonical capability, its
     # canonical name wins. This keeps file_read distinct from code_read while old
     # non-canonical aliases continue resolving through V5_ALIASES.
@@ -318,6 +598,8 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     raw_tools.extend(v5_get_all_tools())
     raw_tools.extend(WORKSPACE_CONTROL_TOOLS)
     raw_tools.extend(PORTABLE_DEVICE_TOOLS)
+    from .bug_report_tools import BUG_REPORT_TOOLS
+    raw_tools.extend(BUG_REPORT_TOOLS)
     from .handlers_memory_history import HISTORY_TOOLS
     raw_tools.extend(HISTORY_TOOLS)
 
@@ -352,8 +634,7 @@ def get_unified_tools(extra_tools: Optional[List[Dict[str, Any]]] = None) -> Lis
     tools = [tool for tool in tools if tool.get("name") in CANONICAL_TOOL_NAMES]
 
     for tool in tools:
-        name = tool.get("name", "")
-        tool.setdefault("x_inventory", _inventory_for_tool(name))
+        _decorate_tool_metadata(tool)
     return tools
 
 
@@ -361,10 +642,13 @@ def get_canonical_all_tools() -> List[Dict[str, Any]]:
     """Return the single canonical full MCP inventory used by all surfaces."""
     from .handlers_wordpress import WORDPRESS_TOOL_SCHEMAS
     from .handlers_browser import BROWSER_TOOL_SCHEMAS
+    from .handlers_mercatai import MERCATAI_TOOL_SCHEMAS
+    from .server_control import SERVER_CONTROL_TOOLS
+    from .web_worker import WEB_WORKER_TOOLS
     from ..services.n8n_mcp import N8N_TOOLS
 
     tools = get_unified_tools(
-        extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS)
+        extra_tools=(WORDPRESS_TOOL_SCHEMAS + BROWSER_TOOL_SCHEMAS + N8N_TOOLS + MERCATAI_TOOL_SCHEMAS + SERVER_CONTROL_TOOLS + WEB_WORKER_TOOLS)
     )
     existing = {tool.get("name") for tool in tools}
     if "nova_chat_agent" not in existing:
@@ -386,7 +670,10 @@ def get_canonical_all_tools() -> List[Dict[str, Any]]:
             },
             "x_inventory": "ai",
         })
-    return _dedupe_tools(tools)
+    tools = _dedupe_tools(tools)
+    for tool in tools:
+        _decorate_tool_metadata(tool)
+    return tools
 
 
 def get_inventory_map(tools: List[Dict[str, Any]]) -> Dict[str, List[str]]:
@@ -404,7 +691,21 @@ def filter_tools_by_inventory(tools: List[Dict[str, Any]], inventory: str) -> Li
     wanted = INVENTORY_SYNONYMS.get(wanted, wanted)
     if not wanted or wanted in ("all", "*"):
         return tools
-    return [tool for tool in tools if (tool.get("x_inventory") or _inventory_for_tool(tool.get("name", ""))) == wanted]
+    scope_aliases = {
+        "global": TOOL_SCOPE_GLOBAL,
+        "triforce_admin": TOOL_SCOPE_TRIFORCE_ADMIN,
+        "admin_only": TOOL_SCOPE_TRIFORCE_ADMIN,
+        "triforce_auth": TOOL_SCOPE_TRIFORCE_AUTH,
+        "authenticated": TOOL_SCOPE_TRIFORCE_AUTH,
+        "aihelper": TOOL_SCOPE_AIHELPER,
+    }
+    scope = scope_aliases.get(wanted)
+    return [
+        tool for tool in tools
+        if (scope is not None and str(tool.get("x_scope") or tool_scope(str(tool.get("name") or ""), str(tool.get("x_inventory") or ""))) == scope)
+        or (tool.get("x_inventory") or _inventory_for_tool(tool.get("name", ""))) == wanted
+        or wanted in set(tool.get("x_inventory_groups") or _semantic_inventory_groups(tool))
+    ]
 
 
 def filter_tools_for_profile(tools: List[Dict[str, Any]], profile: str) -> List[Dict[str, Any]]:
@@ -424,14 +725,13 @@ def decorate_tools(
     include_examples: bool = False,
 ) -> List[Dict[str, Any]]:
     reverse_aliases: Dict[str, List[str]] = {}
-    for old, new in {**V5_ALIASES}.items():
+    for old, new in {**V5_ALIASES, **LEGACY_CANONICAL_ALIASES}.items():
         reverse_aliases.setdefault(new, []).append(old)
 
     decorated: List[Dict[str, Any]] = []
     for tool in tools:
-        t = deepcopy(tool)
+        t = _decorate_tool_metadata(deepcopy(tool))
         name = t.get("name", "")
-        t["x_inventory"] = t.get("x_inventory") or _inventory_for_tool(name)
         if include_links:
             t["x_call"] = {
                 "method": "tools/call",
