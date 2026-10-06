@@ -1491,7 +1491,22 @@ async def _start_pollers_with_lock():
 
 def _launch_pollers():
     global _poller_tasks
-    pollers = [("mail", _poll_mail), ("wordpress", _poll_wordpress)]
+    pollers = [("wordpress", _poll_wordpress)]
+    try:
+        from app.config import get_settings
+        _mail_settings = get_settings()
+        if all((
+            getattr(_mail_settings, "mail_imap_host", None),
+            getattr(_mail_settings, "mail_imap_user", None),
+            getattr(_mail_settings, "mail_imap_pass", None),
+        )):
+            pollers.append(("mail", _poll_mail))
+        else:
+            _poller_status["mail"] = "disabled:no-imap-auth"
+            logger.info("Poller skipped: mail (IMAP auth not configured)")
+    except Exception as exc:
+        _poller_status["mail"] = "disabled:config-error"
+        logger.warning("Mail poller config check failed: %s", exc)
     try:
         from app.mcp.flarum_tools import is_flarum_configured
         if is_flarum_configured():
@@ -1574,7 +1589,8 @@ async def _run_notify_model(*, target: str, model: str, prompt: str, timeout: in
     bounded_timeout = max(10, min(int(timeout), 300))
     safe_id = "notify-" + hashlib.sha256(f"{target}:{model}".encode()).hexdigest()[:16]
     home = prepare_instance_home(safe_id)
-    workspace = Path(os.environ.get("TRIFORCE_NOTIFY_WORKSPACE", "/var/tristar/agents/notify-workspace"))
+    from app.paths import TRISTAR_DIR
+    workspace = Path(os.environ.get("TRIFORCE_NOTIFY_WORKSPACE", str(TRISTAR_DIR / "agents" / "notify-workspace")))
     workspace.mkdir(parents=True, exist_ok=True)
     # Hard execution boundary: notify is communication, never an implicit task runner.
     apply_profile_state(home, {

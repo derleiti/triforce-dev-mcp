@@ -160,3 +160,21 @@ again through the JSON search endpoint. The worker also reported its optional Cl
 CLI observer dependency as setup-required; this is expected because the TriForce
 integration intentionally uses direct local worker retrieval/manual save and does not
 require or enable the observer pipeline. No production memory data was used.
+
+
+## Memory Training Center (2026-09-27)
+
+The Training Center is a read-only distillation layer on top of the existing memory model. It does **not** train model weights and it does not let historical output rewrite current truth.
+
+Inputs are intentionally narrow:
+
+- latest accepted Project-Memory revisions whose structured state is `completed`,
+- `run_completed` runtime observations,
+- failure events such as `tool_failed`, `test_failed`, `provider_failed` and `exception_raised`,
+- bug reports resolved through the documented fix path with fix summary, verification evidence and documentation reference.
+
+`ClaudeMemAdapter.search_global()` supports bounded internal evidence discovery across project scopes, but requires a non-empty query. Full observation content is then retrieved again through its original project scope; there is no unbounded history dump and no direct Claude-Mem SQLite coupling.
+
+`memory_training` returns four candidate classes: verified workflows/best practices, completed runs, anti-patterns, and regression candidates. Promotion is always separate. `automatic_promotion=false` is part of the returned contract, and the authority order remains current runtime/code/tests -> Project Memory -> Curated Memory -> episodic history.
+
+Bug reports close the feedback loop without exposing SMTP credentials to applications: clients submit to `/v1/bugs/report`, TriForce archives the original report to `bugs@ailinux.me`, and a verified resolution archives a second `[AILinux Bugfix]` message. Only the documented resolution becomes a Training Center best-practice/regression signal.

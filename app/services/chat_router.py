@@ -72,14 +72,6 @@ AVAILABLE_MODELS = {
         strengths=["code"],
         cost_tier="free"
     ),
-    "ollama/mixtral:8x7b": ModelConfig(
-        provider=ModelProvider.OLLAMA,
-        model_id="mixtral:8x7b",
-        display_name="Mixtral 8x7B",
-        context_length=32768,
-        strengths=["reasoning", "multilingual"],
-        cost_tier="free"
-    ),
     "ollama/deepseek-coder:6.7b": ModelConfig(
         provider=ModelProvider.OLLAMA,
         model_id="deepseek-coder:6.7b",

@@ -36,6 +36,44 @@ NOVA_FALLBACK_CASCADE = [
     "openai/gpt-oss-120b:free",
 ]
 
+_HARD_PROVIDER_FAILURE_STATUSES = frozenset({401, 402, 403, 404})
+
+
+def _exception_status_code(exc: BaseException) -> int | None:
+    """Best-effort HTTP status extraction without flattening provider errors."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        status_code = getattr(current, "status_code", None)
+        if isinstance(status_code, int):
+            return status_code
+        response = getattr(current, "response", None)
+        response_status = getattr(response, "status_code", None)
+        if isinstance(response_status, int):
+            return response_status
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _is_ollama_cloud_model(model: str) -> bool:
+    normalized = strip_provider_prefix(model).lower()
+    return "-cloud" in normalized or ":cloud" in normalized
+
+
+def _allow_ollama_fallback(original_error: BaseException, fallback_model: str) -> bool:
+    """Avoid chaining a hard provider failure into another paid cloud dependency.
+
+    A configured local Ollama model remains a valid escape hatch. Transient errors
+    (429, 5xx, timeouts/network failures) remain eligible for normal fallback.
+    """
+    status_code = _exception_status_code(original_error)
+    return not (
+        status_code in _HARD_PROVIDER_FAILURE_STATUSES
+        and _is_ollama_cloud_model(fallback_model)
+    )
+
+
 async def _fallback_to_ollama(
     messages: List[dict[str, str]],
     temperature: Optional[float],
@@ -44,9 +82,17 @@ async def _fallback_to_ollama(
     original_error: Exception,
     fallback_model: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Unified fallback logic - streams from Ollama when primary provider fails."""
+    """Stream from Ollama when doing so cannot repeat a hard cloud failure."""
     settings = get_settings()
     model = fallback_model or settings.ollama_fallback_model
+    if not _allow_ollama_fallback(original_error, model):
+        logger.warning(
+            "%s failed with HTTP %s; skipping cloud fallback %s",
+            original_provider,
+            _exception_status_code(original_error),
+            model,
+        )
+        raise original_error
     logger.warning("%s failed (%s), falling back to %s", original_provider, original_error, model)
     async for chunk in _stream_ollama(
         model, messages, temperature=temperature, stream=True, timeout=timeout
@@ -63,8 +109,6 @@ STRUCTURE_PROMPT = (
 
 MISTRAL_MODEL_ALIASES = {
     # Legacy aliases
-    "mistral/open-mixtral-8x7b": "open-mixtral-8x7b",
-    "mistral/mixtral-8x7b": "open-mixtral-8x7b",
     # Current generation (map to latest versions)
     "mistral/large": "mistral-medium-3.5",
     "mistral/medium": "mistral-medium-latest",
@@ -76,8 +120,6 @@ MISTRAL_MODEL_ALIASES = {
     "small": "mistral-small-latest",
     "tiny": "ministral-3b-latest",
     # Specialist models
-    "mistral/codestral": "codestral-latest",
-    "codestral": "codestral-latest",
     # Ministral models
     "mistral/ministral-8b": "ministral-8b-latest",
     "mistral/ministral-3b": "ministral-3b-latest",
@@ -887,6 +929,8 @@ async def _stream_ollama(
                         content = _extract_ollama_text(data.get("response"))
                     if content:
                         yield content
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.exception("Failed to reach Ollama backend: %s", exc)
             raise api_error(
@@ -1397,6 +1441,10 @@ async def _stream_openai_compatible(
         "model": target_model,
         "messages": messages,
     }
+    if provider == "nvidia" and target_model.startswith("openai/gpt-oss"):
+        effort = os.getenv("NVIDIA_REASONING_EFFORT", "low").strip().lower()
+        if effort in {"low", "medium", "high"}:
+            body["reasoning_effort"] = effort
     if temperature is not None:
         body["temperature"] = max(0.0, min(temperature, 2.0))
 

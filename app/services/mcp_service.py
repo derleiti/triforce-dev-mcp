@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import logging
 import re
 import unicodedata
@@ -27,7 +28,7 @@ from ..routes.admin_crawler import (
 )
 from ..mcp.api_docs import get_api_docs, get_endpoint_for_task
 from ..mcp.translation import BidirectionalTranslator, APIToMCPTranslator, MCPToAPITranslator
-from ..mcp.specialists import specialist_router, SPECIALISTS
+from ..mcp.specialists import specialist_router, SPECIALISTS, SpecialistCapability
 from ..mcp.context import context_manager, prompt_library, workflow_manager
 from .compatibility_layer import compatibility_layer
 from .system_control import system_control
@@ -630,7 +631,21 @@ async def handle_specialists_invoke(params: Dict[str, Any]) -> Dict[str, Any]:
         if not specialist:
             raise ValueError(f"Specialist '{specialist_id}' not found")
     elif task:
-        specialist = specialist_router.get_best_specialist(task)
+        routing_description = f"{task}: {message}"
+        specialist = specialist_router.get_best_specialist(routing_description)
+        if not specialist:
+            capability_map = {
+                "code": SpecialistCapability.CODE_GENERATION,
+                "math": SpecialistCapability.MATH,
+                "creative": SpecialistCapability.CREATIVE_WRITING,
+                "analysis": SpecialistCapability.DATA_ANALYSIS,
+                "research": SpecialistCapability.REASONING,
+                "vision": SpecialistCapability.VISION,
+                "debug": SpecialistCapability.DEBUGGING,
+            }
+            capability = capability_map.get(str(task).lower())
+            if capability:
+                specialist = specialist_router.get_specialist_for_capability(capability)
         if not specialist:
             raise ValueError("No suitable specialist found for task")
     else:
@@ -642,12 +657,30 @@ async def handle_specialists_invoke(params: Dict[str, Any]) -> Dict[str, Any]:
         messages.append({"role": "system", "content": specialist.system_prompt_template})
     messages.append({"role": "user", "content": message})
 
-    # Invoke the model
-    result = await handle_llm_invoke({
-        "model": specialist.id,
-        "messages": messages,
-        "options": params.get("options", {})
-    })
+    # Invoke the preferred specialist model, but keep the tool usable when that
+    # provider is temporarily unavailable (quota, billing, outage). The fallback
+    # keeps the specialist prompt/messages while switching only the transport model.
+    try:
+        result = await handle_llm_invoke({
+            "model": specialist.id,
+            "messages": messages,
+            "options": params.get("options", {})
+        })
+    except Exception as primary_error:
+        fallback_model = os.environ.get(
+            "TRIFORCE_SPECIALIST_FALLBACK_MODEL",
+            os.environ.get("TRIFORCE_DEFAULT_CHAT_MODEL", "groq/groq/compound-mini"),
+        )
+        if not fallback_model or fallback_model == specialist.id:
+            raise
+        result = await handle_llm_invoke({
+            "model": fallback_model,
+            "messages": messages,
+            "options": params.get("options", {})
+        })
+        result["fallback_model"] = fallback_model
+        result["fallback_reason"] = type(primary_error).__name__
+        result["specialist_model_attempted"] = specialist.id
 
     result["specialist"] = specialist.to_dict()
     return result

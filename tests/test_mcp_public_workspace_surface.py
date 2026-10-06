@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import re
 
 import pytest
 
@@ -37,10 +38,16 @@ async def test_public_guest_defaults_local_capabilities_off_until_share_exists()
     assert {'chat', 'search', 'models', 'memory_search', 'aihelper_pair'} <= names
     assert {'agent_start', 'memory_clear', 'service_control', 'group_chat_create'}.isdisjoint(names)
 
-    # Workspace/file resources stay hidden until explicitly shared.
-    assert {'shell', 'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
-            'workspace_info', 'file_read', 'file_tree', 'file_edit',
-            'directory_create', 'workspace_clear'}.isdisjoint(names)
+    # Static connectors discover the complete local contract before pairing.
+    # Every locked local tool is schema-visible but remains execution-gated.
+    for name in {'git', 'file_ops', 'code_edit', 'code_search', 'code_tree',
+                 'workspace_info', 'file_read', 'file_tree', 'file_edit',
+                 'directory_create', 'workspace_clear'}:
+        assert name in names
+        assert by_name[name]['x_execution'] == 'local_workspace'
+        assert by_name[name]['x_requires_workspace'] is True
+    # shell is TriForce admin scope and remains absent from public discovery.
+    assert 'shell' not in names
 
     # Static connectors discover canonical Helper vision/input schemas before pairing,
     # but execution remains locked until a share lease exists.
@@ -50,9 +57,13 @@ async def test_public_guest_defaults_local_capabilities_off_until_share_exists()
         assert by_name[name]['x_requires_workspace'] is True
 
     # Shared-service administration is intentionally absent from Local MCP.
-    assert not any(name.startswith('mail_') for name in names)
-    assert not any(name.startswith('wp_') for name in names)
-    assert not any(name.startswith('flarum_') for name in names)
+    assert any(name.startswith('mail_') for name in names)
+    by_name = {tool['name']: tool for tool in result['tools']}
+    assert all(tool.get('x_requires_auth') is True for name, tool in by_name.items() if name.startswith('mail_'))
+    assert any(name.startswith('wp_') for name in names)
+    assert all(tool.get('x_requires_auth') is True for name, tool in by_name.items() if name.startswith('wp_'))
+    assert any(name.startswith('flarum_') for name in names)
+    assert all(tool.get('x_requires_auth') is True for name, tool in by_name.items() if name.startswith('flarum_'))
 
     # Bootstrap tools remain canonical local contracts; server tools do not
     # silently become host-local execution.
@@ -79,9 +90,20 @@ async def test_internal_admin_catalog_keeps_server_tools_and_explicit_core_stays
     assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'group_chat_create', 'mail_inbox', 'aihelper_pair'} <= full_names
 
 
-def test_browser_workspace_socket_credential_uses_subprotocol_not_query():
+
+
+def test_webmcp_live_document_contains_only_external_script_and_stylesheet():
     from app.routes.mcp import _workspace_setup_html
     html = _workspace_setup_html()
+    assert '<style' not in html.lower()
+    assert ' style=' not in html.lower()
+    assert '/v1/mcp/web/styles.css' in html
+    assert '/v1/mcp/web/app.js' in html
+    assert 'cdn.jsdelivr.net' not in html
+
+def test_browser_workspace_socket_credential_uses_subprotocol_not_query():
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert "/v1/mcp/workspace/socket-ticket" in html
     assert "ailinux-workspace-v1" in html
     assert "ailinux-ticket." in html
@@ -99,8 +121,8 @@ def test_browser_workspace_page_prefers_native_pair_handover_over_the_url():
     deprecated fallback for shipped Helper builds <= 2.90.29 and must keep
     stripping itself from history.
     """
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
 
     # Out-of-band handover exists, is awaited before the restore path runs, and
     # is one-shot on the Electron side.
@@ -117,8 +139,8 @@ def test_browser_workspace_page_prefers_native_pair_handover_over_the_url():
 
 
 def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_uri():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert 'showDirectoryPicker' in html
     assert 'heartbeatTimer=null' in html
     assert "new URLSearchParams(location.search).get('pair_code')" in html
@@ -273,7 +295,7 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'handoffBtn' in html
     assert '/v1/mcp/workspace/handoff-ticket' in html
     assert 'workspace/handoff_complete' in html
-    assert "EXECUTOR_VERSION='2.90.29-browser'" in html
+    assert re.search(r"EXECUTOR_VERSION='\d+\.\d+\.\d+-browser'", html)
     assert "document.addEventListener('freeze'" in html
     assert "document.addEventListener('resume'" in html
     assert "method:'workspace/lifecycle'" in html
@@ -285,15 +307,15 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert "saveWorkspaceState('joinCode'" in html
     assert "loadWorkspaceState('joinCode')" in html
     assert "deleteWorkspaceState('joinCode')" in html
-    assert 'this Join ID remains valid until disconnect or workspace replacement.' in html
+    assert 'The one-time Share ID is consumed; future reconnects use the saved secure lease credential.' in html
     assert "resume_token" in html
     assert "resumeToken" in html
 
 
 
 def test_browser_helper_uses_runtime_capabilities_when_the_browser_exposes_them():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert "navigator.mediaDevices.getDisplayMedia" in html
     assert "browserHelperTools()" in html
     assert "function browserHelperTools(){if(nativeHelper)return []" in html
@@ -311,12 +333,13 @@ def test_browser_helper_uses_runtime_capabilities_when_the_browser_exposes_them(
 
 
 def test_browser_python_runtime_is_isolated_and_does_not_impersonate_docker_compute():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert 'id="webRuntimePanel"' in html
     assert 'Pyodide 314.0.6' in html
-    assert "new Worker(url)" in html
-    assert "cdn.jsdelivr.net/pyodide/v314.0.6/full/" in html
+    assert "new Worker('/v1/mcp/web/pyodide-worker.js?v='+encodeURIComponent(WEBMCP_BUILD))" in html
+    assert "/v1/mcp/pyodide/v314.0.6/" in html
+    assert "cdn.jsdelivr.net" not in html
     assert "runPythonAsync" in html
     assert "TriForce remote compute must be intercepted server-side" in html
     assert "runtime:'triforce_docker'" in html
@@ -324,8 +347,8 @@ def test_browser_python_runtime_is_isolated_and_does_not_impersonate_docker_comp
 
 
 def test_browser_remote_compute_and_opfs_workspace_are_explicit_capabilities():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert 'TriForce cloud sandbox · internet + shell + ~/workspace' in html
     assert "if(webShareProfile.remoteCompute&&s.remoteCompute)out.push('compute_execute')" in html
     assert "remote_requested:remote" in html
@@ -339,8 +362,8 @@ def test_browser_remote_compute_and_opfs_workspace_are_explicit_capabilities():
 
 
 def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert "removeEntry(name,{recursive:true})" in html
     assert "NotSupportedError" in html
     assert "workspace_clear" in html
@@ -351,15 +374,16 @@ def test_browser_workspace_clear_uses_native_recursive_remove_fast_path():
 
 
 def test_mobile_workspace_install_surface_and_pwa_contract():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _webmcp_build_key, _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
+    build = _webmcp_build_key()
     assert 'id="helperPanel"' in html
     assert '/v1/mcp/workspace/android.apk' in html
     assert 'package=me.ailinux.workspace' in html
     assert 'intent://pair' in html
     assert 'scheme=ailinux-workspace' in html
-    assert '/v1/mcp/manifest.webmanifest?v=29029' in html
-    assert "/v1/mcp/sw.js?v=29029" in html
+    assert f'/v1/mcp/manifest.webmanifest?v={build}' in html
+    assert "/v1/mcp/sw.js?v='+encodeURIComponent(WEBMCP_BUILD)" in html
     assert "beforeinstallprompt" in html
     assert 'Add to Home Screen' in html
     assert 'native APK selected for foreground workspace' in html
@@ -371,42 +395,56 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     manifest_response = await workspace_pwa_manifest()
     manifest = __import__('json').loads(manifest_response.body)
     assert manifest['name'] == 'AILinux Helper'
-    assert manifest['start_url'] == '/v1/mcp'
+    assert manifest['start_url'].startswith('/v1/mcp?app=')
     assert manifest['display'] == 'standalone'
     worker = await workspace_pwa_service_worker()
-    assert b"ailinux-helper-v29029" in worker.body
-    assert b"caches.match('/v1/mcp?app=2.90.29')" in worker.body
-    assert b'ailinux-helper-v29029' in worker.body
-    assert b'caches.delete' in worker.body
+    worker_path = getattr(worker, 'path', '')
+    assert str(worker_path).endswith('/apps/web/sw.js')
+    worker_source = __import__('pathlib').Path(worker_path).read_text(encoding='utf-8')
+    assert "const CACHE='ailinux-helper-'+BUILD" in worker_source
+    assert "const SHELL='/v1/mcp?app='+encodeURIComponent(BUILD)" in worker_source
+    assert 'caches.delete' in worker_source
 
 
 
 def test_helper_surface_is_unified_and_branded():
-    from app.routes.mcp import _workspace_setup_html
-    html = _workspace_setup_html()
+    from app.routes.mcp import _workspace_setup_contract_source
+    html = _workspace_setup_contract_source()
     assert '<h1>AILinux Helper</h1>' in html
     assert 'id="helperTitle"' in html
     assert 'Mobile Workspace' not in html
     assert '/v1/mcp/helper/icon.png' in html
 
 
-def test_helper_release_catalog_selects_newest_per_platform(tmp_path, monkeypatch):
+def test_helper_release_catalog_ignores_stray_artifacts_and_checks_manifest_size(tmp_path, monkeypatch):
+    import json
     from app.routes.mcp import _helper_release_catalog
 
-    for name in [
-        "AILinux-Helper-2.90.24-android.apk",
-        "AILinux-Helper-2.90.25-linux-amd64.deb",
-        "AILinux-Helper-2.90.25-linux-x86_64.AppImage",
-        "AILinux-Helper-2.90.25-win-x64.exe",
-        "AILinux-Helper-2.90.25-mac-arm64.dmg",
-    ]:
-        (tmp_path / name).write_bytes(b"artifact")
+    expected = tmp_path / "AILinux-Helper-2.90.29-linux-amd64.deb"
+    expected.write_bytes(b"artifact")
+    # A newer-looking file must not silently replace the manifest-selected release.
+    (tmp_path / "AILinux-Helper-9.99.99-linux-amd64.deb").write_bytes(b"stray")
+    manifest = tmp_path / "release.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "helper_version": "2.90.29",
+        "artifacts": {
+            "linux-deb": {
+                "filename": expected.name, "size": len(b"artifact"),
+                "media_type": "application/vnd.debian.binary-package", "sha256": "b" * 64,
+            }
+        },
+        "aliases": {},
+    }))
     monkeypatch.setenv("AILINUX_HELPER_RELEASES", str(tmp_path))
+    monkeypatch.setenv("AILINUX_HELPER_RELEASE_MANIFEST", str(manifest))
     catalog = _helper_release_catalog()
-    assert catalog["latest_version"] == "2.90.25"
-    assert catalog["android"]["version"] == "2.90.24"
-    assert catalog["linux-deb"]["version"] == "2.90.25"
-    assert catalog["windows"]["filename"].endswith("win-x64.exe")
+    assert catalog["latest_version"] == "2.90.29"
+    assert catalog["linux-deb"]["filename"] == expected.name
+    assert catalog["linux-deb"]["available"] is True
+
+    expected.write_bytes(b"wrong-size")
+    assert _helper_release_catalog()["linux-deb"]["available"] is False
 
 
 
@@ -429,8 +467,12 @@ async def test_paired_read_only_discovery_intersects_capabilities_and_grants(mon
     assert by_name['file_read']['x_execution'] == 'local_workspace'
     assert by_name['aihelper_observe']['x_execution'] == 'local_workspace'
     # Announced capability alone cannot bypass the read-only workspace grant.
-    assert 'file_edit' not in names
-    assert {'aihelper_clipboard_read', 'shell'}.isdisjoint(names)
+    # The schema remains visible for cached clients, but is marked locked.
+    assert 'file_edit' in names
+    assert by_name['file_edit']['x_requires_workspace'] is True
+    assert 'aihelper_clipboard_read' in names
+    assert by_name['aihelper_clipboard_read']['x_requires_workspace'] is True
+    assert 'shell' not in names
     assert 'aihelper_screenshot' in names
     assert by_name['aihelper_screenshot']['x_requires_workspace'] is True
 
@@ -452,7 +494,9 @@ async def test_native_only_discovery_needs_no_workspace_grant(monkeypatch):
 
     assert {'aihelper_compute_execute', 'aihelper_observe', 'aihelper_clipboard_read'} <= names
     assert by_name['aihelper_compute_execute']['x_execution'] == 'local_workspace'
-    assert {'workspace_info', 'file_read', 'file_edit'}.isdisjoint(names)
+    for name in {'workspace_info', 'file_read', 'file_edit'}:
+        assert name in names
+        assert by_name[name]['x_requires_workspace'] is True
 
 
 @pytest.mark.asyncio
@@ -467,9 +511,12 @@ async def test_write_workspace_discovery_exposes_only_announced_write_tools(monk
     monkeypatch.setattr(bridge, 'get_workspace_lease', lambda session_id: binding)
 
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'paired-write'))
-    names = {tool['name'] for tool in result['tools']}
+    by_name = {tool['name']: tool for tool in result['tools']}
+    names = set(by_name)
     assert {'file_read', 'file_edit'} <= names
-    assert {'directory_create', 'workspace_clear', 'aihelper_clipboard_write'}.isdisjoint(names)
+    for name in {'directory_create', 'workspace_clear', 'aihelper_clipboard_write'}:
+        assert name in names
+        assert by_name[name]['x_requires_workspace'] is True
 
 
 @pytest.mark.asyncio
@@ -502,23 +549,40 @@ async def test_pair_ticket_returns_no_store_qr_for_exact_one_time_code():
     assert response.headers["pragma"] == "no-cache"
 
 
-def test_linux_helper_download_metadata_uses_dynamic_release_catalog(tmp_path, monkeypatch):
+def test_helper_release_catalog_is_manifest_driven_with_hashes_and_linux_alias(tmp_path, monkeypatch):
+    import json
     from app.routes.mcp import _helper_release_catalog
 
-    for name in [
-        "AILinux-Helper-2.90.24-android.apk",
-        "AILinux-Helper-2.90.25-linux-x86_64.AppImage",
-        "AILinux-Helper-2.90.25-linux-amd64.deb",
-        "AILinux-Helper-2.90.25-win-x64.exe",
-        "AILinux-Helper-2.90.25-mac-arm64.dmg",
-    ]:
-        (tmp_path / name).write_bytes(b"x")
+    artifact = tmp_path / "AILinux-Helper-2.90.29-linux-x86_64.AppImage"
+    artifact.write_bytes(b"x")
+    manifest = tmp_path / "release.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "helper_version": "2.90.29",
+        "artifacts": {
+            "linux-appimage": {
+                "filename": artifact.name, "size": 1,
+                "media_type": "application/vnd.appimage", "sha256": "a" * 64,
+            }
+        },
+        "aliases": {"linux": "linux-appimage"},
+    }))
     monkeypatch.setenv("AILINUX_HELPER_RELEASES", str(tmp_path))
+    monkeypatch.setenv("AILINUX_HELPER_RELEASE_MANIFEST", str(manifest))
     catalog = _helper_release_catalog()
-    assert catalog["linux-appimage"]["filename"] == "AILinux-Helper-2.90.25-linux-x86_64.AppImage"
-    assert catalog["linux-deb"]["filename"] == "AILinux-Helper-2.90.25-linux-amd64.deb"
-    assert catalog["android"]["version"] == "2.90.24"
-    assert catalog["latest_version"] == "2.90.25"
+    assert catalog["linux-appimage"]["filename"] == artifact.name
+    assert catalog["linux-appimage"]["sha256"] == "a" * 64
+    assert catalog["linux"]["alias_for"] == "linux-appimage"
+    assert catalog["linux"]["available"] is True
+    assert catalog["latest_version"] == "2.90.29"
+
+    document = json.loads(manifest.read_text())
+    document["artifacts"]["linux-appimage"]["version"] = "2.90.30"
+    manifest.write_text(json.dumps(document))
+    catalog = _helper_release_catalog()
+    assert catalog["linux-appimage"]["version"] == "2.90.30"
+    assert catalog["linux"]["version"] == "2.90.30"
+    assert catalog["latest_version"] == "2.90.29"
 
 
 
@@ -623,6 +687,28 @@ async def test_paired_device_schema_stays_discoverable_when_runtime_capability_t
             assert by_name[name]['x_requires_workspace'] is True
 
 
+
+
+@pytest.mark.asyncio
+async def test_public_local_mcp_advertises_legacy_pair_and_device_aliases_before_pairing():
+    result = await handle_tools_list({}, request=FakeRequest('public_guest', False, 'legacy-local-discovery'))
+    by_name = {tool['name']: tool for tool in result['tools']}
+
+    for name in {
+        'workspace_status', 'workspace_pair', 'computer_observe', 'computer_screenshot',
+        'vision_start', 'vision_status', 'vision_observe', 'vision_stop', 'app_ops', 'computer_input',
+    }:
+        assert name in by_name
+        assert by_name[name]['x_execution'] == 'local_workspace'
+
+    assert by_name['workspace_pair']['x_compat_alias_for'] == 'aihelper_pair'
+    assert by_name['computer_observe']['x_compat_alias_for'] == 'aihelper_observe'
+    assert by_name['computer_input']['x_compat_alias_for'] == 'aihelper_input'
+    assert by_name['app_ops']['x_compat_alias_for'] == 'aihelper_app_ops'
+    assert by_name['computer_observe']['x_requires_workspace'] is True
+    assert by_name['computer_input']['x_requires_workspace'] is True
+    assert by_name['app_ops']['x_requires_workspace'] is True
+
 def test_shared_reflection_protocol_reaches_mcp_and_tristar_model_init():
     from app.mcp.agent_instructions import build_mcp_instructions
     from app.services.tristar.model_init import ModelCapability, ModelConfig, ModelInitService, ModelRole
@@ -675,11 +761,12 @@ async def test_full_access_client_discovers_execution_and_federation_tools():
 
 
 @pytest.mark.asyncio
-async def test_guest_discovery_stays_minimal_without_full_access():
-    """The counterpart: an unprivileged client must not gain execution tools."""
+async def test_guest_discovery_exposes_complete_non_admin_catalog_without_granting_admin_tools():
+    """Discovery is complete; call-time RBAC remains authoritative."""
     result = await handle_tools_list({}, request=FakeRequest('public_guest', False))
     names = {tool['name'] for tool in result['tools']}
     assert {'shell', 'binary_exec', 'task_runner', 'remote_exec', 'remote_admin'}.isdisjoint(names)
+    assert 'memory_store' not in names
 
 
 def test_federation_reaches_every_mesh_node_with_output():
@@ -690,3 +777,19 @@ def test_federation_reaches_every_mesh_node_with_output():
     assert FEDERATION_NODES['zombie-pc']['host'] == '10.10.0.2'
     # Evidence-gathering commands must stay available on every node.
     assert {'status', 'uptime', 'journal', 'hostname'} <= set(REMOTE_COMMANDS)
+
+
+def test_workspace_pairing_contract_is_helper_first_and_claim_once():
+    from app.mcp.workspace_tool_contract import AIHELPER_PAIR_TOOL, WORKSPACE_CONTROL_TOOLS
+
+    by_name = {tool['name']: tool for tool in WORKSPACE_CONTROL_TOOLS}
+    status = by_name['workspace_status']
+    pair = by_name['workspace_pair']
+
+    assert 'Helper generates a one-time Share ID' in AIHELPER_PAIR_TOOL['description']
+    assert 'one-time Share ID' in status['description']
+    assert 'claims that Share ID exactly once' in status['description']
+    assert 'durable saved lease credential' in status['description']
+    assert 'generated by WebMCP' in pair['description']
+    assert 'claim-once' in pair['description']
+    assert 'consumed after a successful claim' in pair['inputSchema']['properties']['code']['description']

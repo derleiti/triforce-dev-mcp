@@ -88,6 +88,8 @@ class HandlerRegistry:
         self._register_log_handlers()
         self._register_config_handlers()
         self._register_system_handlers()
+        self._register_server_control_handlers()
+        self._register_web_worker_handlers()
         self._register_vault_handlers()
         self._register_remote_handlers()
         self._register_evolve_handlers()
@@ -96,8 +98,10 @@ class HandlerRegistry:
         self._register_mesh_handlers()
         self._register_group_chat_handlers()
         self._register_mail_handlers()
+        self._register_mercatai_handlers()
         self._register_notification_handlers()
         self._register_dev_tool_handlers()
+        self._register_bug_report_handlers()
         self._register_wordpress_handlers()
         # structured_admin LAST: real handlers override stubs from
         # _register_log_handlers / _register_remote_handlers / _register_system_handlers
@@ -123,7 +127,9 @@ class HandlerRegistry:
                 if not message:
                     return {"error": "message parameter required"}
                 
-                model = params.get("model", "gemini-2.0-flash")
+                model = params.get("model") or os.environ.get(
+                    "TRIFORCE_DEFAULT_CHAT_MODEL", "groq/groq/compound-mini"
+                )
                 system_prompt = params.get("system_prompt", "")
                 temperature = params.get("temperature", 0.7)
                 
@@ -842,6 +848,24 @@ class HandlerRegistry:
             logger.warning(f"System handlers import failed: {e}")
 
 
+    def _register_web_worker_handlers(self):
+        """Persistent web-worker job handoff with per-session ticket policy."""
+        try:
+            from app.mcp.web_worker import WEB_WORKER_HANDLERS
+            self.register_many(WEB_WORKER_HANDLERS)
+            logger.info("Web worker handler registered")
+        except Exception as e:
+            logger.warning(f"Web worker handler registration failed: {e}")
+
+    def _register_server_control_handlers(self):
+        """Direct privileged control of the local TriForce server host."""
+        try:
+            from app.mcp.server_control import SERVER_CONTROL_HANDLERS
+            self.register_many(SERVER_CONTROL_HANDLERS)
+            logger.info("Server control handler registered")
+        except Exception as e:
+            logger.warning(f"Server control handler registration failed: {e}")
+
     def _register_dev_tool_handlers(self):
         """Dev Tools v5: dev_analyze, dev_lint, dev_debug, dev_summarize, dev_links, dev_refactor, git."""
         try:
@@ -854,6 +878,15 @@ class HandlerRegistry:
             logger.info(f"Dev tool handlers registered: {n} tools")
         except Exception as e:
             logger.warning(f"Dev tool handlers registration failed: {e}")
+
+    def _register_bug_report_handlers(self):
+        """Register admin-only AILinux bug/crash triage tools."""
+        try:
+            from app.mcp.bug_report_tools import BUG_REPORT_HANDLERS
+            self.register_many(BUG_REPORT_HANDLERS)
+            logger.info("Bug report handlers registered: %s", sorted(BUG_REPORT_HANDLERS))
+        except Exception as exc:
+            logger.warning("Bug report handlers registration failed: %s", exc)
 
     def _register_structured_admin_handlers(self):
         """Structured Admin handlers from app/mcp/structured_admin.py.
@@ -1062,6 +1095,18 @@ class HandlerRegistry:
             logger.warning(f"Group chat handlers import failed: {e}")
         except Exception as e:
             logger.warning(f"Group chat handlers registration failed: {e}")
+
+
+    def _register_mercatai_handlers(self):
+        """Mercatai paid-task marketplace integration."""
+        try:
+            from app.mcp.handlers_mercatai import MERCATAI_HANDLERS
+            self.register_many(MERCATAI_HANDLERS)
+            logger.info(f"Mercatai handlers registered: {list(MERCATAI_HANDLERS.keys())}")
+        except ImportError as e:
+            logger.warning(f"Mercatai handlers import failed: {e}")
+        except Exception as e:
+            logger.warning(f"Mercatai handlers registration failed: {e}")
 
 
     def _register_mail_handlers(self):
