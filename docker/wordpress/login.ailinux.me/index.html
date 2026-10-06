@@ -880,12 +880,15 @@ async function completeBrowserLogin(data, fallbackEmail){
   const redirect=params.get('redirect')||'https://ailinux.me/';
   let target=null;
   try{target=new URL(redirect)}catch{}
-  const isOpenHeatTarget=!!target && target.origin==='https://openheat.dating' && target.pathname==='/auth/callback';
+  const isOpenHeatTarget=!!target && (
+    (target.origin==='https://openheat.dating' && target.pathname==='/auth/callback') ||
+    (target.protocol==='openheat:' && target.hostname==='auth' && target.pathname==='/callback')
+  );
   if(isOpenHeatTarget){
     const openheatState=params.get('openheat_state')||'';
     if(openheatState.length<16){showMsg('login-msg','OpenHeat Login-State fehlt oder ist ungültig.');return false;}
     try{
-      const issued=await createOneTimeBrowserCode(data.token,{purpose:'openheat',redirect_uri:'https://openheat.dating/auth/callback',state:openheatState});
+      const issued=await createOneTimeBrowserCode(data.token,{purpose:'openheat',redirect_uri:target.toString(),state:openheatState});
       if(!issued.handoff_url)throw new Error('OpenHeat handoff URL missing');
       location.replace(issued.handoff_url);
       return true;
