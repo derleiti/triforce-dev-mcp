@@ -1000,7 +1000,7 @@ function openApp(){
           if (location.hostname === 'login.ailinux.me') {
             const params = new URLSearchParams(location.search);
             const target = safeRedirectTarget();
-            const isOpenHeat = target.startsWith('https://openheat.dating/auth/callback');
+            const isOpenHeat = target.startsWith('https://openheat.dating/auth/callback') || target.startsWith('openheat://auth/callback');
             if (isOpenHeat) {
               const openheatState = params.get('openheat_state') || '';
               if (!openheatState || openheatState.length < 16) {
@@ -1010,7 +1010,7 @@ function openApp(){
               nativeFetch(API + '/auth/browser/code', {
                 method:'POST',
                 headers:{'Content-Type':'application/json','Authorization':'Bearer ' + (data.token || data.access_token || data.jwt || data.auth_token)},
-                body:JSON.stringify({purpose:'openheat',redirect_uri:'https://openheat.dating/auth/callback',state:openheatState})
+                body:JSON.stringify({purpose:'openheat',redirect_uri:target,state:openheatState})
               }).then(r=>r.json().then(j=>({ok:r.ok,j}))).then(({ok,j})=>{
                 if (!ok || !j.handoff_url) throw new Error(j.detail || 'OpenHeat handoff failed');
                 window.location.assign(j.handoff_url);
