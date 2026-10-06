@@ -86,3 +86,31 @@ async def test_fetch_response_reports_verified_activity(monkeypatch):
     assert result["mode"] == "fetch"
     assert result["activity"][0]["name"] == "crawl_url"
     assert result["activity"][0]["status"] == "completed"
+
+def test_public_nova_demo_paths_bypass_account_auth_only_for_stateless_routes():
+    from app.utils.auth_middleware import _is_public_path
+
+    assert _is_public_path("/v1/nova/playground") is True
+    assert _is_public_path("/v1/nova/playground/health") is True
+    assert _is_public_path("/v1/nova/playground/agent") is False
+    assert _is_public_path("/v1/nova/playground/agent/example/result") is False
+
+async def test_llm_answer_falls_back_to_groq_when_selected_provider_fails(monkeypatch):
+    from app.routes import nova_playground as mod
+    from app.services import chat_router
+
+    calls = []
+
+    async def fake_chat(self, model, messages, max_tokens):
+        calls.append(model)
+        if model == "broken/provider-model":
+            raise RuntimeError("provider unavailable")
+        if model == "groq/openai/gpt-oss-20b":
+            return "fallback answer"
+        raise AssertionError(f"unexpected fallback: {model}")
+
+    monkeypatch.setattr(chat_router.APIProxy, "chat", fake_chat)
+    answer, used_model = await mod._llm_answer("hello", "en", "broken/provider-model")
+    assert answer == "fallback answer"
+    assert used_model == "groq/openai/gpt-oss-20b"
+    assert calls == ["broken/provider-model", "groq/openai/gpt-oss-20b"]

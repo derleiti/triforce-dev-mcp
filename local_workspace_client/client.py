@@ -40,10 +40,10 @@ def node_url(base_url: str) -> str:
     return urlunsplit((scheme, parsed.netloc, path, query, ""))
 
 
-def node_headers(pair_code: str) -> dict[str, str]:
-    """Credential and machine identity for the workspace transport upgrade."""
+def node_headers(socket_ticket: str) -> dict[str, str]:
+    """One-shot transport credential and machine identity for the WebSocket upgrade."""
     return {
-        "X-AILinux-Pair-Code": str(pair_code or "").strip().upper(),
+        "X-AILinux-Socket-Ticket": str(socket_ticket or "").strip().upper(),
         "X-AILinux-Machine-Id": socket.gethostname(),
     }
 
@@ -83,30 +83,57 @@ def _clear_state(root: Path) -> None:
         pass
 
 
-def _resume_ticket(base_url: str, token: str) -> str:
-    body = json.dumps({"resume_token": token}).encode("utf-8")
+def _post_json(base_url: str, path: str, payload: dict | None = None) -> dict:
+    body = json.dumps(payload or {}).encode("utf-8")
     req = urllib.request.Request(
-        base_url.rstrip("/") + "/v1/mcp/workspace/resume-ticket",
+        base_url.rstrip("/") + path,
         data=body,
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    ticket = str(data.get("pair_code") or "")
+    if not isinstance(data, dict):
+        raise RuntimeError("server returned an invalid workspace response")
+    return data
+
+
+def _socket_ticket(base_url: str, pair_code: str) -> str:
+    data = _post_json(base_url, "/v1/mcp/workspace/socket-ticket", {"pair_code": pair_code})
+    ticket = str(data.get("socket_ticket") or "").strip().upper()
+    if not ticket:
+        raise RuntimeError("server returned no workspace socket ticket")
+    return ticket
+
+
+def _create_pair_ticket(base_url: str) -> tuple[str, str]:
+    data = _post_json(base_url, "/v1/mcp/workspace/pair-ticket")
+    pair_code = str(data.get("pair_code") or "").strip().upper()
+    socket_ticket = str(data.get("socket_ticket") or "").strip().upper()
+    if not pair_code:
+        raise RuntimeError("server returned no workspace Share ID")
+    if not socket_ticket:
+        socket_ticket = _socket_ticket(base_url, pair_code)
+    return pair_code, socket_ticket
+
+
+def _resume_ticket(base_url: str, token: str) -> str:
+    data = _post_json(base_url, "/v1/mcp/workspace/resume-ticket", {"resume_token": token})
+    ticket = str(data.get("socket_ticket") or data.get("pair_code") or "").strip().upper()
     if not ticket:
         raise RuntimeError("server returned no workspace resume ticket")
     return ticket
 
 
 class WorkspaceNode:
-    def __init__(self, base_url: str, runtime: WorkspaceRuntime, pair_code: str = "", resume_token: str = ""):
+    def __init__(self, base_url: str, runtime: WorkspaceRuntime, pair_code: str = "", resume_token: str = "", socket_ticket: str = ""):
         self.base_url = base_url.rstrip("/")
         self.runtime = runtime
         self.pair_code = pair_code.strip().upper()
         self.resume_token = str(resume_token or "").strip()
-        if len(self.pair_code) < 8 and not self.resume_token:
-            raise ValueError("pairing code or resume token is required")
+        self.socket_ticket = str(socket_ticket or "").strip().upper()
+        if len(self.pair_code) < 8 and not self.resume_token and not self.socket_ticket:
+            raise ValueError("workspace Share ID, socket ticket or resume token is required")
         self.stop_event = asyncio.Event()
         self.forget_on_exit = False
 
@@ -169,6 +196,9 @@ class WorkspaceNode:
                 token = str(params.get("resume_token") or "").strip()
                 if token:
                     self.resume_token = token
+                    waiting = bool(params.get("waiting_for_session", False))
+                    if not waiting:
+                        self.pair_code = ""
                     _save_state(self.runtime.root, {
                         "server": self.base_url,
                         "workspace": str(self.runtime.root),
@@ -211,9 +241,14 @@ class WorkspaceNode:
 
         delay = 1.0
         while not self.stop_event.is_set():
-            credential = self.pair_code
+            credential = self.socket_ticket
             if self.resume_token:
                 credential = await asyncio.to_thread(_resume_ticket, self.base_url, self.resume_token)
+            elif not credential and self.pair_code:
+                credential = await asyncio.to_thread(_socket_ticket, self.base_url, self.pair_code)
+            if not credential:
+                raise RuntimeError("workspace transport has no valid reconnect credential")
+            self.socket_ticket = ""
             url = node_url(self.base_url)
             headers = node_headers(credential)
             try:
@@ -256,7 +291,7 @@ class WorkspaceNode:
             except Exception as exc:
                 if self.stop_event.is_set():
                     break
-                if not self.resume_token:
+                if not self.resume_token and not self.pair_code:
                     raise
                 print(json.dumps({"event": "reconnecting", "error": str(exc), "delay_seconds": delay}), flush=True)
                 await asyncio.sleep(delay)
@@ -267,7 +302,7 @@ class WorkspaceNode:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="triforce-workspace", description="Pair one local folder with a public TriForce MCP session")
     p.add_argument("--workspace", required=True, help="Local folder to expose")
-    p.add_argument("--pair", required=False, default="", help="One-time pairing code returned by workspace_status")
+    p.add_argument("--pair", required=False, default="", help="Legacy inbound Share ID; normally the Helper creates its own one-time Share ID")
     p.add_argument("--forget", action="store_true", help="Forget a saved persistent workspace session and exit")
     p.add_argument("--task", default="", help="Task/instructions for the connected AI")
     p.add_argument("--server", default="https://api.ailinux.me", help="TriForce server base URL")
@@ -295,11 +330,25 @@ def main(argv: list[str] | None = None) -> int:
     saved = _load_state(runtime.root)
     resume_token = str(saved.get("resume_token") or "")
     server = str(saved.get("server") or args.server) if resume_token and not args.pair.strip() else args.server
-    if not args.pair.strip() and not resume_token:
-        print("workspace error: --pair is required once; later runs resume automatically", file=sys.stderr)
-        return 2
+    pair_code = args.pair.strip().upper()
+    socket_ticket = ""
+    if not pair_code and not resume_token:
+        try:
+            pair_code, socket_ticket = _create_pair_ticket(server)
+        except Exception as exc:
+            print(f"workspace error: could not create Share ID: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({
+            "event": "pair_code_ready",
+            "pair_code": pair_code,
+            "expires_seconds": 15 * 60,
+        }), flush=True)
     try:
-        node = WorkspaceNode(server, runtime, args.pair, resume_token=resume_token if not args.pair.strip() else "")
+        node = WorkspaceNode(
+            server, runtime, pair_code,
+            resume_token=resume_token if not pair_code else "",
+            socket_ticket=socket_ticket,
+        )
     except Exception as exc:
         print(f"workspace error: {exc}", file=sys.stderr)
         return 2

@@ -18,7 +18,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request
 
-from app.mcp.workspace_tool_contract import WORKSPACE_TOOL_NAMES, AIHELPER_CANONICAL_TO_WIRE
+from app.mcp.workspace_tool_contract import (
+    WORKSPACE_CONTROL_TOOLS,
+    WORKSPACE_TOOL_NAMES,
+    AIHELPER_CANONICAL_TO_WIRE,
+    AIHELPER_LEGACY_ALIASES,
+)
 from .share_manifest import (
     CLIPBOARD_READ_TOOLS,
     CLIPBOARD_WRITE_TOOLS,
@@ -74,11 +79,12 @@ LOCAL_ADMIN_ONLY_INVENTORIES = frozenset({"forum", "wordpress", "mail"})
 # Static MCP clients may cache tools/list before the user pairs a native Helper.
 # Keep the AI-facing vision/input schemas discoverable, but mark them locked;
 # execution still requires a live lease, advertised capability and manifest grant.
-DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset({
-    "aihelper_pair", "aihelper_observe", "aihelper_screenshot", "aihelper_vision_start",
-    "aihelper_vision_status", "aihelper_vision_observe", "aihelper_vision_stop",
-    "aihelper_input", "aihelper_app_ops",
-})
+# Static MCP clients (notably ChatGPT) may cache tools/list for the lifetime of a
+# connector session. Advertise the complete local contract even before pairing;
+# execution still requires a live lease, the advertised capability and a matching
+# share-manifest grant. This prevents pre-pair discovery from permanently hiding
+# file/code/device tools after the Helper comes online.
+DISCOVERABLE_LOCKED_LOCAL_TOOLS = frozenset(LOCAL_TOOL_NAMES | AIHELPER_CANONICAL_TOOLS)
 WORKSPACE_EXECUTOR_WAIT_SECONDS = 25.0
 WORKSPACE_EXECUTOR_POLL_SECONDS = 0.25
 
@@ -139,6 +145,39 @@ def canonical_workspace_tools() -> List[Dict[str, Any]]:
         cloned["x_workspace_contract_fingerprint"] = contract_fp
         tools.append(cloned)
     return tools
+
+
+def legacy_workspace_alias_tools() -> List[Dict[str, Any]]:
+    """Return stable legacy Local-MCP schemas alongside canonical aihelper names.
+
+    Some MCP hosts cache an older tool namespace for the lifetime of a chat and
+    do not refresh when canonical ``aihelper_*`` tools appear. Advertising the
+    legacy wire names as first-class compatibility schemas lets those clients
+    pair and control a Helper directly through the normal MCP tool surface. The
+    call path still canonicalizes every alias and enforces the same live lease,
+    capability and share-manifest checks as the canonical tool.
+    """
+    canonical = {
+        str(tool.get("name") or ""): deepcopy(tool)
+        for tool in canonical_workspace_tools()
+        if isinstance(tool, dict) and str(tool.get("name") or "")
+    }
+    controls = {
+        str(tool.get("name") or ""): deepcopy(tool)
+        for tool in WORKSPACE_CONTROL_TOOLS
+        if isinstance(tool, dict) and str(tool.get("name") or "")
+    }
+    aliases: List[Dict[str, Any]] = []
+    for legacy_name, canonical_name in AIHELPER_LEGACY_ALIASES.items():
+        source = controls.get(legacy_name) if legacy_name in {"workspace_status", "workspace_pair"} else canonical.get(canonical_name)
+        if not source:
+            continue
+        cloned = deepcopy(source)
+        cloned["name"] = legacy_name
+        cloned["x_execution"] = "local_workspace"
+        cloned["x_compat_alias_for"] = canonical_name
+        aliases.append(cloned)
+    return aliases
 
 
 def is_public_guest(request: Request | None) -> bool:
@@ -252,7 +291,7 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
     binding = _share_binding(request)
     if is_public_guest(request):
         from app.mcp.tool_registry_unified import get_canonical_all_tools
-        from app.utils.mcp_security import PRIVILEGED_TOOLS
+        from app.utils.mcp_security import PRIVILEGED_TOOLS, PUBLIC_GUEST_DENIED_TOOLS
 
         merged: Dict[str, Dict[str, Any]] = {}
         for tool in get_canonical_all_tools():
@@ -262,12 +301,12 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             inventory = str(tool.get("x_inventory") or "misc")
             namespace = str(tool.get("x_namespace") or "global")
             access = str(tool.get("x_access") or "policy")
-            if not name or inventory in LOCAL_ADMIN_ONLY_INVENTORIES:
+            if not name or name in PUBLIC_GUEST_DENIED_TOOLS:
                 continue
-            # Public/local MCP exposes only portable global AI tools plus the
-            # explicitly shared AILinux Helper surface. TriForce-owned account
-            # integrations and engine administration stay on authenticated/admin MCP.
-            if namespace == "triforce" or access in {"authenticated", "admin"}:
+            # Public/WebMCP mirrors the canonical non-admin catalogue. Discovery
+            # is not authority: account integrations stay marked as auth-required
+            # and tools/call still enforces RBAC. Only engine/admin scope is hidden.
+            if str(tool.get("x_scope") or "") == "triforce_admin" or access == "admin":
                 continue
             locked_local = name in LOCAL_TOOL_NAMES and not _local_tool_visible(name, binding)
             # Keep selected device/vision schemas stable across the full lease lifecycle.
@@ -282,6 +321,8 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
             cloned = deepcopy(tool)
             execution = "local_workspace" if name in LOCAL_TOOL_NAMES else "triforce_server"
             cloned["x_execution"] = execution
+            if access == "authenticated":
+                cloned["x_requires_auth"] = True
             if locked_local:
                 cloned["x_requires_workspace"] = True
             if execution == "triforce_server" and name in PRIVILEGED_TOOLS:
@@ -308,6 +349,21 @@ def merge_workspace_tools(tools: List[Dict[str, Any]], request: Request) -> List
         if authenticated_bridge and not visible_now:
             cloned["x_requires_workspace"] = True
         merged[name] = cloned
+
+    # Keep the shipped Local-MCP vocabulary discoverable as explicit aliases.
+    # This is intentionally a discovery-only compatibility layer: tools/call
+    # routes these names through the same workspace bridge and therefore the
+    # same lease/capability/share-manifest authorization as canonical names.
+    if is_public_guest(request) or authenticated_bridge:
+        for alias in legacy_workspace_alias_tools():
+            alias_name = str(alias.get("name") or "")
+            canonical_name = str(alias.get("x_compat_alias_for") or "")
+            visible_now = alias_name in CONTROL_TOOLS or _local_tool_visible(canonical_name, binding)
+            # All shipped compatibility aliases remain discoverable so cached
+            # clients see the same device vocabulary as canonical aihelper_* tools.
+            if not visible_now:
+                alias["x_requires_workspace"] = True
+            merged[alias_name] = alias
     return list(merged.values())
 
 
@@ -469,10 +525,23 @@ def _normalize_display_tool_result(name: str, result: Dict[str, Any]) -> Dict[st
         return result
 
     content = result.get("content")
-    if isinstance(content, list) and any(
-        isinstance(block, dict) and block.get("type") == "image" for block in content
-    ):
-        return result
+    if isinstance(content, list):
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "image"):
+                continue
+            encoded = block.get("data")
+            mime = str(block.get("mimeType") or block.get("mime_type") or "").strip().lower()
+            structured = result.get("structuredContent")
+            if isinstance(encoded, str) and encoded and mime.startswith("image/") and isinstance(structured, dict):
+                # Some connector transports surface only structuredContent and drop
+                # native MCP image blocks. Mirror the verified image as a data URL
+                # while preserving the canonical image content block for MCP clients.
+                structured = dict(structured)
+                structured.setdefault("mimeType", mime)
+                structured["data_url"] = f"data:{mime};base64,{encoded}"
+                result = dict(result)
+                result["structuredContent"] = structured
+            return result
 
     structured = result.get("structuredContent")
     if not isinstance(structured, dict):
@@ -530,6 +599,7 @@ def _normalize_display_tool_result(name: str, result: Dict[str, Any]) -> Dict[st
         if key not in {"data", "data_url", "dataUrl"}
     }
     metadata["mimeType"] = mime
+    metadata["data_url"] = f"data:{mime};base64,{encoded}"
     return {
         "content": [{"type": "image", "data": encoded, "mimeType": mime}],
         "structuredContent": metadata,
@@ -626,7 +696,7 @@ async def _claim_workspace_for_session(
 _DEVICE_COMPAT_ALIAS_PREFIX = "@device "
 _DEVICE_COMPAT_ALIAS_TOOLS = frozenset({
     "app_ops", "computer_input", "computer_observe", "computer_screenshot",
-    "vision_start", "vision_status", "vision_observe", "vision_stop",
+    "vision_start", "vision_status", "vision_observe", "vision_stop", "device_info",
 })
 
 
@@ -786,22 +856,17 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
             return _workspace_binding_response(binding, token=workspace_token)
         pair_session_id = affinity_sid or sid
         if pair_session_id:
-            from app.services.mcp_workspace_sessions import get_or_create_pair_code
-            code = get_or_create_pair_code(pair_session_id)
             return {
                 "content": [{"type": "text", "text": (
-                    "No local workspace is paired. Open the TriForce MCP setup page, choose the folder and mode, "
-                    f"then connect it with this pairing ID: {code}"
+                    "No local workspace is paired. Create a one-time Share ID in WebMCP or AILinux Helper, "
+                    "then pass that ID to aihelper_pair/workspace_pair. The Helper keeps a separate secure "
+                    "resume credential for reconnects; the Share ID is never reused."
                 )}],
                 "structuredContent": {
                     "ok": False, "code": "WORKSPACE_REQUIRED", "connected": False,
-                    "pair_code": code,
-                    # P0: never place a pairing credential in a URL. A query
-                    # parameter leaks into browser history, Referer, reverse
-                    # proxy and Cloudflare access logs. The code is handed over
-                    # by the user typing/pasting it into the page instead.
                     "setup_url": "https://api.ailinux.me/v1/mcp",
-                    "procedure": "Open setup_url -> choose folder/mode -> connect -> paste pair_code into the pairing field. Never append the pairing ID to the URL.",
+                    "pair_direction": "helper_to_ai",
+                    "procedure": "Create a Share ID in WebMCP/AILinux Helper -> send it to the AI -> pair once. Reconnects use the saved resume credential automatically.",
                 },
                 "isError": False,
             }
@@ -896,11 +961,23 @@ async def call_workspace_tool(request: Request, name: str, arguments: Dict[str, 
     if wire_name in COMPUTE_TOOLS:
         compute = manifest_resource(_binding_share_manifest(binding), RESOURCE_COMPUTE)
         runtime = str(compute.get("runtime") or "").strip().lower().replace("-", "_")
+        identity = affinity_sid or sid or str(binding.get("session_id") or binding.get("lease_id") or "workspace")
         if runtime == "triforce_docker":
             from .workspace_compute_sandbox import execute_remote_compute
-            identity = affinity_sid or sid or str(binding.get("session_id") or binding.get("lease_id") or "workspace")
             try:
                 return await execute_remote_compute(
+                    connection=connection, arguments=arguments, mode=mode,
+                    capabilities=capabilities, identity=identity,
+                )
+            except (ValueError, RuntimeError) as exc:
+                return _tool_error(
+                    "WORKSPACE_COMPUTE_SANDBOX_FAILED", str(exc),
+                    tool=name, retryable=False, sandboxed=True,
+                )
+        if runtime == "triforce_openshell":
+            from .workspace_openshell_sandbox import execute_openshell_compute
+            try:
+                return await execute_openshell_compute(
                     connection=connection, arguments=arguments, mode=mode,
                     capabilities=capabilities, identity=identity,
                 )

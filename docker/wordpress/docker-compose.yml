@@ -83,6 +83,8 @@ services:
       NOVA_LS_PRODUCT_ENTITLEMENTS: ${NOVA_LS_PRODUCT_ENTITLEMENTS:-}
       NOVA_AI_INTERNAL_KEY: ${NOVA_AI_INTERNAL_KEY:-}
       TRIFORCE_API_BASE: ${TRIFORCE_API_BASE:-https://api.ailinux.me}
+      # Canonical TriForce -> WordPress webhook HMAC key from config/triforce.env.
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       # WICHTIG: Kein WORDPRESS_CONFIG_EXTRA mehr -> kein eval-Parse-Error
     volumes:
       - ${WP_HTML_PATH:-./html}:/var/www/html:delegated

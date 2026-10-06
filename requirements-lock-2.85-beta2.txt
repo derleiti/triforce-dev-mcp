@@ -64,7 +64,7 @@ mdit-py-plugins==0.6.1
 mdurl==0.1.2
 mistralai==2.9.3
 more-itertools==11.1.0
-multidict==6.7.1
+multidict==6.9.1
 mypy==2.3.0
 mypy_extensions==1.1.0
 numpy==2.5.3
@@ -94,7 +94,7 @@ pydantic_core==2.46.5
 pydantic-settings==2.15.0
 pyee==13.0.1
 Pygments==2.21.0
-PyJWT==2.13.0
+PyJWT==2.15.0
 pyparsing==3.3.2
 pyrate-limiter==4.5.0
 pytest==9.1.1
@@ -127,7 +127,7 @@ truststore==0.10.4
 typing_extensions==4.16.0
 typing-inspection==0.4.4
 uritemplate==4.2.0
-urllib3==2.7.0
+urllib3==2.8.0
 uvicorn==0.52.4
 uvloop==0.22.1
 watchfiles==1.2.0

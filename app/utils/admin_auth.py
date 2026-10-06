@@ -7,7 +7,7 @@ Verwendung:
     from ..utils.admin_auth import require_admin, validate_allowed_paths, require_read_access
 
 Env-Keys:
-    ADMIN_USER_IDS   — kommaseparierte User-IDs mit Admin-Rechten
+    ADMIN_USER_IDS   — optionaler Legacy-Fallback für ältere Client-IDs
     INTERNAL_API_KEY — interner Service-Key (WordPress-Plugin, Backend-Services)
 """
 
@@ -30,9 +30,7 @@ def _load_admin_ids() -> frozenset[str]:
     raw = os.environ.get("ADMIN_USER_IDS", "")
     ids = frozenset(uid.strip() for uid in raw.split(",") if uid.strip())
     if not ids:
-        logger.warning(
-            "ADMIN_USER_IDS not set — no user has admin access to grant-* endpoints"
-        )
+        logger.debug("ADMIN_USER_IDS not set; signed authority_role is canonical")
     return ids
 
 
@@ -62,10 +60,22 @@ def require_admin(ctx: dict) -> None:
         ctx = Depends(get_client_context)
         require_admin(ctx)
     """
-    user_id = ctx.get("user_id", "")
-    if not user_id or user_id not in ADMIN_USER_IDS:
-        logger.warning("Admin access denied for user_id=%r", user_id)
-        raise HTTPException(403, "Admin-Zugriff erforderlich")
+    authority_role = str(ctx.get("authority_role") or "").strip().lower()
+    if authority_role in {"human_owner", "human_admin"}:
+        return
+
+    # Compatibility for legacy client tokens/configurations that predate the
+    # shared authority model. New sessions should rely on signed authority_role.
+    user_id = str(ctx.get("user_id") or "").strip()
+    if user_id and user_id in ADMIN_USER_IDS:
+        return
+
+    logger.warning(
+        "Admin access denied for user_id=%r authority_role=%r",
+        user_id,
+        authority_role,
+    )
+    raise HTTPException(403, "Admin-Zugriff erforderlich")
 
 
 # ---------------------------------------------------------------------------

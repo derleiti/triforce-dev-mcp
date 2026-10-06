@@ -228,7 +228,7 @@ async def _llm_answer(prompt: str, lang: str = "de", model: Optional[str] = None
     from app.services.chat_router import APIProxy
     proxy = APIProxy()
     candidates = []
-    for candidate in [model, "mistral/mistral-small-latest", "mistral/mistral-medium-latest"]:
+    for candidate in [model, "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", "mistral/mistral-medium-latest"]:
         if candidate and candidate not in candidates:
             candidates.append(candidate)
     for candidate in candidates:

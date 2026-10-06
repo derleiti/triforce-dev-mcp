@@ -100,17 +100,26 @@ async def _query_agent_model(agent_id: str, model: str, prompt: str, timeout: in
     """Fragt ein Modell via chat_router oder Ollama direkt ab."""
     try:
         if agent_id in OLLAMA_AGENTS:
-            # Ollama: direkt via aiohttp
+            # Ollama via preferred infrastructure nodes.
             import aiohttp
+            from app.services.ollama_node_router import ollama_candidates
+            last_error = "Ollama nodes unavailable"
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as http_session:
-                async with http_session.post(
-                    "http://localhost:11434/api/chat",
-                    json={"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False},
-                ) as resp:
-                    if resp.status != 200:
-                        raise RuntimeError(f"Ollama HTTP {resp.status}")
-                    data = await resp.json()
-                    return data.get("message", {}).get("content", "")
+                for endpoint in ollama_candidates(model):
+                    try:
+                        async with http_session.post(
+                            f"{endpoint.base_url}/api/chat",
+                            json={"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False},
+                        ) as resp:
+                            if resp.status != 200:
+                                last_error = f"Ollama HTTP {resp.status}"
+                                continue
+                            data = await resp.json()
+                            return data.get("message", {}).get("content", "")
+                    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                        last_error = type(exc).__name__
+                        continue
+            raise RuntimeError(last_error)
         else:
             # Cloud API via chat_router proxy
             from app.services.chat_router import api_proxy

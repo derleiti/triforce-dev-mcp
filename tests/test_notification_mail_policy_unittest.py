@@ -140,3 +140,37 @@ def test_launch_pollers_skips_forum_without_auth(monkeypatch):
 
     assert "_poll_forum" not in launched
     assert nm._poller_status["forum"] == "disabled:no-auth"
+
+
+def test_launch_pollers_skips_mail_without_imap_auth(monkeypatch):
+    import app.config as config
+    import app.mcp.flarum_tools as ft
+    import app.mcp.notification_manager as nm
+
+    launched = []
+
+    class MailSettings:
+        mail_imap_host = ""
+        mail_imap_user = ""
+        mail_imap_pass = ""
+
+    def fake_create_task(coro):
+        launched.append(coro.cr_code.co_name)
+        coro.close()
+
+        class DummyTask:
+            def set_name(self, _name):
+                pass
+
+        return DummyTask()
+
+    monkeypatch.setattr(config, "get_settings", lambda: MailSettings())
+    monkeypatch.setattr(ft, "is_flarum_configured", lambda: False)
+    monkeypatch.setattr(nm.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(nm, "_poller_tasks", [])
+    monkeypatch.setattr(nm, "_poller_status", {})
+
+    nm._launch_pollers()
+
+    assert "_poll_mail" not in launched
+    assert nm._poller_status["mail"] == "disabled:no-imap-auth"

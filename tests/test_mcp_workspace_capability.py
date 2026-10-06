@@ -57,21 +57,22 @@ def test_pairing_code_is_session_scoped_and_consumed_on_bind():
     assert sessions.get_workspace('session-B') is None
 
 
-def test_web_pair_codes_are_unique_and_authorize_multiple_aliases():
+def test_web_pair_codes_are_unique_and_each_code_is_claimed_once():
     first = sessions.create_web_pair_code()
     second = sessions.create_web_pair_code()
     assert first != second
     conn = DummyConnection()
     waiting = sessions.register_waiting_workspace(first, conn, mode='write', task='web flow', capabilities=['file_read', 'file_edit'])
     assert waiting['waiting_for_session'] is True
-    bound_a = sessions.claim_waiting_workspace(first, 'session-A')
-    bound_b = sessions.claim_waiting_workspace(first, 'session-B')
-    assert bound_a['mode'] == 'write'
-    assert bound_a['task'] == 'web flow'
-    assert bound_a['capabilities'] == ['file_edit', 'file_read']
-    assert bound_a['lease_id'] == bound_b['lease_id']
+    assert waiting['resume_token']
+    bound = sessions.claim_waiting_workspace(first, 'session-A')
+    assert bound['mode'] == 'write'
+    assert bound['task'] == 'web flow'
+    assert bound['capabilities'] == ['file_edit', 'file_read']
     assert sessions.get_workspace('session-A')['client_id'] == conn.client_id
-    assert sessions.get_workspace('session-B')['client_id'] == conn.client_id
+    with pytest.raises(ValueError, match='already been used'):
+        sessions.claim_waiting_workspace(first, 'session-B')
+    assert sessions.get_workspace('session-B') is None
 
 
 def test_browser_socket_ticket_is_one_shot_and_bound_to_join_code():
@@ -82,34 +83,45 @@ def test_browser_socket_ticket_is_one_shot_and_bound_to_join_code():
     assert sessions.consume_workspace_socket_ticket(ticket) == ''
 
 
+def test_waiting_helper_can_resume_before_ai_claim_and_code_remains_claimable(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
+    code = sessions.create_web_pair_code()
+    first = DummyConnection('waiting-1')
+    waiting = sessions.register_waiting_workspace(code, first, mode='write', capabilities=['file_read'])
+    token = waiting['resume_token']
+    sessions.suspend_connection(first)
+    sessions._WEB_PAIR.clear()
+    sessions._RESUME_INDEX.clear()
+    second = DummyConnection('waiting-2')
+    resumed = sessions.reconnect_workspace_with_resume_token(token, second, mode='write', capabilities=['file_read'])
+    assert resumed['waiting_for_session'] is True
+    claimed = sessions.claim_waiting_workspace(code, 'chatgpt-after-drop')
+    assert claimed['lease_id'] == resumed['lease_id']
+    assert sessions.get_workspace('chatgpt-after-drop')['client_id'] == 'waiting-2'
+    assert sessions.resolve_web_pair_code(code) is None
+
+
 
 @pytest.mark.asyncio
-async def test_workspace_status_tells_user_to_use_web_setup_page():
+async def test_workspace_status_tells_user_to_create_helper_share_id():
     req = DummyRequest('session-A')
     result = await call_public_local_tool(req, 'workspace_status', {})
     structured = result['structuredContent']
     assert structured['code'] == 'WORKSPACE_REQUIRED'
     assert structured['setup_url'] == 'https://api.ailinux.me/v1/mcp'
-    assert structured['pair_code']
+    assert structured['pair_direction'] == 'helper_to_ai'
+    assert 'pair_code' not in structured
 
 
 @pytest.mark.asyncio
-async def test_workspace_status_setup_url_never_carries_the_pair_code():
-    """P0 regression: a pairing credential must never reach a URL.
-
-    A query parameter is copied into browser history, the Referer header and
-    every reverse-proxy/Cloudflare access log on the path. The pair code is a
-    bootstrap credential the user pastes into the page, never a URL component.
-    """
+async def test_workspace_status_setup_url_never_carries_credentials():
     req = DummyRequest('session-url-leak')
     result = await call_public_local_tool(req, 'workspace_status', {})
     structured = result['structuredContent']
-    code = str(structured['pair_code'])
-    assert code, 'test needs a pair code to assert against'
-
     setup_url = str(structured['setup_url'])
     assert '?' not in setup_url and '#' not in setup_url
-    assert code not in setup_url
+    assert 'pair_code' not in structured
     for key in ('pair_code', 'resume_token', 'workspace_token', 'handoff'):
         assert key not in setup_url
 
@@ -184,32 +196,30 @@ async def test_browser_capability_gate_rejects_unadvertised_tool():
     assert conn.calls == []
 
 
-def test_same_pairing_id_reconnects_same_session_after_suspend():
+def test_resume_token_reconnects_same_session_after_suspend():
     code = sessions.create_web_pair_code()
     first = DummyConnection('mobile-1')
     sessions.register_waiting_workspace(code, first, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
-    sessions.claim_waiting_workspace(code, 'session-A')
+    claimed = sessions.claim_waiting_workspace(code, 'session-A')
+    token = claimed['resume_token']
     sessions.suspend_connection(first)
-    status = sessions.workspace_status('session-A')
-    assert status['connected'] is True
-    assert status['suspended'] is False
-    assert sessions.pair_code_kind(code) == ('reconnect', 'session-A')
+    assert sessions.pair_code_kind(code) == ('invalid', None)
     second = DummyConnection('mobile-2')
-    resumed = sessions.reconnect_web_workspace(code, second, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
+    resumed = sessions.reconnect_workspace_with_resume_token(token, second, mode='write', task='mobile', capabilities=['file_read', 'file_edit'])
     assert resumed['session_id'] == 'session-A'
-    assert resumed['resume_token']
-    bound = sessions.get_workspace('session-A')
-    assert bound is not None
-    assert bound['client_id'] == 'mobile-2'
+    assert resumed['resume_token'] == token
+    assert sessions.get_workspace('session-A')['client_id'] == 'mobile-2'
 
 
-def test_same_pairing_id_can_be_shared_by_authorized_sessions():
+def test_resume_token_can_authorize_an_additional_transport_alias():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('mobile-1')
     sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
     first = sessions.claim_waiting_workspace(code, 'session-A')
-    second = sessions.claim_waiting_workspace(code, 'session-B')
+    second = sessions.claim_workspace_with_resume_token(first['resume_token'], 'session-B')
     assert first['lease_id'] == second['lease_id']
+    with pytest.raises(ValueError, match='already been used'):
+        sessions.claim_waiting_workspace(code, 'session-C')
     assert sessions.get_workspace('session-A') is not None
     assert sessions.get_workspace('session-B') is not None
 
@@ -236,41 +246,37 @@ def test_explicit_workspace_cleanup_still_revokes_binding():
     assert sessions.get_workspace('session-A') is None
 
 
-def test_detached_transport_can_rebind_same_lease_to_new_mcp_session():
+def test_detached_transport_can_rebind_same_lease_with_resume_token():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('lease-browser')
     sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read', 'file_edit'])
     first = sessions.claim_waiting_workspace(code, 'transport-A')
-    lease_id = first['lease_id']
     sessions.mark_transport_detached('transport-A')
-
-    rebound = sessions.claim_waiting_workspace(code, 'transport-B')
-    assert rebound['lease_id'] == lease_id
-    assert sessions.get_workspace('transport-A') is not None
+    rebound = sessions.claim_workspace_with_resume_token(first['resume_token'], 'transport-B')
+    assert rebound['lease_id'] == first['lease_id']
     assert sessions.get_workspace('transport-B')['client_id'] == 'lease-browser'
-    assert sessions.workspace_status('transport-B')['transport_active'] is True
 
 
-def test_same_pair_code_authorizes_multiple_concurrent_mcp_aliases():
+def test_pair_code_does_not_authorize_multiple_concurrent_mcp_aliases():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('lease-browser')
     sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
     first = sessions.claim_waiting_workspace(code, 'transport-A')
-    second = sessions.claim_waiting_workspace(code, 'transport-B')
+    with pytest.raises(ValueError, match='already been used'):
+        sessions.claim_waiting_workspace(code, 'transport-B')
+    second = sessions.claim_workspace_with_resume_token(first['resume_token'], 'transport-B')
     assert first['lease_id'] == second['lease_id']
-    assert sessions.get_workspace('transport-A')['client_id'] == 'lease-browser'
-    assert sessions.get_workspace('transport-B')['client_id'] == 'lease-browser'
 
 
-def test_browser_reconnect_refreshes_all_mcp_aliases():
+def test_browser_resume_refreshes_all_authorized_mcp_aliases():
     code = sessions.create_web_pair_code()
-    first = DummyConnection('browser-1')
-    sessions.register_waiting_workspace(code, first, mode='write', capabilities=['file_read'])
-    sessions.claim_waiting_workspace(code, 'chatgpt')
-    sessions.claim_waiting_workspace(code, 'mistral')
-    sessions.suspend_connection(first)
-    second = DummyConnection('browser-2')
-    sessions.reconnect_web_workspace(code, second, mode='write', capabilities=['file_read'])
+    first_conn = DummyConnection('browser-1')
+    sessions.register_waiting_workspace(code, first_conn, mode='write', capabilities=['file_read'])
+    first = sessions.claim_waiting_workspace(code, 'chatgpt')
+    sessions.claim_workspace_with_resume_token(first['resume_token'], 'mistral')
+    sessions.suspend_connection(first_conn)
+    second_conn = DummyConnection('browser-2')
+    sessions.reconnect_workspace_with_resume_token(first['resume_token'], second_conn, mode='write', capabilities=['file_read'])
     assert sessions.get_workspace('chatgpt')['client_id'] == 'browser-2'
     assert sessions.get_workspace('mistral')['client_id'] == 'browser-2'
 
@@ -322,19 +328,19 @@ async def test_sessionless_workspace_token_cannot_resolve_unpaired_or_wrong_code
 
 
 @pytest.mark.asyncio
-async def test_real_mcp_session_can_reclaim_stateless_lease_with_same_pair_code():
+async def test_real_mcp_session_reclaims_stateless_lease_with_resume_token():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('stateless-browser')
     sessions.register_waiting_workspace(code, conn, mode='read_only', capabilities=['file_read'])
     sessionless = DummyRequest('')
     paired = await call_public_local_tool(sessionless, 'workspace_pair', {'code': code})
-    lease_id = paired['structuredContent']['lease_id']
-
+    token = paired['structuredContent']['workspace_token']
     sessioned = DummyRequest('real-session')
-    rebound = await call_public_local_tool(sessioned, 'workspace_pair', {'code': code})
+    rebound = await call_public_local_tool(sessioned, 'workspace_status', {'workspace_token': token})
     assert rebound['structuredContent']['ok'] is True
-    assert rebound['structuredContent']['lease_id'] == lease_id
     assert sessions.get_workspace('real-session')['client_id'] == 'stateless-browser'
+    reused = await call_public_local_tool(sessioned, 'workspace_pair', {'code': code})
+    assert reused['structuredContent']['ok'] is False
 
 
 def test_openai_connector_headers_form_stable_logical_session_without_exposing_raw_values():
@@ -362,7 +368,7 @@ def test_explicit_mcp_session_header_wins_over_connector_fallback():
     assert _logical_transport_session_id(req, 'protocol-session') == 'protocol-session'
 
 
-def test_session_pair_promotes_to_shared_web_lease():
+def test_legacy_session_pair_is_consumed_when_promoted_to_lease():
     code = sessions.get_or_create_pair_code('chatgpt-session')
     conn = DummyConnection('browser-direct')
     bound = sessions.promote_session_pair_to_web_lease(
@@ -370,11 +376,9 @@ def test_session_pair_promotes_to_shared_web_lease():
     )
     assert bound['session_id'] == 'chatgpt-session'
     assert sessions.resolve_pair_code(code) is None
-    assert sessions.pair_code_kind(code) == ('reconnect', 'chatgpt-session')
-    second = sessions.claim_waiting_workspace(code, 'mistral-session')
+    assert sessions.pair_code_kind(code) == ('invalid', None)
+    second = sessions.claim_workspace_with_resume_token(bound['resume_token'], 'mistral-session')
     assert second['lease_id'] == bound['lease_id']
-    assert sessions.get_workspace('chatgpt-session')['client_id'] == 'browser-direct'
-    assert sessions.get_workspace('mistral-session')['client_id'] == 'browser-direct'
 
 
 @pytest.mark.asyncio
@@ -444,24 +448,17 @@ def test_workspace_status_distinguishes_suspended_from_unpaired():
     assert status['mode'] == 'write'
 
 
-def test_suspended_workspace_can_authorize_new_transport_alias_with_same_code():
+def test_suspended_workspace_can_authorize_new_transport_alias_with_resume_token():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('mobile-alias')
     sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['code_tree'])
     first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
+    token = first['resume_token']
     sessions.suspend_connection(conn)
-
-    second = sessions.claim_waiting_workspace(code, 'mistral-B')
+    second = sessions.claim_workspace_with_resume_token(token, 'mistral-B')
     assert second['lease_id'] == first['lease_id']
-    assert sessions.workspace_status('mistral-B')['state'] == 'ready'
-    assert sessions.workspace_status('mistral-B')['transport_state'] == 'offline'
-
     replacement = DummyConnection('mobile-alias-reconnected')
-    sessions.reconnect_web_workspace(code, replacement, mode='write', capabilities=['code_tree'])
-    assert sessions.workspace_status('chatgpt-A')['state'] == 'ready'
-    assert sessions.workspace_status('chatgpt-A')['transport_state'] == 'online'
-    assert sessions.workspace_status('mistral-B')['state'] == 'ready'
-    assert sessions.workspace_status('mistral-B')['transport_state'] == 'online'
+    sessions.reconnect_workspace_with_resume_token(token, replacement, mode='write', capabilities=['code_tree'])
     assert sessions.get_workspace('chatgpt-A')['client_id'] == 'mobile-alias-reconnected'
     assert sessions.get_workspace('mistral-B')['client_id'] == 'mobile-alias-reconnected'
 
@@ -613,14 +610,15 @@ def test_resume_token_restores_lease_after_process_state_loss(monkeypatch):
 
 
 
-def test_repeated_pair_claim_keeps_returning_durable_token():
+def test_repeated_pair_claim_is_rejected_but_resume_token_remains_valid():
     code = sessions.create_web_pair_code()
     conn = DummyConnection('idempotent-token-browser')
     sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
     first = sessions.claim_waiting_workspace(code, 'same-transport')
-    second = sessions.claim_waiting_workspace(code, 'same-transport')
     assert first['resume_token']
-    assert second['resume_token'] == first['resume_token']
+    with pytest.raises(ValueError, match='already been used'):
+        sessions.claim_waiting_workspace(code, 'same-transport')
+    assert sessions.resolve_resume_token(first['resume_token']) is not None
 
 
 def test_resume_token_claim_returns_proven_durable_token(monkeypatch):
@@ -643,7 +641,7 @@ def test_pair_code_stays_short_lived_after_durable_lease_created(monkeypatch):
     item = sessions._WEB_PAIR[sessions._pair_key(code)]
     item['pair_expires_at'] = sessions.time.time() - 1
     assert sessions.resolve_web_pair_code(code) is None
-    with pytest.raises(ValueError, match='expired workspace pairing code'):
+    with pytest.raises(ValueError, match='workspace pairing code'):
         sessions.claim_waiting_workspace(code, 'session-B')
     assert sessions.resolve_resume_token(token) is not None
 
@@ -770,7 +768,7 @@ async def test_mixed_local_tools_respect_read_only_mode():
     assert commit['structuredContent']['code'] == 'WORKSPACE_READ_ONLY'
 
 
-def test_workspace_join_id_persists_for_lease_lifetime(monkeypatch):
+def test_workspace_join_id_is_consumed_when_lease_is_claimed(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
     code = sessions.create_web_pair_code()
@@ -778,43 +776,38 @@ def test_workspace_join_id_persists_for_lease_lifetime(monkeypatch):
     sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
     first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
     assert first['lease_id']
-    resolved = sessions.resolve_web_pair_code(code)
-    assert resolved is not None
-    assert resolved['lease_id'] == first['lease_id']
-    assert resolved['pair_expires_at'] > sessions.time.time() + sessions.PAIR_TTL_SECONDS
+    assert sessions.resolve_web_pair_code(code) is None
+    assert sessions.resolve_resume_token(first['resume_token']) is not None
 
 
-def test_workspace_join_id_can_add_second_client_alias(monkeypatch):
+def test_consumed_join_id_cannot_add_second_client_alias(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
     code = sessions.create_web_pair_code()
     conn = DummyConnection('join-browser')
     sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
     first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
-    second = sessions.claim_waiting_workspace(code, 'telegram-B')
+    with pytest.raises(ValueError, match='already been used'):
+        sessions.claim_waiting_workspace(code, 'telegram-B')
+    second = sessions.claim_workspace_with_resume_token(first['resume_token'], 'telegram-B')
     assert second['lease_id'] == first['lease_id']
-    assert sessions.workspace_status('telegram-B')['access_mode'] == 'write'
 
 
-def test_workspace_join_id_restores_from_redis_after_process_loss(monkeypatch):
+def test_resume_token_restores_lease_from_redis_after_process_loss(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(sessions, '_redis_client', lambda: fake)
     code = sessions.create_web_pair_code()
     conn = DummyConnection('join-browser')
     sessions.register_waiting_workspace(code, conn, mode='write', capabilities=['file_read'])
     first = sessions.claim_waiting_workspace(code, 'chatgpt-A')
+    token = first['resume_token']
     lease_id = first['lease_id']
-
     sessions._SESSION_WORKSPACE.clear()
     sessions._WEB_PAIR.clear()
     sessions._RESUME_INDEX.clear()
-
-    restored = sessions.resolve_web_pair_code(code)
-    assert restored is not None
+    assert sessions.resolve_web_pair_code(code) is None
+    restored = sessions.claim_workspace_with_resume_token(token, 'telegram-after-restart')
     assert restored['lease_id'] == lease_id
-    second = sessions.claim_waiting_workspace(code, 'telegram-after-restart')
-    assert second['lease_id'] == lease_id
-    assert sessions.workspace_status('telegram-after-restart')['state'] == 'ready'
 
 
 def test_active_mcp_session_is_not_expired_by_creation_age():
@@ -1029,7 +1022,7 @@ def test_display_result_normalizes_desktop_data_url_to_native_image_content():
     assert result['structuredContent']['width'] == 800
     assert result['structuredContent']['height'] == 600
     assert result['structuredContent']['source'] == 'primary-screen'
-    assert 'data_url' not in result['structuredContent']
+    assert result['structuredContent']['data_url'] == 'data:image/png;base64,' + encoded
 
 
 def test_display_result_normalizes_raw_base64_and_preserves_jpeg_mime():
@@ -1049,7 +1042,23 @@ def test_display_result_normalizes_raw_base64_and_preserves_jpeg_mime():
     assert result['content'][0]['mimeType'] == 'image/jpeg'
     assert result['content'][0]['data'] == encoded
     assert result['structuredContent']['source'] == 'android-screen'
-    assert 'data' not in result['structuredContent']
+    assert result['structuredContent']['data_url'] == 'data:image/jpeg;base64,' + encoded
+
+
+def test_display_result_mirrors_native_image_block_into_structured_data_url_for_connectors():
+    import base64
+    from app.services.mcp_workspace_bridge import _normalize_display_tool_result
+
+    encoded = base64.b64encode(b'\xff\xd8connector-frame\xff\xd9').decode('ascii')
+    raw = {
+        'content': [{'type': 'image', 'data': encoded, 'mimeType': 'image/jpeg'}],
+        'structuredContent': {'ok': True, 'frame_id': 7},
+        'isError': False,
+    }
+    result = _normalize_display_tool_result('computer_screenshot', raw)
+    assert result['content'][0]['data'] == encoded
+    assert result['structuredContent']['mimeType'] == 'image/jpeg'
+    assert result['structuredContent']['data_url'] == 'data:image/jpeg;base64,' + encoded
 
 
 def test_display_result_rejects_malformed_base64_without_echoing_payload():
@@ -1155,6 +1164,53 @@ async def test_browser_remote_compute_is_intercepted_by_triforce_sandbox(monkeyp
     assert conn.calls == []
 
 
+
+@pytest.mark.asyncio
+async def test_browser_remote_compute_can_dispatch_to_feature_gated_openshell(monkeypatch):
+    from app.services import mcp_workspace_bridge as bridge
+    from app.services import workspace_openshell_sandbox as sandbox
+
+    conn = DummyConnection('browser-openshell-compute')
+    conn.share_manifest = {
+        'resources': [
+            {'type': 'workspace', 'enabled': True, 'mode': 'read_write'},
+            {'type': 'compute', 'enabled': True, 'runtime': 'triforce_openshell', 'available': True},
+        ],
+        'grants': [
+            {'resource': 'workspace', 'action': 'read'},
+            {'resource': 'workspace', 'action': 'write'},
+            {'resource': 'compute', 'action': 'execute'},
+        ],
+    }
+    seen = {}
+
+    async def fake_openshell_compute(**kwargs):
+        seen.update(kwargs)
+        return {
+            'content': [{'type': 'text', 'text': 'openshell-ok'}],
+            'structuredContent': {'ok': True, 'backend': 'triforce_openshell'},
+            'isError': False,
+        }
+
+    monkeypatch.setattr(sandbox, 'execute_openshell_compute', fake_openshell_compute)
+    sessions.bind_workspace(
+        'session-openshell-compute',
+        conn,
+        mode='write',
+        capabilities=['file_read', 'file_edit', 'file_ops', 'compute_execute'],
+    )
+    req = DummyRequest('session-openshell-compute')
+    result = await bridge.call_public_local_tool(req, 'compute_execute', {'command': 'python -V', 'cwd': '.'})
+
+    assert result['isError'] is False
+    assert result['structuredContent']['backend'] == 'triforce_openshell'
+    assert seen['connection'] is conn
+    assert seen['mode'] == 'write'
+    assert seen['arguments']['command'] == 'python -V'
+    assert 'compute_execute' in seen['capabilities']
+    assert conn.calls == []
+
+
 @pytest.mark.asyncio
 async def test_portable_device_read_operation_allowed_in_read_only_binding():
     conn = DummyConnection()
@@ -1242,7 +1298,7 @@ def test_live_vision_result_normalizes_cached_jpeg_to_native_image_content():
     assert result['structuredContent']['frame_id'] == 42
     assert result['structuredContent']['scene_id'] == 9
     assert result['structuredContent']['frame_age_ms'] == 17
-    assert 'data' not in result['structuredContent']
+    assert result['structuredContent']['data_url'] == 'data:image/jpeg;base64,' + encoded
 
 
 @pytest.mark.asyncio
@@ -1303,6 +1359,14 @@ async def test_cached_shell_device_alias_still_enforces_live_capability_gate():
     assert conn.calls == []
 
 
+def test_cached_shell_device_info_alias_is_read_only_compatible():
+    from app.services.mcp_workspace_bridge import _device_tool_from_shell_alias
+
+    tool, arguments = _device_tool_from_shell_alias('shell', {'command': '@device device_info {}'})
+    assert tool == 'device_info'
+    assert arguments == {}
+
+
 def test_cached_shell_device_alias_rejects_unknown_target():
     from app.services.mcp_workspace_bridge import _device_tool_from_shell_alias
 
@@ -1316,3 +1380,109 @@ def test_workspace_socket_ticket_subprotocol_parser_ignores_base_protocol():
     headers = {"sec-websocket-protocol": "ailinux-workspace-v1, ailinux-ticket.ABCD-1234-EF56"}
     assert _workspace_ticket_from_subprotocol(headers) == "ABCD-1234-EF56"
     assert _workspace_ticket_from_subprotocol({"sec-websocket-protocol": "ailinux-workspace-v1"}) == ""
+
+
+
+def test_workspace_transport_ticket_accepts_native_header():
+    from app.routes.mcp_node import _workspace_transport_ticket
+
+    headers = {"x-ailinux-socket-ticket": "abcd-1234-ef56"}
+    assert _workspace_transport_ticket(headers) == "ABCD-1234-EF56"
+
+
+def test_workspace_transport_ticket_prefers_browser_subprotocol():
+    from app.routes.mcp_node import _workspace_transport_ticket
+
+    headers = {
+        "sec-websocket-protocol": "ailinux-workspace-v1, ailinux-ticket.BROWSER-1234",
+        "x-ailinux-socket-ticket": "native-5678",
+    }
+    assert _workspace_transport_ticket(headers) == "BROWSER-1234"
+
+
+def test_webmcp_setup_html_uses_content_fingerprint_for_mutable_assets(tmp_path, monkeypatch):
+    from app.routes.mcp import _webmcp_build_key, _workspace_setup_html
+
+    web = tmp_path / "apps" / "web"
+    web.mkdir(parents=True)
+    (web / "index.html").write_text(
+        '<html><head><link rel="stylesheet" href="/v1/mcp/web/styles.css?v=old">'
+        '<link rel="manifest" href="/v1/mcp/manifest.webmanifest?v=old"></head>'
+        '<body><script src="/v1/mcp/web/app.js?v=old"></script></body></html>',
+        encoding="utf-8",
+    )
+    (web / "styles.css").write_text("body{}", encoding="utf-8")
+    (web / "app.js").write_text("console.log('one')", encoding="utf-8")
+    (web / "pyodide-worker.js").write_text("self.onmessage=()=>{}", encoding="utf-8")
+    (web / "sw.js").write_text("self.addEventListener('fetch',()=>{})", encoding="utf-8")
+    monkeypatch.setenv("AILINUX_HELPER_SOURCE", str(tmp_path))
+
+    first = _webmcp_build_key()
+    html = _workspace_setup_html()
+    assert f'/v1/mcp/web/app.js?v={first}' in html
+    assert f'/v1/mcp/web/styles.css?v={first}' in html
+    assert f'/v1/mcp/manifest.webmanifest?v={first}' in html
+    assert f'<meta name="ailinux-webmcp-build" content="{first}">' in html
+
+    (web / "app.js").write_text("console.log('two')", encoding="utf-8")
+    assert _webmcp_build_key() != first
+
+
+def test_webmcp_mutable_asset_headers_disable_browser_and_cdn_caches():
+    from app.routes.mcp import _webmcp_no_store_headers
+
+    headers = _webmcp_no_store_headers()
+    assert "no-store" in headers["Cache-Control"]
+    assert headers["CDN-Cache-Control"] == "no-store"
+    assert headers["Cloudflare-CDN-Cache-Control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_successful_workspace_pair_queues_tools_list_changed_notification():
+    import asyncio
+    from app.routes import mcp as mcp_route
+
+    session_id = "tool-refresh-session"
+    previous = mcp_route._mcp_sessions.pop(session_id, None)
+    try:
+        mcp_route._mcp_sessions[session_id] = {
+            "created": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            "last_seen": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            "queue": asyncio.Queue(),
+            "initialized": True,
+        }
+        result = {"structuredContent": {"ok": True, "connected": True}, "isError": False}
+        assert mcp_route._workspace_call_changes_tool_inventory("workspace_pair", {"code": "redacted"}, result) is True
+        assert await mcp_route._queue_tools_list_changed(session_id) is True
+        notice = mcp_route._mcp_sessions[session_id]["queue"].get_nowait()
+        assert notice == {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
+    finally:
+        mcp_route._mcp_sessions.pop(session_id, None)
+        if previous is not None:
+            mcp_route._mcp_sessions[session_id] = previous
+
+
+def test_workspace_inventory_refresh_only_fires_for_successful_state_changes():
+    from app.routes import mcp as mcp_route
+
+    ok = {"structuredContent": {"ok": True, "connected": True}, "isError": False}
+    error = {"structuredContent": {"ok": False}, "isError": True}
+    assert mcp_route._workspace_call_changes_tool_inventory("workspace_status", {"workspace_id": "redacted"}, ok) is True
+    assert mcp_route._workspace_call_changes_tool_inventory("workspace_status", {}, ok) is False
+    assert mcp_route._workspace_call_changes_tool_inventory("aihelper_pair", {"action": "disconnect"}, ok) is True
+    assert mcp_route._workspace_call_changes_tool_inventory("workspace_pair", {}, error) is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_only_tool_without_lease_skips_v4_error_path(monkeypatch):
+    from app.routes import mcp as mcp_route
+
+    async def forbidden_v4(*_args, **_kwargs):
+        raise AssertionError("workspace-only tool must not enter v4 dispatch")
+
+    monkeypatch.setattr(mcp_route, "call_v4_tool", forbidden_v4)
+    result = await mcp_route.handle_tools_call({"name": "file_tree", "arguments": {"path": "."}})
+
+    assert result["isError"] is True
+    assert result["structuredContent"]["code"] == "workspace_not_paired"
+    assert result["structuredContent"]["source"] == "workspace_bridge"

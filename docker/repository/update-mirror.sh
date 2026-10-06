@@ -487,6 +487,7 @@ step_generate_packages() {
       log "Running dpkg-scanpackages + apt-ftparchive in container for ${repo_name}..."
       cmd="
         set -euo pipefail
+        umask 022
         cd ${repo_path_container}
         shopt -s nullglob
 
@@ -591,12 +592,14 @@ EOF
               gzip -9c \"\$out_dir/Packages\" > \"\$out_dir/Packages.gz\"
               xz -c \"\$out_dir/Packages\" > \"\$out_dir/Packages.xz\"
               write_binary_release \"\$out_dir/Release\" \"\$suite\" \"\$component\" \"\$arch\"
+              chmod 0644 \"\$out_dir/Packages\" \"\$out_dir/Packages.gz\" \"\$out_dir/Packages.xz\" \"\$out_dir/Release\"
             done
 
             source_dir=\"\$component_dir/source\"
             mkdir -p \"\$source_dir\"
             : > \"\$source_dir/Packages\"
             gzip -9c \"\$source_dir/Packages\" > \"\$source_dir/Packages.gz\"
+            chmod 0644 \"\$source_dir/Packages\" \"\$source_dir/Packages.gz\"
           done
 
           components_joined=\$(printf '%s ' \"\${components[@]}\" | sed 's/ \$//')
@@ -711,6 +714,44 @@ step_verify_local_repo() {
         fi
         rm -f "$remote_tmp"
         log_ok "Public repo.ailinux.me serves the freshly generated Packages.xz"
+
+        # Kernel meta packages are tiny but critical: fetch the canonical public
+        # URL without a cache-busting query and verify its bytes too. This catches
+        # stale CDN objects where Packages already advertises a new SHA256 while
+        # the package URL still serves an older file under the same name.
+        local meta_pkg="ailinux-kernel-ai-gaming"
+        local meta_file="" meta_version="" candidate candidate_version
+        local public_pkg_url public_pkg_tmp local_pkg_sha public_pkg_sha
+        shopt -s nullglob
+        for candidate in "$local_repo"/pool/main/a/ailinux-kernel/${meta_pkg}_*_amd64.deb; do
+            candidate_version="$(dpkg-deb -f "$candidate" Version 2>/dev/null || true)"
+            [[ -n "$candidate_version" ]] || continue
+            if [[ -z "$meta_version" ]] || dpkg --compare-versions "$candidate_version" gt "$meta_version"; then
+                meta_version="$candidate_version"
+                meta_file="$candidate"
+            fi
+        done
+        shopt -u nullglob
+
+        if [[ -n "$meta_file" ]]; then
+            public_pkg_url="$public_base/repo.ailinux.me/${meta_file#${local_repo}/}"
+            public_pkg_tmp="$(mktemp)"
+            if ! curl -fsSL --connect-timeout 10 --max-time 30 "$public_pkg_url" -o "$public_pkg_tmp"; then
+                rm -f "$public_pkg_tmp"
+                log_err "Public kernel meta verification failed: could not fetch $public_pkg_url"
+                return 1
+            fi
+            local_pkg_sha="$(sha256sum "$meta_file" | awk '{print $1}')"
+            public_pkg_sha="$(sha256sum "$public_pkg_tmp" | awk '{print $1}')"
+            rm -f "$public_pkg_tmp"
+            if [[ "$local_pkg_sha" != "$public_pkg_sha" ]]; then
+                log_err "Public kernel meta hash mismatch for $meta_version: local=$local_pkg_sha public=$public_pkg_sha"
+                return 1
+            fi
+            log_ok "Public kernel meta $meta_version matches local SHA256 ($local_pkg_sha)"
+        else
+            log_warn "No kernel meta package found for public payload verification"
+        fi
     else
         log_warn "curl not installed; skipped public repository byte-for-byte verification"
     fi

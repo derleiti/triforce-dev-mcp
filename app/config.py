@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     docker_log_tail: int = Field(default=100, ge=10, le=5000, validation_alias="DOCKER_LOG_TAIL")
     docker_network_name: str = Field(default="triforce-net", validation_alias="DOCKER_NETWORK_NAME")
 
+    # Optional OpenShell-backed disposable compute. This stays disabled unless
+    # explicitly enabled on a compute node; the existing Docker backend remains
+    # the default runtime for AILinux Helper compute shares.
+    openshell_compute_enabled: bool = Field(default=False, validation_alias="TRIFORCE_OPENSHELL_COMPUTE_ENABLED")
+    openshell_cli: str = Field(default="openshell", validation_alias="TRIFORCE_OPENSHELL_CLI")
+    openshell_image: str = Field(default="python:3.13-slim", validation_alias="TRIFORCE_OPENSHELL_IMAGE")
+    openshell_cpu: str = Field(default="2", validation_alias="TRIFORCE_OPENSHELL_CPU")
+    openshell_memory: str = Field(default="2Gi", validation_alias="TRIFORCE_OPENSHELL_MEMORY")
+
     docker_redis_image: str = Field(default="redis:8.10-alpine", validation_alias="DOCKER_REDIS_IMAGE")
     docker_redis_container: str = Field(default="triforce-redis", validation_alias="DOCKER_REDIS_CONTAINER")
     docker_redis_bind: str = Field(default="127.0.0.1", validation_alias="DOCKER_REDIS_BIND")
@@ -184,7 +193,7 @@ class Settings(BaseSettings):
     )
 
     # MCP Mesh WebSocket
-    mcp_ws_enabled: bool = Field(default=True, validation_alias="MCP_WS_ENABLED")
+    mcp_ws_enabled: bool = Field(default=False, validation_alias="MCP_WS_ENABLED")
     mcp_ws_host: str = Field(default="0.0.0.0", validation_alias="MCP_WS_HOST")
     mcp_ws_port: int = Field(default=44433, validation_alias="MCP_WS_PORT")
     mcp_ws_enable_ipv6: bool = Field(default=False, validation_alias="MCP_WS_ENABLE_IPV6")
@@ -233,10 +242,17 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
 
+    # Mercatai autonomous agent marketplace
+    mercatai_api_key: str | None = Field(default=None, validation_alias="MERCATAI_API_KEY")
+    mercatai_agent_id: str | None = Field(default=None, validation_alias="MERCATAI_AGENT_ID")
+    mercatai_agent_uuid: str | None = Field(default=None, validation_alias="MERCATAI_AGENT_UUID")
+    mercatai_developer_api_key: str | None = Field(default=None, validation_alias="MERCATAI_DEVELOPER_API_KEY")
+    mercatai_base_url: str = Field(default="https://mercatai.eu", validation_alias="MERCATAI_BASE_URL")
+    mercatai_timeout_seconds: int = Field(default=30, ge=5, le=120, validation_alias="MERCATAI_TIMEOUT_SECONDS")
+
     # Mistral
     mistral_api_key: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
     mistral_organisation_id: str | None = Field(default=None, validation_alias="MISTRAL_ORG_ID")
-    codestral_api_key: str | None = Field(default=None, validation_alias="CODESTRAL_API_KEY")
     # Native Mistral Agents / Conversations API
     mistral_agent_id: Optional[str] = Field(
         default="ag:75b2b27f:20251006:untitled-agent:8f02c404",

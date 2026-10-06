@@ -6,13 +6,14 @@ x-logging: &default_logging
 
 services:
   n8n:
-    image: ${N8N_IMAGE:-n8nio/n8n:2.34.6}
+    image: ${N8N_IMAGE:-n8nio/n8n:2.39.5}
     container_name: n8n
     logging: *default_logging
     pids_limit: ${N8N_PIDS_LIMIT:-512}
     restart: unless-stopped
     ports:
-      - "${N8N_PORT:-5678}:5678"
+      - "172.17.0.1:${N8N_PORT:-5678}:5678"
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
     environment:
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
@@ -62,7 +63,7 @@ services:
 
 
   n8n-runners:
-    image: ${N8N_RUNNERS_IMAGE:-n8nio/runners:2.34.6}
+    image: ${N8N_RUNNERS_IMAGE:-n8nio/runners:2.39.5}
     container_name: n8n-runners
     logging: *default_logging
     pids_limit: ${N8N_RUNNERS_PIDS_LIMIT:-256}
