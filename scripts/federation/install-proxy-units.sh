@@ -3,7 +3,7 @@ set -euo pipefail
 
 MODE=install
 BIND_IP=""
-BACKEND="${TRIFORCE_FEDERATION_BACKEND:-127.0.0.1:9100}"
+BACKEND="${TRIFORCE_FEDERATION_BACKEND:-172.17.0.1:9000}"
 
 usage() {
   echo "Usage: $0 [--print] [--bind-ip WG_IP] [--backend HOST:PORT]" >&2

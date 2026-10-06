@@ -111,27 +111,40 @@ class MeshBrainV2:
         
         # === OLLAMA NODES ===
         self.ollama_nodes = {
-            "hetzner": OllamaNode(
-                provider_id="hetzner", 
-                provider_type=ProviderType.OLLAMA, 
-                priority=10, 
-                cost_tier=1, 
-                speed_tier=4, 
-                quality_tier=3,
-                host="127.0.0.1", 
-                port=11434,
-                default_model="qwen2.5-coder:7b"
-            ),
+            # Prefer compute away from the public hub. Hetzner remains the most
+            # reliable fallback, but backup should absorb ordinary Ollama work.
             "backup": OllamaNode(
-                provider_id="backup", 
+                provider_id="backup",
                 provider_type=ProviderType.OLLAMA,
-                priority=8, 
-                cost_tier=1, 
-                speed_tier=3, 
+                priority=12,
+                cost_tier=1,
+                speed_tier=4,
                 quality_tier=3,
-                host="10.10.0.3", 
+                host="10.10.0.3",
                 port=11434,
-                default_model="llama3.2:3b"
+                default_model="qwen3.5:cloud"
+            ),
+            "zombie-pc": OllamaNode(
+                provider_id="zombie-pc",
+                provider_type=ProviderType.OLLAMA,
+                priority=11,
+                cost_tier=1,
+                speed_tier=4,
+                quality_tier=3,
+                host="10.10.0.2",
+                port=11434,
+                default_model="hf-gemma-4-e4b-uncensored-hauhaucs-aggressive:latest"
+            ),
+            "hetzner": OllamaNode(
+                provider_id="hetzner",
+                provider_type=ProviderType.OLLAMA,
+                priority=7,
+                cost_tier=1,
+                speed_tier=4,
+                quality_tier=3,
+                host="127.0.0.1",
+                port=11434,
+                default_model="qwen3.5:cloud"
             )
         }
         
@@ -237,36 +250,49 @@ class MeshBrainV2:
         
     def select_provider(self, strategy: Strategy = Strategy.FALLBACK,
                        prefer_local: bool = True,
-                       provider_type: ProviderType = None) -> Optional[Provider]:
-        """Select best provider based on strategy"""
-        
+                       provider_type: ProviderType = None,
+                       model: str = None,
+                       exclude: Optional[set[str]] = None) -> Optional[Provider]:
+        """Select the best currently usable provider.
+
+        Exclusions are used by retry/failover so a failed high-priority node
+        cannot be selected repeatedly. For Ollama nodes, a discovered model
+        inventory is authoritative for model-specific routing.
+        """
+        excluded = set(exclude or ())
         candidates = []
-        
-        # Add healthy Ollama nodes first if prefer_local
+
+        def ollama_eligible(node: OllamaNode) -> bool:
+            if not node.healthy or node.provider_id in excluded:
+                return False
+            if provider_type is not None and provider_type != ProviderType.OLLAMA:
+                return False
+            if model and node.models and model not in node.models:
+                return False
+            return True
+
         if prefer_local:
             for node in self.ollama_nodes.values():
-                if node.healthy:
-                    if provider_type is None or provider_type == ProviderType.OLLAMA:
-                        candidates.append(node)
-        
-        # Add API providers
+                if ollama_eligible(node):
+                    candidates.append(node)
+
         for provider in self.providers.values():
-            if provider.healthy:
+            if provider.healthy and provider.provider_id not in excluded:
                 if provider_type is None or provider_type == provider.provider_type:
                     candidates.append(provider)
-        
-        # Add Ollama at end if not prefer_local
+
         if not prefer_local:
             for node in self.ollama_nodes.values():
-                if node.healthy and node not in candidates:
-                    if provider_type is None or provider_type == ProviderType.OLLAMA:
-                        candidates.append(node)
-        
+                if node not in candidates and ollama_eligible(node):
+                    candidates.append(node)
+
         if not candidates:
             logger.warning("No healthy providers available!")
             return None
             
         if strategy == Strategy.FALLBACK:
+            # Priority encodes preferred placement. Model availability still
+            # gets enforced by the Ollama request path after health discovery.
             return sorted(candidates, key=lambda p: -p.priority)[0]
             
         elif strategy == Strategy.ROUND_ROBIN:
@@ -311,14 +337,25 @@ class MeshBrainV2:
         """
         await self.initialize()
         
+        # If an explicit model is known on Ollama, keep failover inside the
+        # Ollama node pool. This avoids sending an Ollama-only model name to an
+        # unrelated API provider during retries.
+        routed_type = None
+        if model and any(
+            node.healthy and model in node.models for node in self.ollama_nodes.values()
+        ):
+            routed_type = ProviderType.OLLAMA
+
         # Force specific provider?
         if provider_id:
             provider = self.ollama_nodes.get(provider_id) or self.providers.get(provider_id)
             if not provider:
                 return {"error": f"Unknown provider: {provider_id}"}
         else:
-            provider = self.select_provider(strategy, prefer_local)
-            
+            provider = self.select_provider(
+                strategy, prefer_local, provider_type=routed_type, model=model
+            )
+
         if not provider:
             return {"error": "No healthy providers available"}
         
@@ -329,8 +366,11 @@ class MeshBrainV2:
         while retries < max_retries:
             if provider.provider_id in tried_providers:
                 # Get next provider
-                provider = self.select_provider(strategy, prefer_local)
-                if not provider or provider.provider_id in tried_providers:
+                provider = self.select_provider(
+                    strategy, prefer_local, provider_type=routed_type,
+                    model=model, exclude=tried_providers
+                )
+                if not provider:
                     break
                     
             tried_providers.add(provider.provider_id)
@@ -363,8 +403,11 @@ class MeshBrainV2:
                 logger.error(f"Provider {provider.provider_id} failed: {e}")
             
             retries += 1
-            provider = self.select_provider(strategy, prefer_local)
-            
+            provider = self.select_provider(
+                strategy, prefer_local, provider_type=routed_type,
+                model=model, exclude=tried_providers
+            )
+
         return {
             "error": f"All providers failed after {retries} retries. Last error: {last_error}",
             "_tried": list(tried_providers)

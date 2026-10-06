@@ -40,7 +40,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run ${{ matrix.command }} -- --publish never
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch'
         with:
           retention-days: 1

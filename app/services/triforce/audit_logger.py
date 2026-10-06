@@ -23,6 +23,7 @@ from typing import Optional, Dict, Any, List, Set
 from pathlib import Path
 
 from app.paths import LOG_DIR
+from app.utils.log_formatters import redact_sensitive, sanitize_log_data
 import logging
 
 logger = logging.getLogger("ailinux.triforce.audit")
@@ -58,9 +59,17 @@ class AuditEntry:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
+        """Convert to a log-safe dictionary."""
         data = asdict(self)
         data["level"] = self.level.value
+        for field_name in ("error_message",):
+            if data.get(field_name) is not None:
+                data[field_name] = redact_sensitive(data[field_name])
+        for field_name in ("params", "metadata"):
+            if data.get(field_name) is not None:
+                data[field_name] = sanitize_log_data(data[field_name])
+        if data.get("session_id") not in (None, "unknown"):
+            data["session_id"] = "[REDACTED]"
         return data
 
     def to_json(self) -> str:
@@ -265,22 +274,9 @@ class AuditLogger:
         )
 
     def _sanitize_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove sensitive data from params"""
-        if not params:
-            return {}
-
-        sensitive_keys = {"password", "api_key", "secret", "token", "credential"}
-        safe = {}
-
-        for key, value in params.items():
-            if any(s in key.lower() for s in sensitive_keys):
-                safe[key] = "[REDACTED]"
-            elif isinstance(value, str) and len(value) > 500:
-                safe[key] = value[:500] + "...[truncated]"
-            else:
-                safe[key] = value
-
-        return safe
+        """Return the same recursive log-safe representation used by MCP logging."""
+        safe = sanitize_log_data(params or {})
+        return safe if isinstance(safe, dict) else {}
 
     async def _flush(self):
         """Flush buffer to disk"""

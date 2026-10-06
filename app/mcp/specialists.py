@@ -342,29 +342,6 @@ SPECIALISTS: Dict[str, ModelSpecialist] = {
         notes="Strong European AI model with good multilingual support."
     ),
 
-    "codestral": ModelSpecialist(
-        id="mistral/codestral",
-        name="Codestral",
-        provider="mistral",
-        description="Mistral's specialized coding model",
-        capabilities={
-            SpecialistCapability.CODE_GENERATION,
-            SpecialistCapability.CODE_REVIEW,
-            SpecialistCapability.DEBUGGING,
-            SpecialistCapability.FAST_RESPONSE,
-        },
-        optimal_tasks=[
-            "code generation",
-            "code completion",
-            "refactoring"
-        ],
-        context_length=32768,
-        response_speed="fast",
-        cost_tier="low",
-        complexity_range=(TaskComplexity.SIMPLE, TaskComplexity.COMPLEX),
-        notes="Optimized for coding tasks."
-    ),
-
     # German Language Specialist
     "gpt-oss": ModelSpecialist(
         id="gpt-oss:20b-cloud",

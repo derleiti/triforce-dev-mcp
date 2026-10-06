@@ -2,6 +2,7 @@ from __future__ import annotations
 from .widget_handlers import handle_weather, handle_crypto_prices, handle_stock_indices, handle_market_overview, handle_google_deep_search, handle_current_time, handle_list_timezones
 
 import base64
+import hashlib
 import inspect
 import logging
 import os
@@ -176,10 +177,11 @@ def _helper_release_catalog() -> dict:
         artifact = release_root / filename
         expected_size = int(meta.get("size") or 0)
         available = bool(filename and artifact.is_file() and (not expected_size or artifact.stat().st_size == expected_size))
+        artifact_version = str(meta.get("version") or version)
         catalog[str(platform)] = {
             "available": available,
             "platform": str(platform),
-            "version": version,
+            "version": artifact_version,
             "filename": filename,
             "size": expected_size,
             "media_type": str(meta.get("media_type") or "application/octet-stream"),
@@ -200,13 +202,56 @@ def _helper_release_catalog() -> dict:
     return catalog
 
 
+def _webmcp_build_key() -> str:
+    """Fingerprint the browser executor bundle for cache-safe public asset URLs."""
+    root = _helper_web_root()
+    digest = hashlib.sha256()
+    for name in ("index.html", "styles.css", "app.js", "pyodide-worker.js", "sw.js"):
+        path = root / name
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
 def _workspace_setup_html() -> str:
-    """Load the canonical WebMCP document from AILinux Helper source."""
+    """Load WebMCP and bind mutable browser assets to their content fingerprint."""
     path = _helper_web_root() / "index.html"
     try:
-        return path.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8")
+        build = _webmcp_build_key()
+        for asset in ("/v1/mcp/web/styles.css", "/v1/mcp/web/app.js", "/v1/mcp/manifest.webmanifest"):
+            content = re.sub(re.escape(asset) + r"\?v=[^\"'\s>]+", f"{asset}?v={build}", content)
+        marker = '<meta name="ailinux-webmcp-build"'
+        if marker not in content:
+            content = content.replace("</head>", f'<meta name="ailinux-webmcp-build" content="{build}"></head>', 1)
+        return content
     except Exception as exc:
         raise RuntimeError(f"WebMCP index unavailable: {path}") from exc
+
+
+def _webmcp_handoff_build_key() -> str:
+    """Fingerprint the browser-to-native handoff document and assets."""
+    root = _helper_web_root()
+    digest = hashlib.sha256()
+    for name in ("handoff.html", "handoff.css", "handoff.js"):
+        path = root / name
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def _webmcp_no_store_headers() -> Dict[str, str]:
+    """Keep mutable WebMCP control assets out of browser and CDN caches."""
+    return {
+        "Cache-Control": "no-store, max-age=0, must-revalidate",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+        "Pragma": "no-cache",
+    }
 
 
 def _workspace_setup_contract_source() -> str:
@@ -241,6 +286,67 @@ def _build_tool_result(result: Any, *, is_error: bool = False) -> Dict[str, Any]
         "structuredContent": structured_content,
         "isError": is_error,
     }
+
+
+def _is_dual_surface_tool(tool_name: str) -> bool:
+    """True for tools that exist BOTH server-side (v4) and on a paired workspace.
+
+    For these eight names (shell, git, code_*, file_ops, file_read) the target
+    machine depends solely on whether this MCP session holds a workspace lease.
+    The name alone does not reveal it, so results get tagged with
+    ``execution_target``. Derived at call time from the live registries, so the
+    set cannot drift out of sync with a hand-maintained list.
+    """
+    try:
+        from ..services.mcp_workspace_bridge import LOCAL_TOOL_NAMES
+        from ..mcp.handlers_v4 import get_tool_handler as _get_v4_handler
+    except Exception:  # pragma: no cover - transparency must never break a call
+        return False
+    return tool_name in LOCAL_TOOL_NAMES and _get_v4_handler(tool_name) is not None
+
+
+def _tag_execution_target(result: Any, tool_name: str, target: str) -> Any:
+    """Tag a raw handler result before serialization (server-side path).
+
+    Applied pre-serialization so the text block and structuredContent produced
+    by _build_tool_result stay byte-identical in meaning.
+    """
+    if not isinstance(result, dict) or "execution_target" in result:
+        return result
+    if _is_dual_surface_tool(tool_name):
+        result["execution_target"] = target
+    return result
+
+
+def _tag_local_execution_target(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
+    """Tag an already-built MCP result coming back from the workspace bridge.
+
+    The bridge returns a finished MCP envelope, so both representations are
+    updated together. Non-JSON text blocks (e.g. screenshot payloads) and image
+    blocks are left untouched.
+    """
+    if not isinstance(result, dict) or not _is_dual_surface_tool(tool_name):
+        return result
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict) or "execution_target" in structured:
+        return result
+    structured["execution_target"] = "local_workspace"
+    content = result.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "text"):
+                continue
+            try:
+                parsed = json.loads(block.get("text") or "")
+            except (ValueError, TypeError):
+                break
+            if isinstance(parsed, dict):
+                parsed["execution_target"] = "local_workspace"
+                block["text"] = json.dumps(
+                    parsed, separators=(",", ":"), ensure_ascii=False, default=str
+                )
+            break
+    return result
 
 
 def _maybe_block_write_tool(
@@ -324,6 +430,28 @@ def _finish_tools_list(
         try:
             from app.services.mcp_workspace_bridge import merge_workspace_tools
             filtered_tools = merge_workspace_tools(filtered_tools, request)
+            # Re-apply server-tool authorization after the workspace/public
+            # overlay, but do not feed explicitly leased local-workspace tools
+            # back through the server RBAC filter. Local tools are authorized by
+            # the workspace bridge from the live capability + share manifest;
+            # filtering them here makes a valid Helper lease undiscoverable.
+            local_workspace_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") == "local_workspace"
+            ]
+            server_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") != "local_workspace"
+            ]
+            allowed_server_names = {
+                str(tool.get("name") or "")
+                for tool in _filter_tools_for_client(server_tools, request)
+            }
+            filtered_tools = [
+                tool for tool in filtered_tools
+                if str(tool.get("x_execution") or "") == "local_workspace"
+                or str(tool.get("name") or "") in allowed_server_names
+            ]
             # Workspace/public overlays may only narrow or decorate the requested
             # discovery view. They must never inflate a semantic inventory back
             # into the full public catalogue.
@@ -359,9 +487,17 @@ def _finish_tools_list(
 
 
 def _filter_tools_for_client(tools: List[Dict[str, Any]], request: Optional[Request] = None) -> List[Dict[str, Any]]:
-    """Apply normal MCP authorization; ai-coder is an identity, not a deny profile."""
+    """Apply normal MCP authorization plus the claimed web-worker capability profile."""
     if request is None:
         return tools
+    try:
+        from app.mcp.web_worker import filter_restricted_worker_tools, worker_mode_for_request
+        if worker_mode_for_request(request) in {"ticket", "market"}:
+            return filter_restricted_worker_tools(tools, request)
+    except Exception:
+        state = getattr(request, "state", None)
+        if str(getattr(state, "mcp_worker_mode", "") or "") in {"ticket", "market"}:
+            return []
     if is_internal_full_request(request):
         return tools
     return filter_tools_for_external(tools, request=request)
@@ -474,7 +610,11 @@ async def browser_workspace_handoff_landing() -> HTMLResponse:
     path = _helper_web_root() / "handoff.html"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="Workspace handoff page unavailable")
-    return HTMLResponse(path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
+    content = path.read_text(encoding="utf-8")
+    build = _webmcp_handoff_build_key()
+    for asset in ("/v1/mcp/web/handoff.css", "/v1/mcp/web/handoff.js"):
+        content = re.sub(re.escape(asset) + r"\?v=[^\"'\s>]+", f"{asset}?v={build}", content)
+    return HTMLResponse(content, headers=_webmcp_no_store_headers())
 
 
 @public_router.head("/mcp/workspace/android.apk", tags=["MCP"], include_in_schema=False)
@@ -489,7 +629,7 @@ async def webmcp_stylesheet() -> Response:
     if not path.is_file():
         raise HTTPException(status_code=503, detail="WebMCP stylesheet unavailable")
     content = _helper_design_css() + "\n" + path.read_text(encoding="utf-8")
-    return Response(content=content, media_type="text/css", headers={"Cache-Control": "no-store"})
+    return Response(content=content, media_type="text/css", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/handoff.css", tags=["MCP"], include_in_schema=False)
@@ -497,7 +637,7 @@ async def webmcp_handoff_stylesheet() -> Response:
     path = _helper_web_root() / "handoff.css"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="Workspace handoff stylesheet unavailable")
-    return FileResponse(path, media_type="text/css", headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(path, media_type="text/css", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/handoff.js", tags=["MCP"], include_in_schema=False)
@@ -505,7 +645,7 @@ async def webmcp_handoff_script() -> Response:
     path = _helper_web_root() / "handoff.js"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="Workspace handoff script unavailable")
-    return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/app.js", tags=["MCP"], include_in_schema=False)
@@ -513,7 +653,7 @@ async def webmcp_script() -> Response:
     path = _helper_web_root() / "app.js"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="WebMCP script unavailable")
-    return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "no-store"})
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/web/pyodide-worker.js", tags=["MCP"], include_in_schema=False)
@@ -521,7 +661,7 @@ async def webmcp_pyodide_worker() -> Response:
     path = _helper_web_root() / "pyodide-worker.js"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="WebMCP worker unavailable")
-    return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(path, media_type="text/javascript", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/pyodide/{version}/{filename}", tags=["MCP"], include_in_schema=False)
@@ -582,24 +722,29 @@ async def download_desktop_workspace_helper(platform: str) -> Response:
 
 @public_router.get("/mcp/manifest.webmanifest", tags=["MCP"], summary="AILinux workspace PWA manifest")
 async def workspace_pwa_manifest() -> JSONResponse:
+    build = _webmcp_build_key()
     return JSONResponse({
         "name": "AILinux Helper",
         "short_name": "AILinux Helper",
         "id": "/v1/mcp",
-        "start_url": "/v1/mcp",
+        "start_url": f"/v1/mcp?app={build}",
         "scope": "/v1/mcp",
         "display": "standalone",
         "background_color": "#0d1117",
         "theme_color": "#0d1117",
         "description": "AILinux cross-platform local MCP companion and workspace executor",
-        "icons": [{"src": "/v1/mcp/helper/icon.png?v=29029", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
-    }, media_type="application/manifest+json", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store"})
+        "icons": [{"src": f"/v1/mcp/helper/icon.png?v={build}", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+    }, media_type="application/manifest+json", headers=_webmcp_no_store_headers())
 
 
 @public_router.get("/mcp/sw.js", tags=["MCP"], summary="AILinux workspace PWA service worker")
 async def workspace_pwa_service_worker() -> Response:
-    script = """'use strict';const CACHE='ailinux-helper-v29029';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/v1/mcp?app=2.90.29')).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('ailinux-workspace-')||k.startsWith('ailinux-helper-'))).map(k=>caches.delete(k)))),self.clients.claim()]));});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||caches.match('/v1/mcp?app=2.90.29'))))});"""
-    return Response(script, media_type="application/javascript", headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "CDN-Cache-Control": "no-store", "Cloudflare-CDN-Cache-Control": "no-store", "Service-Worker-Allowed": "/v1/mcp"})
+    path = _helper_web_root() / "sw.js"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="WebMCP service worker unavailable")
+    headers = _webmcp_no_store_headers()
+    headers["Service-Worker-Allowed"] = "/v1/mcp"
+    return FileResponse(path, media_type="application/javascript", headers=headers)
 
 
 @public_router.get("/.well-known/mcp")
@@ -943,7 +1088,7 @@ async def handle_llm_invoke(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("'message' or 'messages' is required")
     
     if not model_id:
-        model_id = "gemini/gemini-2.0-flash"
+        model_id = os.environ.get("TRIFORCE_DEFAULT_CHAT_MODEL", "groq/groq/compound-mini")
     
     # Auto-prefix: wenn kein Provider angegeben, versuche bekannte Prefixe
     if "/" not in model_id:
@@ -1133,8 +1278,8 @@ async def handle_models_list(_: Dict[str, Any]) -> Dict[str, Any]:
         "video_gen": [],       # Veo 3.1, Sora
         "audio": [],           # Whisper / Voxtral STT, Gemini TTS, Live API, native-audio
         "audio_gen": [],       # Lyria 3, Suno-style music generators
-        "embedding": [],       # gemini-embedding-001, mistral-embed, codestral-embed, BGE
-        "code": [],             # Codestral, DeepSeek-Coder, qwen-coder, codex
+        "embedding": [],       # gemini-embedding-001, mistral-embed, BGE
+        "code": [],             # DeepSeek-Coder, qwen-coder, codex
         "reasoning": [],       # o1/o3, DeepSeek-R1, Magistral, thinking variants
         "function_calling": [], # Models advertising native tool use
         "moderation": [],      # llama-guard, mistral-moderation
@@ -1994,7 +2139,10 @@ async def handle_tools_list(params: Dict[str, Any], request: Optional[Request] =
         # remote_exec, remote_admin) exist and are registered, but a client that
         # sends tools/list without an inventory parameter never learns they are
         # callable, and reports them as "deleted".
-        inventory = "all" if _request_has_full_access(request) else "core"
+        # External/public MCP clients also need the complete canonical non-admin
+        # vocabulary so separate TriForce MCP and WebMCP connectors can coexist in
+        # one AI session without schema drift. Authorization remains call-time.
+        inventory = "all" if request is not None else "core"
     # Check if client wants legacy (v3) tools
     use_legacy = inventory in {"legacy", "v3"} or params.get("legacy", False) or params.get("v3", False)
     
@@ -2752,9 +2900,10 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     if request is not None and tool_name:
         from app.services.mcp_workspace_bridge import call_workspace_tool, should_route_tool_locally
         if should_route_tool_locally(request, str(tool_name)):
-            return await call_workspace_tool(
+            local_result = await call_workspace_tool(
                 request, str(tool_name), arguments if isinstance(arguments, dict) else {}
             )
+            return _tag_local_execution_target(local_result, str(tool_name))
 
     # Resolve unified registry aliases before legacy/v4 normalization.
     from ..mcp.tool_registry_unified import resolve_tool_name_for_call
@@ -2874,12 +3023,43 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
     if not handler and "_" in tool_name:
         handler = tool_map.get(tool_name.replace("_", "."))
 
-    # Try v4 handlers first
+    # Workspace-only tools have no server-side v4 handler by design. Detect
+    # this before entering handlers_v4 so an expected unpaired-workspace state
+    # does not get logged as a backend ERROR.
     if not handler:
+        from ..services.mcp_workspace_bridge import LOCAL_TOOL_NAMES
+        from ..mcp.handlers_v4 import get_tool_handler as _get_v4_handler
+
+        if tool_name in LOCAL_TOOL_NAMES and _get_v4_handler(tool_name) is None:
+            mcp_logger.info(
+                f"workspace tool '{tool_name}' called without a paired workspace lease"
+            )
+            return _build_tool_result(
+                {
+                    "error": (
+                        f"'{tool_name}' executes on your paired local workspace, but this "
+                        "MCP session has no active workspace lease. Pair a workspace or "
+                        "AILinux Helper for THIS session first (workspace_status / "
+                        "aihelper_pair), then retry. A lease paired on a different MCP "
+                        "endpoint or session does not apply here."
+                    ),
+                    "tool_name": tool_name,
+                    "source": "workspace_bridge",
+                    "code": "workspace_not_paired",
+                },
+                is_error=True,
+            )
+
         try:
-            v4_result = await call_v4_tool(tool_name, arguments)
+            v4_handler = _get_v4_handler(tool_name)
+            if v4_handler is not None and _tool_handler_accepts_request(v4_handler):
+                v4_result = await _call_tool_handler(v4_handler, arguments, request)
+            else:
+                v4_result = await call_v4_tool(tool_name, arguments)
             if v4_result is not None:
-                return _build_tool_result(v4_result)
+                return _build_tool_result(
+                    _tag_execution_target(v4_result, tool_name, "server")
+                )
         except Exception as e:
             mcp_logger.error(f"v4 handler failed for {tool_name}: {e}")
             return _build_tool_result(
@@ -2891,7 +3071,7 @@ async def handle_tools_call(params: Dict[str, Any], request: Optional[Request] =
         raise ValueError(f"Unknown tool: {tool_name}")
 
     result = await _call_tool_handler(handler, arguments, request)
-    return _build_tool_result(result)
+    return _build_tool_result(_tag_execution_target(result, tool_name, "server"))
 
 
 # ============================================================================
@@ -4195,6 +4375,9 @@ MCP_REQUEST_BODY_TIMEOUT_SECONDS = float(os.getenv("MCP_REQUEST_BODY_TIMEOUT_SEC
 
 # In-memory session store with response queues
 _mcp_sessions: Dict[str, Dict[str, TypingAny]] = {}
+# Private queue sentinel used to wake a legacy SSE generator immediately when
+# a client explicitly terminates its transport. It is never serialized.
+_LEGACY_SSE_CLOSE = object()
 
 
 def _get_session(session_id: str) -> Dict[str, TypingAny]:
@@ -4208,6 +4391,39 @@ def _get_session(session_id: str) -> Dict[str, TypingAny]:
             "initialized": False,
         }
     return _mcp_sessions[session_id]
+
+
+def _workspace_call_changes_tool_inventory(tool_name: str, arguments: TypingAny, result: TypingAny) -> bool:
+    """Return True when a successful workspace control call changes visible MCP tools."""
+    if not isinstance(result, dict) or bool(result.get("isError")):
+        return False
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict):
+        return False
+    name = str(tool_name or "")
+    args = arguments if isinstance(arguments, dict) else {}
+    if name == "workspace_pair":
+        return bool(structured.get("ok"))
+    if name == "workspace_status":
+        return bool(args.get("workspace_id")) and bool(structured.get("connected"))
+    if name == "aihelper_pair":
+        action = str(args.get("action") or "status").strip().lower()
+        return action in {"pair", "reconnect", "disconnect"} and bool(structured.get("ok", structured.get("connected")))
+    return False
+
+
+async def _queue_tools_list_changed(session_id: str | None) -> bool:
+    """Notify an initialized MCP transport that its session-scoped tool list changed."""
+    if not session_id:
+        return False
+    session = _mcp_sessions.get(str(session_id))
+    if not session or not bool(session.get("initialized")):
+        return False
+    queue = session.get("queue")
+    if queue is None:
+        return False
+    await queue.put({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+    return True
 
 
 def _store_session_request_state(session: Dict[str, TypingAny], request: Request) -> None:
@@ -4231,6 +4447,47 @@ def _restore_session_request_state(session: Dict[str, TypingAny], request: Reque
     request.state.mcp_authority_source = session.get("authority_source")
     request.state.mcp_auth_client_id = session.get("auth_client_id")
     request.state.mcp_workspace_subject = session.get("workspace_subject")
+
+
+def _legacy_sse_session_matches_request(session: Dict[str, TypingAny], request: Request) -> bool:
+    """Match an authenticated DELETE to its legacy SSE session without guessing.
+
+    A few legacy MCP clients terminate ``/sse`` without echoing the session id.
+    In that case we only infer a session from authenticated identity fields that
+    were captured on the original GET. The caller must still resolve to exactly
+    one live session before it may be closed.
+    """
+    state = request.state
+    comparisons = (
+        ("auth_client_id", "mcp_auth_client_id"),
+        ("workspace_subject", "mcp_workspace_subject"),
+        ("auth_user", "mcp_auth_user"),
+    )
+    matched = False
+    for session_key, state_key in comparisons:
+        expected = session.get(session_key)
+        if expected in (None, ""):
+            continue
+        actual = getattr(state, state_key, None)
+        if actual in (None, "") or str(actual) != str(expected):
+            return False
+        matched = True
+    return matched
+
+
+def _close_legacy_sse_session(session_id: str) -> bool:
+    """Wake and detach one legacy SSE transport, preserving workspace leases."""
+    session = _mcp_sessions.get(session_id)
+    if session is None:
+        return False
+    queue = session.get("queue")
+    if queue is not None:
+        try:
+            queue.put_nowait(_LEGACY_SSE_CLOSE)
+        except (AttributeError, asyncio.QueueFull):
+            pass
+    _clear_mcp_session(session_id, clear_workspace=False)
+    return True
 
 
 def _logical_transport_session_id(request: Request, explicit_session_id: str | None = None) -> str:
@@ -4325,8 +4582,9 @@ async def mcp_health_or_sse(request: Request):
     await require_mcp_auth(request)
 
     accept_header = request.headers.get("Accept", "")
-    if "text/html" in accept_header and "text/event-stream" not in accept_header:
-        return HTMLResponse(_workspace_setup_html(), headers={"Cache-Control": "no-store"})
+    app_shell_request = bool(request.query_params.get("app"))
+    if ("text/html" in accept_header or app_shell_request) and "text/event-stream" not in accept_header:
+        return HTMLResponse(_workspace_setup_html(), headers=_webmcp_no_store_headers())
     client_ip = request.client.host if request.client else "unknown"
 
     if "text/event-stream" in accept_header:
@@ -4414,6 +4672,58 @@ async def mcp_sse_post(request: Request):
     return await mcp_unified_endpoint(request)
 
 
+@router.delete("/mcp/sse", tags=["MCP"], summary="Terminate legacy SSE transport")
+@router.delete("/mcp/sse/", tags=["MCP"], summary="Terminate legacy SSE transport")
+@router.delete("/sse", tags=["MCP"], summary="Terminate legacy SSE transport (alias)")
+@router.delete("/sse/", tags=["MCP"], summary="Terminate legacy SSE transport (alias)")
+async def mcp_sse_delete(request: Request):
+    """Idempotently terminate a Cursor-compatible legacy SSE transport."""
+    await require_mcp_auth(request)
+    session_id = str(
+        request.query_params.get("session_id")
+        or request.headers.get("Mcp-Session-Id")
+        or ""
+    ).strip()
+
+    if getattr(request.state, "mcp_auth_method", None) == "public_guest" and not session_id:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Public guest DELETE requires Mcp-Session-Id"},
+        )
+
+    if session_id:
+        session = _mcp_sessions.get(session_id)
+        if session is not None and not _legacy_sse_session_matches_request(session, request):
+            # Older token-auth sessions may not have identity metadata. Their
+            # high-entropy session id remains a capability, matching /messages.
+            has_owner = any(session.get(key) not in (None, "") for key in (
+                "auth_client_id", "workspace_subject", "auth_user"
+            ))
+            if has_owner:
+                raise HTTPException(status_code=403, detail="MCP session ownership mismatch")
+    else:
+        matches = [
+            sid for sid, session in _mcp_sessions.items()
+            if _legacy_sse_session_matches_request(session, request)
+        ]
+        if len(matches) > 1:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "Multiple legacy SSE sessions match; provide Mcp-Session-Id"},
+            )
+        if len(matches) == 1:
+            session_id = matches[0]
+
+    closed = bool(session_id) and _close_legacy_sse_session(session_id)
+    mcp_logger.info(
+        "SSE_DELETE | Session: %s | closed=%s",
+        session_id if session_id else "none",
+        closed,
+    )
+    headers = {"Mcp-Session-Id": session_id} if session_id else None
+    return Response(status_code=204, headers=headers)
+
+
 @router.get("/mcp/sse", tags=["MCP"], summary="SSE endpoint for Cursor/MCP clients")
 @router.get("/mcp/sse/", tags=["MCP"], summary="SSE endpoint for Cursor/MCP clients")
 @router.get("/sse", tags=["MCP"], summary="SSE endpoint (alias)")
@@ -4481,6 +4791,9 @@ async def mcp_sse_connect(request: Request):
                             session["queue"].get(),
                             timeout=wait_timeout,
                         )
+                        if response is _LEGACY_SSE_CLOSE:
+                            mcp_logger.info(f"SSE_DELETE_CLOSE | Session: {session_id}")
+                            break
                         # Send response as SSE message
                         yield f"event: message\ndata: {json.dumps(response)}\n\n"
                         mcp_logger.debug(f"SSE_RESPONSE | Session: {session_id} | Response sent")
@@ -4512,7 +4825,9 @@ async def mcp_sse_connect(request: Request):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id",
+            "Access-Control-Expose-Headers": "Mcp-Session-Id",
+            "Mcp-Session-Id": session_id,
         }
     )
 
@@ -4792,6 +5107,11 @@ async def _process_mcp_request(
         result = await _call_mcp_method_handler(method, handler, params, request)
         latency_ms = (_time.time() - start_time) * 1000
         await multi_logger.log_mcp(method, params, result, latency_ms)
+        if method == "tools/call" and isinstance(params, dict):
+            tool_name = str(params.get("name") or "")
+            tool_args = params.get("arguments", {})
+            if _workspace_call_changes_tool_inventory(tool_name, tool_args, result):
+                await _queue_tools_list_changed(session_id)
         return {"jsonrpc": "2.0", "result": result, "id": req_id}
     except Exception as e:
         return {

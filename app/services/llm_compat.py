@@ -426,7 +426,7 @@ class LLMCompatibilityLayer:
             return LLMProvider.ANTHROPIC
         elif any(x in model_lower for x in ["gemini", "palm"]):
             return LLMProvider.GOOGLE
-        elif any(x in model_lower for x in ["llama", "mistral", "mixtral", "phi", "qwen", "codestral"]):
+        elif any(x in model_lower for x in ["llama", "mistral", "phi", "qwen"]):
             return LLMProvider.OLLAMA
         elif "deepseek" in model_lower:
             return LLMProvider.DEEPSEEK

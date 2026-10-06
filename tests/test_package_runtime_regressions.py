@@ -97,6 +97,14 @@ def test_mcp_well_known_uses_product_version_and_current_protocol():
     assert '"2024-11-05"' in text
 
 
+
+def test_init_service_uses_product_version_for_mcp_metadata():
+    text = (Path(__file__).parents[1] / "app" / "services" / "init_service.py").read_text()
+    assert "from ..config import VERSION" in text
+    assert "self._version = VERSION" in text
+    assert '"mcp_version": self._version' in text
+    assert '"2.80.0"' not in text
+
 def test_openrouter_default_is_current_chat_capable_fallback():
     from app.config import Settings
     assert Settings.model_fields["openrouter_default_model"].default == "nvidia/nemotron-3-ultra-550b-a55b:free"
