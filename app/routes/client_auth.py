@@ -786,12 +786,15 @@ _BROWSER_APP_HTTPS_REDIRECTS = {
     for app_id in _BROWSER_APP_IDS
 }
 
-_OPENHEAT_REDIRECT_URI = "https://openheat.dating/auth/callback"
+_OPENHEAT_REDIRECT_URIS = {
+    "https://openheat.dating/auth/callback",
+    "openheat://auth/callback",
+}
 
 
 def _validate_openheat_redirect(redirect_uri: str) -> str:
     value = (redirect_uri or "").strip()
-    if value != _OPENHEAT_REDIRECT_URI:
+    if value not in _OPENHEAT_REDIRECT_URIS:
         raise HTTPException(400, "Invalid OpenHeat redirect_uri")
     return value
 
