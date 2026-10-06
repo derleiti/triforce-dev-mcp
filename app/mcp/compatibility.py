@@ -10,8 +10,9 @@ from dataclasses import dataclass
 import hashlib
 from typing import Any, Mapping
 
-SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26")
-DEFAULT_PROTOCOL_VERSION = "2024-11-05"
+HANDSHAKE_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+LEGACY_DEFAULT_PROTOCOL_VERSION = "2024-11-05"
+LATEST_HANDSHAKE_PROTOCOL_VERSION = "2025-11-25"
 
 
 @dataclass(frozen=True)
@@ -88,9 +89,13 @@ def detect_profile(
 
 def negotiate_protocol_version(requested: Any) -> str:
     requested_text = str(requested or "").strip()
-    if requested_text in SUPPORTED_PROTOCOL_VERSIONS:
+    if not requested_text:
+        return LEGACY_DEFAULT_PROTOCOL_VERSION
+    if requested_text in HANDSHAKE_PROTOCOL_VERSIONS:
         return requested_text
-    return DEFAULT_PROTOCOL_VERSION
+    # initialize only negotiates handshake-era revisions. Unknown/future/modern
+    # revisions receive the latest handshake revision as a counter-offer.
+    return LATEST_HANDSHAKE_PROTOCOL_VERSION
 
 
 def build_initialize_result(

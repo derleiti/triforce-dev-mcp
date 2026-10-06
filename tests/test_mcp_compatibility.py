@@ -9,10 +9,13 @@ from app.mcp.compatibility import (
 def test_protocol_negotiation_accepts_supported_versions():
     assert negotiate_protocol_version("2024-11-05") == "2024-11-05"
     assert negotiate_protocol_version("2025-03-26") == "2025-03-26"
+    assert negotiate_protocol_version("2025-06-18") == "2025-06-18"
+    assert negotiate_protocol_version("2025-11-25") == "2025-11-25"
 
 
 def test_protocol_negotiation_falls_back_to_current_default():
-    assert negotiate_protocol_version("2099-01-01") == "2024-11-05"
+    assert negotiate_protocol_version("2099-01-01") == "2025-11-25"
+    assert negotiate_protocol_version("2026-07-28") == "2025-11-25"
     assert negotiate_protocol_version(None) == "2024-11-05"
 
 
