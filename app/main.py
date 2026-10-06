@@ -113,6 +113,7 @@ from .routes.nova_operator import router as nova_operator_router
 from .routes.rag import router as rag_router
 from .routes.search_curated import router as search_curated_router
 from .routes.bug_reports import router as bug_reports_router
+from .routes.sipgate import router as sipgate_router
 from app.routes.admin_users import router as admin_users_router
 
 # Import routers from the top-level app directory
@@ -449,6 +450,7 @@ def create_app() -> FastAPI:
     app.include_router(mcp_node_router, prefix="/v1", tags=["MCP Node"])
     app.include_router(mcp_remote_router, tags=["MCP Remote Server"])
     app.include_router(oauth_router, tags=["OAuth 2.0"])
+    app.include_router(sipgate_router, tags=["Sipgate"])
     app.include_router(models_router, prefix="/v1", tags=["Models"])
     app.include_router(openai_compat_router, prefix="/v1/openai", tags=["OpenAI Compatibility"])
     app.include_router(orchestration_router, prefix="/v1", tags=["Orchestration"])
@@ -545,6 +547,64 @@ def create_app() -> FastAPI:
     if _HAS_TRIFORCE_LOGGING:
         app.add_middleware(TriForceLoggingMiddleware, central_logger=central_logger)
 
+    # Keep Swagger/ReDoc navigation stable when a router defines its own tag
+    # in addition to the canonical tag supplied by include_router().  Runtime
+    # routing and authorization are untouched; this only normalizes OpenAPI.
+    _default_openapi = app.openapi
+
+    def normalized_openapi():
+        schema = _default_openapi()
+        meaningful_secondary_tags = {
+            "Bootstrap", "Codebase", "Init", "Hybrid Compute",
+            "Auth", "Quick Access",
+        }
+
+        for path_item in schema.get("paths", {}).values():
+            if not isinstance(path_item, dict):
+                continue
+            for operation in path_item.values():
+                if not isinstance(operation, dict):
+                    continue
+                tags = operation.get("tags")
+                if not isinstance(tags, list) or not tags:
+                    continue
+
+                primary = str(tags[0])
+                normalized_tags = [primary]
+                seen = {primary.casefold()}
+                for tag in tags[1:]:
+                    tag = str(tag)
+                    if tag not in meaningful_secondary_tags:
+                        continue
+                    key = tag.casefold()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    normalized_tags.append(tag)
+                operation["tags"] = normalized_tags
+
+        # Top-level tag metadata can also contain case-only duplicates. Keep the
+        # first definition because it matches the human-facing router group.
+        top_level_tags = schema.get("tags")
+        if isinstance(top_level_tags, list):
+            seen = set()
+            normalized = []
+            for item in top_level_tags:
+                if not isinstance(item, dict) or "name" not in item:
+                    normalized.append(item)
+                    continue
+                key = str(item["name"]).casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(item)
+            schema["tags"] = normalized
+
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = normalized_openapi
+
     static_dir = Path(__file__).parent / "static"
     docs_static_dir = static_dir / "docs"
 
@@ -560,6 +620,7 @@ def create_app() -> FastAPI:
             f"<script>{swagger_js}</script>"
             "<script>window.ui=SwaggerUIBundle({"
             "url:'/openapi.json',dom_id:'#swagger-ui',layout:'BaseLayout',deepLinking:true,"
+            "filter:true,docExpansion:'none',tagsSorter:'alpha',operationsSorter:'alpha',"
             "showExtensions:true,showCommonExtensions:true,"
             "oauth2RedirectUrl:window.location.origin+'/docs/oauth2-redirect',"
             "presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset]"
