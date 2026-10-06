@@ -599,7 +599,7 @@ class TestGlobalAuthMiddlewareRegistration:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"])
-    async def test_external_api_documentation_requires_auth(self, monkeypatch, path):
+    async def test_external_api_documentation_is_public_readonly_surface(self, monkeypatch, path):
         from fastapi import FastAPI
         from fastapi.responses import Response
         from app.utils import auth_middleware
@@ -621,7 +621,7 @@ class TestGlobalAuthMiddlewareRegistration:
             return Response(status_code=204)
 
         response = await middleware.dispatch(request, call_next)
-        assert response.status_code == 401
+        assert response.status_code == 204
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("path", [

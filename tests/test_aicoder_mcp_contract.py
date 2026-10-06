@@ -40,14 +40,21 @@ class AiCoderMcpContractTests(unittest.TestCase):
         self.assertEqual(AI_CODER_TOOL_ALLOWLIST, EXTERNAL_TOOL_ALLOWLIST_FULL)
 
     def test_ai_coder_external_catalog_matches_normal_external_catalog(self):
-        names = {"health", "service_status", "mail_read", "shell", "memory_clear"}
-        catalog = [{"name": name} for name in names]
+        catalog = [
+            {"name": "health", "x_scope": "global"},
+            {"name": "service_status", "x_scope": "global"},
+            {"name": "mail_read", "x_scope": "triforce_auth"},
+            {"name": "shell", "x_scope": "triforce_admin"},
+            {"name": "memory_clear", "x_scope": "triforce_admin"},
+        ]
         ai_visible = filter_tools_for_external(catalog, request=FakeRequest())
         normal_visible = filter_tools_for_external(catalog, request=FakeRequest(profile=""))
         self.assertEqual(ai_visible, normal_visible)
-        self.assertIn("service_status", {tool["name"] for tool in ai_visible})
-        self.assertNotIn("shell", {tool["name"] for tool in ai_visible})
-        self.assertNotIn("memory_clear", {tool["name"] for tool in ai_visible})
+        visible = {tool["name"]: tool for tool in ai_visible}
+        self.assertIn("service_status", visible)
+        self.assertTrue(visible["mail_read"]["x_requires_auth"])
+        self.assertNotIn("shell", visible)
+        self.assertNotIn("memory_clear", visible)
 
     def test_privileged_tools_still_require_backend_full_access(self):
         external = FakeRequest()
