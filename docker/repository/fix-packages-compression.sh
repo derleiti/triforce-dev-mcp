@@ -10,6 +10,8 @@
 # ============================================================================
 
 set -euo pipefail
+# Never generate inaccessible Packages.gz/Packages.xz under a root cron umask.
+umask 022
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$SCRIPT_DIR}"

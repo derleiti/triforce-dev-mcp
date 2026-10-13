@@ -27,6 +27,8 @@
 # Bash Guard
 if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
 set -u
+# Published APT metadata must be readable by the unprivileged HTTP server.
+umask 022
 
 # ==================== CONFIGURATION ====================
 
@@ -347,7 +349,7 @@ step_permissions() {
 
     # Get the actual user (even if running with sudo)
     local current_user
-    current_user="${SUDO_USER:-$(id -un)}"
+    current_user="${REPO_MIRROR_OWNER:-${SUDO_USER:-$(stat -c %U "$REPO_ROOT")}}"
     local current_group
     current_group="$(id -gn "$current_user" 2>/dev/null || id -gn)"
 
@@ -960,6 +962,12 @@ main() {
 
     if [[ $failed -eq 0 ]]; then
         run_step 10 "Generate Index" step_generate_index || failed=1
+    fi
+
+    # Compression, signing and index generation may create new files after
+    # the first permission pass. Do not publish unreadable Packages.xz files.
+    if [[ $failed -eq 0 ]]; then
+        run_step 11 "Final Public Mirror Permissions" step_permissions || failed=1
     fi
 
     # Summary
