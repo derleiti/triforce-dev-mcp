@@ -161,6 +161,26 @@ repo_matches_os() {
     [[ "$target_codename" == "$current_codename" ]]
 }
 
+ensure_selected_architectures() {
+    local selected_sources="$1"
+    # Source entries alone do not activate Multi-Arch in APT. On a fresh
+    # amd64 installation this is necessary before the first apt-get update.
+    if ! grep -Eq '^deb \[arch=[^]]*i386' <<<"$selected_sources"; then
+        return 0
+    fi
+    if [[ $DRY_RUN -eq 1 ]]; then
+        log_info "[DRY-RUN] Would ensure dpkg foreign architecture i386 is enabled"
+        return 0
+    fi
+    need_cmd dpkg
+    if dpkg --print-foreign-architectures | grep -Fxq i386; then
+        log_info "i386 architecture already enabled"
+    else
+        dpkg --add-architecture i386
+        log_ok "Enabled dpkg foreign architecture i386 (Steam/Wine)"
+    fi
+}
+
 install_keyring() {
     if [[ $DRY_RUN -eq 1 ]]; then
         log_info "[DRY-RUN] Would install ${BASE_URL}/ailinux-archive-key.gpg -> ${KEYRING_PATH}"
@@ -266,6 +286,10 @@ main() {
 # ============================================
 EOF
 )
+
+    # Enable i386 only when the selected mirror entries actually require it.
+    # This preserves --select behavior and leaves dry-runs side-effect free.
+    ensure_selected_architectures "$sources"
 
     if [[ $DRY_RUN -eq 1 ]]; then
         printf '%s\n%s\n' "$header" "$sources"
