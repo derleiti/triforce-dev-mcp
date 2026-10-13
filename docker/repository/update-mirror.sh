@@ -27,6 +27,7 @@
 # Bash Guard
 if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
 set -u
+set -o pipefail
 # Published APT metadata must be readable by the unprivileged HTTP server.
 umask 022
 
@@ -284,8 +285,9 @@ step_heal_perms() {
         log_ok "Permissions healed"
         return 0
     else
-        log_warn "heal-perms.sh had issues (continuing anyway)"
-        return 0
+        local rc=$?
+        log_err "heal-perms.sh failed (rc=$rc)"
+        return "$rc"
     fi
 }
 
@@ -295,7 +297,10 @@ step_container_setup() {
     # For apt-mirror, we use docker compose run (profiled service)
     # Just verify docker is working and image is built
     log "Ensuring apt-mirror image is built..."
-    dc --profile mirror build --quiet "$SERVICE" 2>/dev/null || true
+    if ! dc --profile mirror build --quiet "$SERVICE"; then
+        log_err "Mirror container build failed; refusing to run an outdated image"
+        return 1
+    fi
 
     # Create required directories on host
     log "Creating log directory..."
@@ -316,16 +321,55 @@ step_download() {
     fi
 
     log "Starting apt-mirror download..."
-    log "This may take a while depending on repository updates..."
-
-    # Run apt-mirror using docker compose run (for profiled service)
-    if dc --profile mirror run --rm "$SERVICE" /usr/bin/apt-mirror /etc/apt/mirror.list 2>&1 | tee -a "$LOGFILE"; then
-        log_ok "Download completed"
-        return 0
-    else
-        log_warn "apt-mirror had warnings (continuing anyway)"
-        return 0
+    # Google serves the Chrome APT endpoints over HTTP/2 but can hang for
+    # minutes on HTTP/1.1. Keep its entry in mirror.list and its public path,
+    # but fetch Chrome separately with HTTP/2 curl and SHA256 verification.
+    local mirror_input="/etc/apt/mirror.list"
+    local chrome_enabled=0
+    if grep -Eq '^deb .*https://dl.google.com/linux/chrome/deb ' "$REPO_ROOT/mirror.list"; then
+        chrome_enabled=1
+        mkdir -p "$REPO_ROOT/data/var"
+        sed '/^deb .*https:\/\/dl.google.com\/linux\/chrome\/deb /d' \
+            "$REPO_ROOT/mirror.list" > "$REPO_ROOT/data/var/mirror-wget.list"
+        chmod 0644 "$REPO_ROOT/data/var/mirror-wget.list"
+        mirror_input="/var/spool/apt-mirror/var/mirror-wget.list"
+        log "Chrome remains enabled: HTTP/2 synchronization follows the regular apt-mirror download"
     fi
+
+    # apt-mirror starts many wget workers and may hang on third-party URLs.
+    # Bound the full download within the 2-hour cron interval; pipefail above
+    # ensures a docker or timeout error cannot be hidden by tee.
+    local download_limit="${MIRROR_DOWNLOAD_TIMEOUT:-90m}"
+    log "Download time limit: ${download_limit}; individual wget waits bounded by mirror-wgetrc"
+    if timeout --signal=TERM --kill-after=45s "$download_limit" \
+        docker compose -f "$COMPOSE_FILE" --profile mirror run --rm -T \
+        "$SERVICE" /usr/bin/apt-mirror "$mirror_input" 2>&1 | tee -a "$LOGFILE"; then
+        log_ok "apt-mirror download completed"
+    else
+        local rc=$?
+        log_err "apt-mirror download failed (rc=$rc); refusing incomplete metadata publish"
+        return "$rc"
+    fi
+
+    if [[ $chrome_enabled -eq 1 ]]; then
+        # Reserve enough time for signing before the next two-hour cron run.
+        if timeout --signal=TERM --kill-after=30s "${MIRROR_CHROME_TIMEOUT:-20m}" \
+            python3 -B "$REPO_ROOT/sync-google-chrome-http2.py" \
+            --mirror-root "$MIRROR_ROOT" 2>&1 | tee -a "$LOGFILE"; then
+            log_ok "Google Chrome HTTP/2 mirror synchronized and checksum-verified"
+        else
+            local rc=$?
+            if [[ $rc -eq 2 ]]; then
+                log_warn "Chrome upstream unavailable; retained verified cached Chrome packages"
+            else
+                log_err "Google Chrome HTTP/2 synchronization failed (rc=$rc)"
+                return "$rc"
+            fi
+        fi
+    fi
+
+    log_ok "Download completed"
+    return 0
 }
 
 step_postmirror() {
@@ -381,7 +425,9 @@ step_permissions() {
     # Also fix GNUPG home ownership and permissions
     if [[ -d "$GNUPG_HOME" ]]; then
         log "Fixing GPG home ownership and permissions..."
-        sudo chown -R "${current_user}:${current_group}" "$GNUPG_HOME" 2>/dev/null || true
+        # Mounted as /root/.gnupg inside the signing container. GnuPG rejects
+        # user-owned directories there with an unsafe-ownership warning.
+        sudo chown -R root:root "$GNUPG_HOME" 2>/dev/null || true
         chmod 700 "$GNUPG_HOME" 2>/dev/null || true
         find "$GNUPG_HOME" -type f ! -perm 600 -exec chmod 600 {} + 2>/dev/null || true
     fi
@@ -402,8 +448,9 @@ step_compression_fix() {
         log_ok "Compression fix completed"
         return 0
     else
-        log_warn "Compression fix had errors (continuing)"
-        return 0
+        local rc=$?
+        log_err "Compression fix failed (rc=$rc); refusing to publish inconsistent checksums"
+        return "$rc"
     fi
 }
 

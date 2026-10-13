@@ -52,11 +52,13 @@ services:
     environment:
       - TZ=${TZ:-Europe/Berlin}
       - REPO_PATH=/var/spool/apt-mirror
+      - WGETRC=/etc/apt-mirror-wgetrc
     volumes:
       # Data persistence
       - ${REPO_MIRROR_DATA_PATH:-./data}:/var/spool/apt-mirror
       # Configuration
       - ${REPO_MIRROR_LIST:-./mirror.list}:/etc/apt/mirror.list:ro
+      - ./mirror-wgetrc:/etc/apt-mirror-wgetrc:ro
       # Scripts for post-mirror processing
       - ./postmirror.sh:/var/spool/apt-mirror/var/postmirror.sh:ro
       - ./sign-repos.sh:/var/spool/apt-mirror/var/sign-repos.sh:ro
