@@ -21,6 +21,9 @@ set limit_rate        100m
 deb-amd64 https://archive.ubuntu.com/ubuntu resolute main restricted universe multiverse
 deb-amd64 https://archive.ubuntu.com/ubuntu resolute-updates main restricted universe multiverse
 deb-amd64 https://security.ubuntu.com/ubuntu resolute-security main restricted universe multiverse
+deb-i386 https://archive.ubuntu.com/ubuntu resolute main restricted universe multiverse
+deb-i386 https://archive.ubuntu.com/ubuntu resolute-updates main restricted universe multiverse
+deb-i386 https://security.ubuntu.com/ubuntu resolute-security main restricted universe multiverse
 deb [arch=amd64] https://deb.nodesource.com/node_22.x nodistro main
 deb [arch=amd64] https://deb.nodesource.com/node_20.x nodistro main
 deb [arch=amd64] https://dl.google.com/linux/chrome/deb stable main
