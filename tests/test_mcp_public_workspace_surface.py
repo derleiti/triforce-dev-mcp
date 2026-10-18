@@ -402,9 +402,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     worker_path = getattr(worker, 'path', '')
     assert str(worker_path).endswith('/apps/web/sw.js')
     worker_source = __import__('pathlib').Path(worker_path).read_text(encoding='utf-8')
-    assert "const CACHE='ailinux-helper-'+BUILD" in worker_source
-    assert "const SHELL='/v1/mcp?app='+encodeURIComponent(BUILD)" in worker_source
-    assert 'caches.delete' in worker_source
+    assert "self.clients.claim()" in worker_source
+    assert "caches.delete" in worker_source
+    assert "addEventListener('fetch'" not in worker_source
 
 
 
