@@ -281,7 +281,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'isSameEntry' in html
     assert 'Folder shared. Starting sandbox executor automatically' in html
     assert 'await connect();' in html
-    assert 'id="connectBtn" class="secondary hidden"' in html
+    assert 'id="connectBtn" class="secondary"' in html
+    assert 'Generate Share ID / connect' in html
     assert 'Saved directory handle restored · permission=' in html
     assert '&resume_token=' not in html
     assert 'data-cfasync="false"' in html
