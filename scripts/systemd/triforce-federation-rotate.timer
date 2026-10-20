@@ -1,11 +1,11 @@
 [Unit]
-Description=TriForce Federation Token Rotation (täglich 03:00)
-Requires=triforce-federation-rotate.service
+Description=TriForce Federation credential audit (daily, read-only)
 
 [Timer]
 OnCalendar=*-*-* 03:00:00
 Persistent=true
 RandomizedDelaySec=300
+Unit=triforce-federation-rotate.service
 
 [Install]
 WantedBy=timers.target
