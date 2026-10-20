@@ -36,3 +36,19 @@ def test_flstudio_invalid_requests_do_not_execute():
     assert not asyncio.run(handle_flstudio({'action': 'something-else'}))['ok']
     assert not asyncio.run(handle_flstudio({'action': 'call', 'tool': 'bash'}))['ok']
     assert not asyncio.run(handle_flstudio({'action': 'call', 'tool': 'fl_get_tempo', 'arguments': 'bad'}))['ok']
+
+
+def test_fast_batch_limits_and_name_validation():
+    too_many = [{'tool': 'fl_get_tempo'}] * 25
+    assert not asyncio.run(handle_flstudio({'action': 'batch', 'calls': too_many}))['ok']
+    assert not asyncio.run(handle_flstudio({'action': 'batch', 'calls': []}))['ok']
+    assert not asyncio.run(handle_flstudio({'action': 'batch', 'calls': [{'tool': 'bash'}]}))['ok']
+    assert not asyncio.run(handle_flstudio({'action': 'batch', 'calls': [{'tool': 'fl_get_tempo', 'arguments': 'bad'}]}))['ok']
+
+
+def test_fast_batch_is_admin_only():
+    guest = Request({'type': 'http', 'method': 'POST', 'path': '/v1/mcp',
+                     'headers': [], 'client': ('198.51.100.20', 1234),
+                     'server': ('api.ailinux.me', 443), 'scheme': 'https'})
+    payload = {'action': 'batch', 'calls': [{'tool': 'fl_get_tempo'}]}
+    assert not is_tool_allowed('flstudio', guest, payload)

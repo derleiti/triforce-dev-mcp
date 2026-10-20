@@ -1609,14 +1609,16 @@ V5_TOOLS += [
 V5_TOOLS += [
     {
         "name": "flstudio",
-        "description": "Control the FL Studio 2026 MCP on zombie-pc over TriForce WireGuard SSH. Admin only. status checks real controller readiness; list enumerates FL tools; call executes one named upstream fl_* tool. Project writes should be deliberate and backed up.",
+        "description": "Owner/admin FL Studio MCP gateway over persistent private Unix socket and WireGuard SSH with legacy fallback. status confirms controller; list enumerates tools; call invokes one fl_* tool; batch runs 1-24 sequential actions or dry_run preview. Batch writes are not atomic. Back up FL projects before editing.",
         "x_inventory": "admin",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["status", "list", "call"], "default": "status"},
+                "action": {"type": "string", "enum": ["status", "list", "call", "batch"], "default": "status"},
                 "tool": {"type": "string", "description": "Upstream fl_* MCP tool (action=call)"},
                 "arguments": {"type": "object", "description": "Upstream tool arguments"},
+                "calls": {"type": "array", "maxItems": 24, "items": {"type": "object"}, "description": "Upstream calls, action=batch; executed sequentially, partial writes are not rolled back"},
+                "dry_run": {"type": "boolean", "default": False, "description": "For action=batch: validate and preview without executing"},
             },
             "required": ["action"],
         },
