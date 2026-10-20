@@ -205,13 +205,13 @@ async def lifespan(app: FastAPI):
     # Fresh/local installations remain standalone and do not attempt peer calls.
     if os.environ.get("FEDERATION_SECRET", "").strip():
         try:
-            from .services.server_federation import federation_manager
+            from .services.server_federation import federation_manager, role_for_federation_node
             from .services.federation_websocket import federation_lb
             import socket
             node_id_env = os.environ.get("NODE_ID")
             _hostname = socket.gethostname().lower()
             node_id = node_id_env or ("backup" if "backup" in _hostname else "zombie-pc" if "zombie" in _hostname else "hetzner")
-            await federation_manager.initialize(node_id=node_id)
+            await federation_manager.initialize(node_id=node_id, role=role_for_federation_node(node_id))
             await federation_lb.start()
             logger.info("Federation Manager started")
         except Exception as e:
