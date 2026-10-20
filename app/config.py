@@ -327,9 +327,10 @@ class Settings(BaseSettings):
     fireworks_default_model: str = Field(default="accounts/fireworks/models/llama-v3p3-70b-instruct", validation_alias="FIREWORKS_DEFAULT_MODEL")
     fireworks_timeout_ms: int = Field(default=60000, validation_alias="FIREWORKS_TIMEOUT_MS")
 
-    # Cloudflare Workers AI (10,000 neurons/day free)
+    # Cloudflare Workers AI (dedicated account-scoped Bearer token)
     cloudflare_account_id: str | None = Field(default=None, validation_alias="CLOUDFLARE_ACCOUNT_ID")
     cloudflare_api_token: str | None = Field(default=None, validation_alias="CLOUDFLARE_API_TOKEN")
+    cloudflare_ai_workers_api: str | None = Field(default=None, validation_alias="CLOUDFLARE_AI_WORKERS_API")
     cloudflare_zone_id: str | None = Field(default=None, validation_alias="CLOUDFLARE_ZONE_ID")
     cloudflare_zone_api_token: str | None = Field(default=None, validation_alias="CLOUDFLARE_ZONE_API_TOKEN")
     cloudflare_default_model: str = Field(default="@cf/meta/llama-3.3-70b-instruct-fp8-fast", validation_alias="CLOUDFLARE_DEFAULT_MODEL")

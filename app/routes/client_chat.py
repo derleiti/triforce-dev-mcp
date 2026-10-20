@@ -183,7 +183,7 @@ def provider_is_configured(provider: str) -> bool:
         return True
     if provider == "cloudflare":
         return bool(
-            os.getenv("CLOUDFLARE_API_TOKEN")
+            os.getenv("CLOUDFLARE_AI_WORKERS_API")
             and os.getenv("CLOUDFLARE_ACCOUNT_ID")
         )
     return any(os.getenv(name) for name in PROVIDER_KEY_ENVS.get(provider, ()))
@@ -229,7 +229,7 @@ REGISTERED_FREE_PROVIDER_KEYS = {
     "groq": "GROQ_API_KEY",
     "cerebras": "CEREBRAS_API_KEY",
     "nvidia": "NVIDIA_API_KEY",
-    "cloudflare": "CLOUDFLARE_API_TOKEN",
+    "cloudflare": "CLOUDFLARE_AI_WORKERS_API",
     "huggingface": "HUGGINGFACE_API_KEY",
 }
 

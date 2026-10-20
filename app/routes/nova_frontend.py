@@ -646,14 +646,9 @@ async def _image_proxy(req: ImageRequest) -> Dict[str, Any]:
     if m.startswith("cloudflare/@cf/"):
         import os as _os
         cf_account = _os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
-        # Workers-AI-spezifischer Token (cfut_…) hat Vorrang — der generische
-        # CLOUDFLARE_API_TOKEN ist oft ein Global API Key (37-char hex), der
-        # für /ai/run mit Bearer-Auth nicht akzeptiert wird (CF Code 10000).
-        cf_token = (
-            _os.getenv("CLOUDFLARE_AI_WORKERS_API")
-            or _os.getenv("CLOUDFLARE_API_TOKEN")
-            or ""
-        ).strip()
+        # Workers AI uses its own scoped Bearer token, never the DNS or
+        # legacy general-purpose Cloudflare credentials.
+        cf_token = (_os.getenv("CLOUDFLARE_AI_WORKERS_API") or "").strip()
         if not cf_account or not cf_token:
             raise HTTPException(status_code=503, detail="Cloudflare Workers AI nicht konfiguriert (CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_AI_WORKERS_API fehlen)")
         # Modell-ID ohne "cloudflare/" prefix

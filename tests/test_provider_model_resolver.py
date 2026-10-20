@@ -74,12 +74,13 @@ def test_cloudflare_caps_requested_output_tokens(monkeypatch):
     from app.services import provider_chat
 
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "account")
-    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "configured")
+    monkeypatch.setenv("CLOUDFLARE_AI_WORKERS_API", "configured")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "legacy_should_not_be_used")
     monkeypatch.delenv("CLOUDFLARE_MAX_TOKENS", raising=False)
     seen = {}
 
     async def fake_post(provider, url, headers, payload, timeout):
-        seen.update(provider=provider, url=url, payload=payload)
+        seen.update(provider=provider, url=url, headers=headers, payload=payload)
         return {
             "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
             "choices": [{"message": {"content": "cloudflare-ok", "tool_calls": []}}],
@@ -95,5 +96,6 @@ def test_cloudflare_caps_requested_output_tokens(monkeypatch):
     ))
 
     assert seen["provider"] == "cloudflare"
+    assert seen["headers"]["Authorization"] == "Bearer configured"
     assert seen["payload"]["max_tokens"] == 8192
     assert result["content"] == "cloudflare-ok"
