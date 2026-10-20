@@ -1605,6 +1605,25 @@ V5_TOOLS += [
 
 
 # =============================================================================
+# FL STUDIO — restricted owner/admin only, SSH to zombie-pc via WireGuard
+V5_TOOLS += [
+    {
+        "name": "flstudio",
+        "description": "Control the FL Studio 2026 MCP on zombie-pc over TriForce WireGuard SSH. Admin only. status checks real controller readiness; list enumerates FL tools; call executes one named upstream fl_* tool. Project writes should be deliberate and backed up.",
+        "x_inventory": "admin",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["status", "list", "call"], "default": "status"},
+                "tool": {"type": "string", "description": "Upstream fl_* MCP tool (action=call)"},
+                "arguments": {"type": "object", "description": "Upstream tool arguments"},
+            },
+            "required": ["action"],
+        },
+    },
+]
+
+
 # DEDUPLICATION GUARD — Bug-Fix 2026-04-28 (Code Review)
 # Removes accidental duplicate tool definitions (e.g. flarum_* re-definitions
 # in the V5_TOOLS += [...] block). First occurrence wins — preserves the

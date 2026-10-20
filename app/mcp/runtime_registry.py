@@ -47,7 +47,7 @@ class RuntimeToolRegistry:
         wire_name = AIHELPER_CANONICAL_TO_WIRE.get(name, name)
         open_world = name in {"search", "web_search", "smart_search", "multi_search", "crawl", "crawl_url", "crawl_site", "fetch", "image_search"}
         requires_file_write = wire_name in {"file_write", "codebase_edit", "code_edit", "code_patch", "file_ops"} or wire_name in WORKSPACE_WRITE_TOOLS
-        requires_shell = wire_name in {"shell", "server_control", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin"}
+        requires_shell = wire_name in {"shell", "server_control", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin", "flstudio"}
         destructive = wire_name in {"shell", "task_runner", "binary_exec", "remote_admin", "ollama_delete", "memory_clear", "queue_clear", "workspace_clear", "docker_stack"}
         read_only = not (requires_file_write or requires_shell or destructive or wire_name in CLIPBOARD_WRITE_TOOLS or name == "aihelper_pair" or wire_name in {"workspace_pair", "compute_execute", "memory_history", "feature_experience_store", "prompt_set", "config_set", "service_control", "container_control", "package_manager", "vault_add", "mail_send", "wp_create_draft", "wp_update_post", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "flarum_admin_request", "notify_send", "notify_clear", "notify_read", "idle_assign", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input", "vision_start", "vision_stop", "bug_report_status"})
         min_tier = "enterprise" if (requires_file_write or requires_shell or destructive) else "free"
@@ -73,7 +73,7 @@ class RuntimeToolRegistry:
             return "internal_only"
         if wire_name in {"shell", "server_control", "bash_exec", "tristar_shell_exec", "task_runner", "binary_exec", "custom_exec", "remote_admin", "remote_exec"}:
             return "exec_privileged"
-        if wire_name in {"config_set", "prompt_set", "service_control", "container_control", "docker_stack", "package_manager", "vault_add", "restart", "restart_backend", "restart_agent", "flarum_admin_request", "memory_history", "feature_experience_store"}:
+        if wire_name in {"config_set", "prompt_set", "service_control", "container_control", "docker_stack", "package_manager", "vault_add", "flstudio", "restart", "restart_backend", "restart_agent", "flarum_admin_request", "memory_history", "feature_experience_store"}:
             return "write_privileged"
         if wire_name in WORKSPACE_WRITE_TOOLS or wire_name in CLIPBOARD_WRITE_TOOLS or name == "aihelper_pair" or wire_name in {"workspace_pair", "compute_execute", "file_write", "file_ops", "code_patch", "codebase_edit", "codebase_create", "wp_create_draft", "wp_update_post", "mail_send", "flarum_post_create", "flarum_post_edit", "flarum_discussion_create", "notify_send", "notify_clear", "notify_read", "idle_assign", "process_ops", "service_ops", "app_ops", "window_ops", "computer_input", "vision_start", "vision_stop", "bug_report_status"}:
             return "write_scoped"
