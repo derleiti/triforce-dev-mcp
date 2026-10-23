@@ -117,3 +117,33 @@ async def test_wrong_guild_rejected(signed_app, monkeypatch):
         result = await client.post("/discord", content=raw, headers=headers)
     assert result.json()["type"] == 4
     assert result.json()["data"]["flags"] == 64
+
+@pytest.mark.asyncio
+async def test_listening_controls_only_allow_owner(signed_app, monkeypatch):
+    key, app = signed_app
+    seen = []
+    async def fake_finish(action, user_id, text, token):
+        seen.append((action, user_id))
+    monkeypatch.setattr(bridge, 'finish_nova_command', fake_finish)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        for action in ('listen', 'quiet'):
+            raw, headers = build_request(key, nova_payload(action))
+            response = await client.post('/discord', content=raw, headers=headers)
+            assert response.json()['type'] == 5
+        raw, headers = build_request(key, nova_payload('listen', '111111111111111111'))
+        response = await client.post('/discord', content=raw, headers=headers)
+        assert response.json()['type'] == 4
+    assert seen == [('listen', bridge.OWNER_ID), ('quiet', bridge.OWNER_ID)]
+
+
+@pytest.mark.asyncio
+async def test_listening_state_calls_rpc(monkeypatch):
+    calls=[]
+    async def fake_rpc(data):
+        calls.append(data)
+        return {'ok': True, 'listening': data.get('enabled', False)}
+    monkeypatch.setattr(bridge, 'voice_rpc', fake_rpc)
+    enabled=await bridge.do_nova_action('listen', bridge.OWNER_ID, '')
+    disabled=await bridge.do_nova_action('quiet', bridge.OWNER_ID, '')
+    assert calls == [{'op': 'listen', 'enabled': True}, {'op': 'listen', 'enabled': False}]
+    assert 'hört' in enabled and 'ausgeschaltet' in disabled

@@ -24,7 +24,7 @@ OWNER_ID = "965583496435367956"
 REMOTE_TARGET = "zombie-pc"
 REMOTE_CLIENT = "/home/zombie/workspace/triforce/integrations/ailinux-discord-voice-mcp/remote_client.py"
 
-SUPPORTED = {"join", "say", "leave", "status"}
+SUPPORTED = {"join", "say", "leave", "status", "listen", "quiet"}
 
 
 def private_message(content: str) -> JSONResponse:
@@ -47,7 +47,7 @@ def parse_nova(payload: dict[str, Any]) -> tuple[str, str, str] | str:
     # Discord handles default command permissions, but never rely on that alone.
     options = (payload.get("data") or {}).get("options") or []
     if not isinstance(options, list) or len(options) != 1:
-        return "Verwende /nova join, /nova say, /nova status oder /nova leave."
+        return "Verwende /nova join, /nova listen, /nova quiet, /nova status oder /nova leave."
     subcommand = options[0]
     if not isinstance(subcommand, dict) or subcommand.get("type") != 1:
         return "Ungültiger Unterbefehl."
@@ -111,7 +111,7 @@ async def do_nova_action(action: str, user_id: str, text: str) -> str:
     if action == "status":
         data = await voice_rpc({"op": "status"})
         if data.get("connected"):
-            return f"Nova ist in #{data.get('channel_name', 'Sprachkanal')}. Stimme: Seraphina. Zuhören: aus."
+            return f"Nova ist in #{data.get('channel_name', 'Sprachkanal')}. Stimme: Seraphina. Zuhören: {'an' if data.get('listening') else 'aus'}."
         return "Nova ist online und bereit. Ich bin noch in keinem Sprachkanal. Nutze /nova join."
 
     if action == "join":
@@ -125,7 +125,11 @@ async def do_nova_action(action: str, user_id: str, text: str) -> str:
                 })
             except Exception as error:
                 return f"Nova ist in #{channel}, aber die Begrüßung konnte nicht abgespielt werden: {str(error)[:135]}"
-        return f"Nova ist jetzt in #{channel}! Zum Sprechen /nova say verwenden. /nova leave beendet die Verbindung."
+        return f"Nova ist jetzt in #{channel}! Sag laut Nova und stelle eine Frage. /nova quiet pausiert das Zuhören."
+
+    if action in ("listen", "quiet"):
+        data = await voice_rpc({"op": "listen", "enabled": action == "listen"})
+        return "Nova hört jetzt auf das Wort Nova." if data.get("listening") else "Zuhören ausgeschaltet."
 
     if action == "say":
         data = await voice_rpc({"op": "say", "text": text})
