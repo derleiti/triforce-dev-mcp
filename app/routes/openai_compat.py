@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import time
-from fastapi import APIRouter, Depends, Query
+import hmac
+import os
+
+from fastapi import APIRouter, Depends, Query, Header, HTTPException
 from ..utils.rate_limit_compat import RateLimiter
 
 from ..services.openai_compat import (
@@ -12,6 +15,34 @@ from ..services.openai_compat import (
 from ..services.model_registry import registry
 
 router = APIRouter(tags=["openai-compat"])
+
+
+async def require_pinned_ollama_auth(
+    payload: OpenAIChatCompletionRequest,
+    authorization: str | None = Header(None, alias="Authorization"),
+    x_internal_key: str | None = Header(None, alias="X-Internal-Key"),
+) -> None:
+    """Block anonymous direct inference against the private federation nodes.
+
+    Other OpenAI-compatible provider behavior stays unchanged. Server-side
+    callers may use the existing internal key; desktop/API users need a
+    verified TriForce client JWT (never an untrusted X-User-ID header).
+    """
+    from ..services.ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+    name = payload.model.removeprefix("ollama/")
+    if name not in LOCAL_OLLAMA_PLACEMENT:
+        return
+    expected = os.getenv("INTERNAL_API_KEY") or ""
+    if expected and x_internal_key and hmac.compare_digest(x_internal_key, expected):
+        return
+    from .client_chat import get_user_and_tier_from_headers
+    from ..services.user_tiers import UserTier
+    user_id, tier = get_user_and_tier_from_headers(authorization)
+    if user_id != "anonymous" and tier in (
+        UserTier.REGISTERED, UserTier.PRO, UserTier.ENTERPRISE,
+    ):
+        return
+    raise HTTPException(403, "Authenticated TriForce account required for local Ollama workers")
 
 
 @router.get("/")
@@ -96,7 +127,8 @@ async def get_openai_model(model_id: str):
 
 @router.post(
     "/chat/completions",
-    dependencies=[Depends(RateLimiter(times=5, seconds=10))],
+    dependencies=[Depends(RateLimiter(times=5, seconds=10)),
+                  Depends(require_pinned_ollama_auth)],
 )
 async def openai_chat_completions(payload: OpenAIChatCompletionRequest):
     if payload.stream:
@@ -106,7 +138,8 @@ async def openai_chat_completions(payload: OpenAIChatCompletionRequest):
 
 @router.post(
     "/",
-    dependencies=[Depends(RateLimiter(times=5, seconds=10))],
+    dependencies=[Depends(RateLimiter(times=5, seconds=10)),
+                  Depends(require_pinned_ollama_auth)],
 )
 async def openai_chat_completions_root(payload: OpenAIChatCompletionRequest):
     """Alternative endpoint at /v1/openai for compatibility."""

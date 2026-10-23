@@ -295,6 +295,12 @@ def _choose_mode(message: str, url: Optional[str], requested: str, tools: list[s
 
 @router.post("", response_model=PlaygroundResponse)
 async def nova_playground(req: PlaygroundRequest) -> Dict[str, Any]:
+    # This endpoint is intentionally anonymous; private federation nodes may
+    # only be selected via authenticated TriForce client/API endpoints.
+    from app.services.ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+    if (req.model or "").removeprefix("ollama/") in LOCAL_OLLAMA_PLACEMENT:
+        return {"ok": False, "mode": "error", "answer": "", "sources": [],
+                "error": "Please sign in through the TriForce client to use this model"}
     message = req.message.strip()
     if not message:
         return {"ok": False, "mode": "error", "answer": "", "sources": [],
@@ -413,6 +419,9 @@ async def nova_playground_agent(req: AgentRequest) -> Dict[str, Any]:
     Startet einen dedizierten Agent-Session via spawn_for_user().
     Gibt session_id zurück — Ergebnis via /nova/playground/agent/{session_id}/result abrufbar.
     """
+    from app.services.ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+    if (req.model_id or "").removeprefix("ollama/") in LOCAL_OLLAMA_PLACEMENT:
+        return {"ok": False, "error": "Private Ollama workers require authenticated TriForce client access"}
     topic  = req.topic.strip()
     prompt = req.prompt.strip() or f"Analysiere und bearbeite: {topic}"
     if not topic:

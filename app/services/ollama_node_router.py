@@ -24,6 +24,31 @@ _ZOMBIE_DEFAULT_MODELS = {
     "hf-gemma-4-e4b-uncensored-hauhaucs-aggressive:latest",
 }
 
+# Only these explicitly administered models may appear in the self-hosted
+# catalog. Their exact node is pinned; never silently route to an unrelated
+# worker or a cloud provider with a similarly named model.
+LOCAL_OLLAMA_PLACEMENT: dict[str, str] = {
+    "openbmb/minicpm-v4.7:35b-a3b": "hetzner",
+    "openbmb/minicpm-v4.7:1b": "backup",
+    "gemma4:12b": "zombie-pc",
+}
+
+
+def local_model_endpoint(model: str) -> OllamaEndpoint | None:
+    """Return the only permitted host for a locally pinned Ollama model."""
+    name = _normal_model(model)
+    node_id = LOCAL_OLLAMA_PLACEMENT.get(name)
+    if not node_id:
+        return None
+    default_urls = {
+        "hetzner": os.getenv("OLLAMA_BASE_URL",
+                             os.getenv("OLLAMA_BASE", "http://127.0.0.1:11434")),
+        "backup": os.getenv("TRIFORCE_OLLAMA_BACKUP_URL", "http://10.10.0.3:11434"),
+        "zombie-pc": os.getenv("TRIFORCE_OLLAMA_ZOMBIE_URL", "http://10.10.0.2:11434"),
+    }
+    return OllamaEndpoint(node_id, default_urls[node_id].rstrip("/"),
+                          100.0, "pinned-local-model")
+
 
 def _csv_models(value: str) -> set[str]:
     return {item.strip() for item in str(value or "").split(",") if item.strip()}
@@ -106,6 +131,11 @@ def ollama_candidates(model: str = "") -> list[OllamaEndpoint]:
     always retained as a final candidate.
     """
     model_name = _normal_model(model)
+    pinned = local_model_endpoint(model_name)
+    if pinned is not None:
+        # The model is installed on exactly one worker. Do not return a false
+        # fallback that would produce 404 or run a different model elsewhere.
+        return [pinned]
     backup_url = os.getenv(
         "TRIFORCE_OLLAMA_BACKUP_URL", "http://10.10.0.3:11434"
     ).rstrip("/")
