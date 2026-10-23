@@ -15,6 +15,8 @@ import httpx
 from fastapi.responses import JSONResponse
 from starlette.background import BackgroundTask
 
+from ..services.discord_voice_history import VoiceHistoryStore
+
 LOGGER = logging.getLogger(__name__)
 
 # Application/guild owner identities verified through the Discord Bot API.
@@ -24,7 +26,7 @@ OWNER_ID = "965583496435367956"
 REMOTE_TARGET = "zombie-pc"
 REMOTE_CLIENT = "/home/zombie/workspace/triforce/integrations/ailinux-discord-voice-mcp/remote_client.py"
 
-SUPPORTED = {"join", "say", "leave", "status", "listen", "quiet"}
+SUPPORTED = {"join", "say", "leave", "status", "listen", "quiet", "history", "forget"}
 
 
 def private_message(content: str) -> JSONResponse:
@@ -47,7 +49,7 @@ def parse_nova(payload: dict[str, Any]) -> tuple[str, str, str] | str:
     # Discord handles default command permissions, but never rely on that alone.
     options = (payload.get("data") or {}).get("options") or []
     if not isinstance(options, list) or len(options) != 1:
-        return "Verwende /nova join, /nova listen, /nova quiet, /nova status oder /nova leave."
+        return "Verwende /nova join, /nova listen, /nova quiet, /nova history oder /nova leave."
     subcommand = options[0]
     if not isinstance(subcommand, dict) or subcommand.get("type") != 1:
         return "Ungültiger Unterbefehl."
@@ -110,9 +112,25 @@ async def voice_rpc(request: dict[str, Any]) -> dict[str, Any]:
 async def do_nova_action(action: str, user_id: str, text: str) -> str:
     if action == "status":
         data = await voice_rpc({"op": "status"})
+        history_count = await asyncio.to_thread(VoiceHistoryStore().count, GUILD_ID, OWNER_ID)
         if data.get("connected"):
-            return f"Nova ist in #{data.get('channel_name', 'Sprachkanal')}. Stimme: Seraphina. Zuhören: {'an' if data.get('listening') else 'aus'}."
-        return "Nova ist online und bereit. Ich bin noch in keinem Sprachkanal. Nutze /nova join."
+            return (f"Nova ist in #{data.get('channel_name', 'Sprachkanal')}. "
+                    f"Seraphina: aktiv. Zuhören: {'an' if data.get('listening') else 'aus'}. "
+                    f"Gespeicherte Gesprächsrunden: {history_count}. "
+                    f"Aktivierungswort: Nova.")
+        return (f"Nova ist online, aber nicht im Sprachkanal. "
+                f"Gespeicherte Gesprächsrunden: {history_count}. Nutze /nova join.")
+
+    if action == "history":
+        turns = await asyncio.to_thread(VoiceHistoryStore().recent, GUILD_ID, OWNER_ID, 5)
+        if not turns:
+            return "Noch keine gespeicherten Gespräche. Starte mit 'Nova' und einer Frage."
+        entries = [f"Du: {item['user'][:180]}\nNova: {item['assistant'][:220]}" for item in turns]
+        return "Deine letzten Nova-Gespräche:\n\n" + "\n\n".join(entries)[-1750:]
+
+    if action == "forget":
+        removed = await asyncio.to_thread(VoiceHistoryStore().clear, GUILD_ID, OWNER_ID)
+        return f"Gesprächshistorie gelöscht: {removed} Runde(n). Neue Fragen beginnen wieder ohne Vorwissen."
 
     if action == "join":
         data = await voice_rpc({"op": "join_user", "user_id": user_id})
