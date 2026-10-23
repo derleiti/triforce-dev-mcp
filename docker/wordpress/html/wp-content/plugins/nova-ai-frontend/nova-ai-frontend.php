@@ -410,77 +410,61 @@ function nova_proxy_auth(string $path, string $method='GET', ?array $body=null):
 
 function nova_proxy_health(WP_REST_Request $r): WP_REST_Response  { return nova_proxy('/health'); }
 function nova_proxy_models(WP_REST_Request $r): WP_REST_Response {
-    $settings     = get_option('nova_ai_settings', []);
-    $endpoint     = $settings['api_endpoint'] ?? 'https://api.ailinux.me';
-    $internal_key = $settings['internal_key']  ?? '';
-
-    // FIX 2026-04-24: /v1/frontend/dashboard/models entfernt — nutze /v1/models/all.
-    // Response-Shape: {data: [...], total: N} statt {models: [...]} — wird unten normalisiert.
-    $resp = wp_remote_get($endpoint . '/v1/models/all', [
+    // A public WordPress dashboard never uses privileged /v1/models/all.
+    // TriForce is the one source of truth for tier access and free metadata.
+    $settings = get_option('nova_ai_settings', []);
+    $endpoint = rtrim($settings['api_endpoint'] ?? 'https://api.ailinux.me', '/');
+    $resp = wp_remote_get($endpoint . '/v1/client/models', [
         'timeout' => 15,
-        'headers' => [
-            'Accept'          => 'application/json',
-            'X-Internal-Key'  => $internal_key,
-        ],
+        'headers' => ['Accept' => 'application/json'],
     ]);
-
     if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) {
-        // Fallback: client/models ohne Auth (57 Free-Modelle)
-        $resp2 = wp_remote_get($endpoint . '/v1/client/models', ['timeout' => 10]);
-        if (!is_wp_error($resp2)) {
-            $body2 = json_decode(wp_remote_retrieve_body($resp2), true);
-            $raw   = $body2['models'] ?? [];
-            $models = [];
-            foreach ($raw as $m) {
-                if (is_string($m)) {
-                    $p = explode('/', $m, 2);
-                    $models[] = ['id'=>$m,'name'=>count($p)>1?$p[1]:$m,'provider'=>count($p)>1?$p[0]:'other','chat'=>true];
-                } else { $models[] = $m; }
-            }
-            return new WP_REST_Response(['models' => $models, 'tier' => 'free', 'fallback' => true], 200);
-        }
-        return new WP_REST_Response(['models' => []], 502);
+        return new WP_REST_Response(['models' => [], 'count' => 0, 'error' => 'model_catalog_unavailable'], 502);
     }
-
     $body = json_decode(wp_remote_retrieve_body($resp), true);
-    // FIX 2026-04-24: /v1/models/all liefert {data: [...], total: N} — mappen auf {models, count}
-    $raw = $body['data'] ?? ($body['models'] ?? []);
-    $models = [];
-    foreach ($raw as $m) {
-        if (is_string($m)) {
-            $p = explode('/', $m, 2);
-            $models[] = ['id'=>$m, 'name'=>count($p)>1?$p[1]:$m, 'provider'=>count($p)>1?$p[0]:'other', 'chat'=>true];
-            continue;
+    if (!is_array($body) || !isset($body['models']) || !is_array($body['models'])) {
+        return new WP_REST_Response(['models' => [], 'count' => 0, 'error' => 'invalid_model_catalog'], 502);
+    }
+    $details = [];
+    foreach (($body['model_details'] ?? []) as $item) {
+        if (is_array($item) && isset($item['id']) && is_string($item['id'])) {
+            $details[$item['id']] = $item;
         }
-        $id       = $m['id'] ?? '';
-        $parts    = explode('/', $id, 2);
-        $caps     = $m['capabilities'] ?? [];
-        $entry = [
-            'id'       => $id,
-            'name'     => $m['name'] ?? (count($parts)>1 ? $parts[1] : $id),
-            'provider' => $m['provider'] ?? (count($parts)>1 ? $parts[0] : 'other'),
-            'chat'     => in_array('chat', $caps, true) || ($m['chat'] ?? false) === true,
-            'vision'   => in_array('vision', $caps, true) || in_array('multimodal', $caps, true),
-            'media_image'  => in_array('image_gen', $caps, true),
-            'media_video'  => in_array('video_gen', $caps, true),
-            'audio'        => in_array('audio', $caps, true),
-            'ocr'          => in_array('ocr', $caps, true),
-            'embedding'    => in_array('embedding', $caps, true),
-            'code'         => in_array('code', $caps, true),
-            'reasoning'    => in_array('reasoning', $caps, true),
-            'image_gen'    => in_array('image_gen', $caps, true),
-            'video_gen'    => in_array('video_gen', $caps, true),
+    }
+    $models = [];
+    foreach ($body['models'] as $value) {
+        $id = is_string($value) ? $value : (is_array($value) ? ($value['id'] ?? '') : '');
+        if (!is_string($id) || $id === '') continue;
+        $entry = $details[$id] ?? [];
+        $parts = explode('/', $id, 2);
+        $caps = is_array($entry['capabilities'] ?? null) ? $entry['capabilities'] : ['chat'];
+        $row = [
+            'id' => $id,
+            'name' => $entry['name'] ?? (count($parts) > 1 ? $parts[1] : $id),
+            'provider' => $entry['provider'] ?? $parts[0],
+            'chat' => in_array('chat', $caps, true),
+            'vision' => in_array('vision', $caps, true),
+            'image_gen' => in_array('image_gen', $caps, true),
+            'video_gen' => in_array('video_gen', $caps, true),
+            'media_image' => in_array('image_gen', $caps, true),
+            'media_video' => in_array('video_gen', $caps, true),
+            'audio' => in_array('audio', $caps, true),
+            'ocr' => in_array('ocr', $caps, true),
+            'embedding' => in_array('embedding', $caps, true),
+            'code' => in_array('code', $caps, true),
+            'reasoning' => in_array('reasoning', $caps, true),
+            'free_status' => $entry['free_status'] ?? 'unknown',
+            'free_endpoint' => ($entry['free_endpoint'] ?? false) === true,
+            'free_badge' => ($entry['free_badge'] ?? false) === true,
             'capabilities' => $caps,
         ];
-        $entry['categories'] = [];
+        $row['categories'] = [];
         foreach (['chat','vision','media_image','media_video','audio','ocr','embedding','code','reasoning'] as $cat) {
-            if (!empty($entry[$cat])) {
-                $entry['categories'][] = $cat;
-            }
+            if (!empty($row[$cat])) $row['categories'][] = $cat;
         }
-        $models[] = $entry;
+        $models[] = $row;
     }
-    return new WP_REST_Response(['models' => $models, 'count' => count($models)], 200);
+    return new WP_REST_Response(['models' => $models, 'count' => count($models), 'tier' => $body['tier'] ?? 'guest'], 200);
 }
 function nova_proxy_chat(WP_REST_Request $r): WP_REST_Response {
     $params = $r->get_json_params();
