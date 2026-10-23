@@ -46,7 +46,7 @@ function token() {
 }
 
 function doctor() {
-  console.log('Nova Discord Voice RC0.3');
+  console.log('Nova Discord Voice RC0.3.1');
   if (!GUILD_ID || !APP_ID) throw new Error('GuildControl must have exactly one allowed guild and app id');
   token();
   const node = process.versions.node;
@@ -93,7 +93,7 @@ function publicStatus() {
     connected:Boolean(s?.connection && s.connection.state.status === VoiceConnectionStatus.Ready),
     guild_id:GUILD_ID, channel_id:s?.channelId || null,
     channel_name:s?.channelName || null, state:s?.connection?.state?.status || 'none',
-    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.3.0'
+    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.3.1'
   };
 }
 
@@ -136,6 +136,32 @@ function say(text) {
   return job;
 }
 
+const WAKE_ACK_FILE = join(STATE_DIR, 'wake-ack.mp3');
+
+// Play a pre-generated, private Seraphina clip for near-immediate feedback.
+// Retain the existing TTS path as a fallback if the cache is missing.
+function acknowledgeWake() {
+  const session=sessions.get(GUILD_ID);
+  if (!session || session.connection.state.status !== VoiceConnectionStatus.Ready) {
+    return Promise.reject(new Error('Voice channel is not ready'));
+  }
+  if (!existsSync(WAKE_ACK_FILE) || statSync(WAKE_ACK_FILE).size < 3000) {
+    return say('Ja, Zombie?');
+  }
+  const job=session.pending.then(async () => {
+    session.speakingBack=true;
+    try {
+      session.player.play(createAudioResource(WAKE_ACK_FILE));
+      await entersState(session.player, AudioPlayerStatus.Idle, 18000);
+      return {ok:true,cache:true};
+    } finally {
+      session.speakingBack=false;
+    }
+  });
+  session.pending=job.catch(e=>console.error('Wake acknowledgement error:',e.message));
+  return job;
+}
+
 async function joinChannel(channelId) {
   if (!client?.isReady()) throw new Error('Discord bot gateway is not connected');
   const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID);
@@ -170,7 +196,7 @@ async function joinChannel(channelId) {
     throw new Error('Discord voice/DAVE handshake failed: ' + err.message);
   }
   const listening=attachConversation(session,{
-    python:PYTHON, root:ROOT, say,
+    python:PYTHON, root:ROOT, say, ack:acknowledgeWake,
   });
   try {await listening.ready;}
   catch(error){await leave();throw new Error('Offline speech recognition unavailable: '+error.message);}

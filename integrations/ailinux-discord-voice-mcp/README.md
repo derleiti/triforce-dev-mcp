@@ -136,3 +136,13 @@ Voice files prior to this patch are in
 ~/.local/state/ailinux-nova-voice/pre-conversation-fix-20261023/.
 The TriForce script and webhook backups are on the ailinux host under the same
 snapshot name. New history is never committed to Git.
+
+## RC0.3.1 - audible wake confirmation
+
+- Say Nova by itself: a short cached Seraphina clip says Ja, Zombie?
+- Speak the question after the confirmation within 18 seconds.
+- Recognition uses only the targeted Nova hotword; no long Whisper initial prompt.
+- Removes hallucinations on silence and tolerates short clips above 0.19 seconds.
+- Cached greeting lives in private state under wake-ack.mp3; missing file falls back
+  to online Seraphina synthesis. It contains no recorded user audio.
+- Spoken activation without a question is not sent to the LLM or chat history.

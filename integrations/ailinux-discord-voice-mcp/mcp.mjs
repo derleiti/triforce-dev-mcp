@@ -41,7 +41,7 @@ function result(data) {
 
 const server = new McpServer({
   name:'ailinux-discord-voice-mcp',
-  version:'0.3.0'
+  version:'0.3.1'
 });
 
 server.registerTool('discord_voice_status',{

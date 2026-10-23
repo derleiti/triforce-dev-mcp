@@ -12,16 +12,16 @@ import {queryTriForce,historyAction,VOICE_OWNER_ID,VOICE_GUILD_ID} from './chat_
 import {WakeDialogue} from './wake_dialogue.mjs';
 
 function remove(p){try{if(existsSync(p))unlinkSync(p);}catch{}}
-export function attachConversation(session,{python,root,say,chat=queryTriForce}) {
+export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zombie?'),chat=queryTriForce}) {
   const receiver=session.connection.receiver;
   const worker=new SpeechRecognizer(python,root);
   const dialogue=new WakeDialogue();
   let lastErrorNotice=0;
   let active=true, recording=false, processing=false, recorder=null,lastRecordAt=0;
   const metrics={speaking_events:0,audio_packets:0,clips:0,transcribed:0,
-    wakes:0,wake_only:0,followups:0,chat_requests:0,replies:0,errors:0,
+    wakes:0,wake_only:0,wake_acknowledged:0,followups:0,chat_requests:0,replies:0,errors:0,
     history_count:null,last_question_length:0,last_model:null,
-    last_audio_at:null,last_wake_at:null,last_response_at:null,
+    last_audio_at:null,last_wake_at:null,last_wake_ack_at:null,last_response_at:null,
     last_error:null,stt_ready:false};
   session.listening=false; session.responding=false;
   session.metrics=metrics;
@@ -33,7 +33,7 @@ export function attachConversation(session,{python,root,say,chat=queryTriForce})
     if(!active||!session.listening||processing||!worker.ready)return;
     if(!existsSync(file))return;
     const size=statSync(file).size;
-    if(size<11000||size>650000)return;
+    if(size<6000||size>650000)return;
     processing=true;metrics.clips++;
     try{
       const result=await worker.recognize(file);
@@ -47,7 +47,17 @@ export function attachConversation(session,{python,root,say,chat=queryTriForce})
         metrics.wakes++;
         metrics.wake_only++;
         metrics.last_wake_at=new Date().toISOString();
-        return; // Wake-only: wait for next clip, never invent a question.
+        // Confirm activation audibly without asking the chat model a fake question.
+        // Refresh the activation window after TTS, which can take several seconds.
+        if(active && session.listening){
+          try{
+            await ack();
+            metrics.wake_acknowledged++;
+            metrics.last_wake_ack_at=new Date().toISOString();
+            if(active && session.listening)dialogue.interpret('Nova');
+          }catch(e){error('wake_ack',e);}
+        }
+        return;
       }
       if(event.source==='wake'){
         metrics.wakes++;
@@ -130,7 +140,7 @@ export function attachConversation(session,{python,root,say,chat=queryTriForce})
     metrics.stt_ready=true;session.listening=true;
     receiver.speaking.on('start',onStart);
     historyAction('count').then(result=>{
-      if(active)metrics.history_count=chatResult.history_count;
+      if(active)metrics.history_count=result.history_count;
     }).catch(()=>{});
     console.log('Nova wake receiver active with split-wake/follow-up support.');
   }).catch(e=>{error('start',e);throw e;});

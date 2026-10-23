@@ -36,6 +36,9 @@ def transcribe(source: str) -> tuple[str, float]:
             raise ValueError("Expected 16-kHz PCM16 mono WAV")
         data = wav.readframes(wav.getnframes())
     samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+    # Guard against Whisper text hallucinations on nearly silent clips.
+    if not samples.size or float(np.sqrt(np.mean(samples * samples))) < 0.001:
+        return "", len(samples) / 16000.0
     segments, info = MODEL.transcribe(
         samples,
         language="de",
@@ -45,10 +48,13 @@ def transcribe(source: str) -> tuple[str, float]:
         vad_filter=False,
         temperature=0,
         no_speech_threshold=0.65,
-        initial_prompt="Ein deutschsprachiges Gespräch über Linux, Technik, Musik und den Alltag.",
+        # Focused recognition hint. A long initial_prompt caused hallucinations.
+        hotwords="Nova",
     )
     pieces = []
     for part in segments:
+        if part.no_speech_prob > 0.80:
+            continue
         pieces.append(part.text)
         if sum(map(len, pieces)) > 800:
             break
