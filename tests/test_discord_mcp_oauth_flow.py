@@ -51,6 +51,9 @@ def _start(client, client_id):
     r = client.get("/v1/discord-mcp/oauth2/authorize", params=q)
     assert r.status_code == 200, r.text
     assert "ChatGPT local test" in r.text
+    assert r.headers["referrer-policy"] == "same-origin"
+    assert '<meta name="referrer" content="same-origin">' in r.text
+    assert "login.ailinux.me" in r.text
     assert "dmcp_consent" in client.cookies
     return verifier, q
 
@@ -129,6 +132,54 @@ def test_mcp_discovery_and_auth_boundary(scenario):
     assert origin.status_code == 403
 
 
+def test_google_ailinux_sign_in_redirect_for_unauthenticated_user(scenario, monkeypatch):
+    client, _, _ = scenario
+    # One AILinux session per person; no Gmail credential is sent to ChatGPT.
+    monkeypatch.setattr(auth, "_ailinux_account", lambda request: None)
+    client_id = _client_registration(client)
+    verifier = "A" * 60
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    query = {
+        "response_type": "code", "client_id": client_id,
+        "redirect_uri": "https://chatgpt.com/connector_platform_oauth_redirect",
+        "scope": "discord:read", "state": "strongrandomstateabcdefghijklmnopqrstuvwxyz",
+        "code_challenge": challenge, "code_challenge_method": "S256", "resource": RESOURCE,
+    }
+    res = client.get("/v1/discord-mcp/oauth2/authorize", params=query)
+    assert res.status_code == 302
+    dest = urlparse(res.headers["location"])
+    assert (dest.scheme, dest.netloc) == ("https", "login.ailinux.me")
+    parameters = parse_qs(dest.query)
+    assert parameters["google"] == ["1"]
+    redirect = urlparse(parameters["redirect"][0])
+    assert redirect.netloc == "discord.ailinux.me"
+    assert redirect.path == "/authorize"
+    assert "state=" in redirect.query
+
+
+def test_null_origin_is_still_rejected(scenario):
+    client, _, _ = scenario
+    client_id = _client_registration(client)
+    _start(client, client_id)
+    csrf = client.cookies.get("dmcp_consent")
+    blocked = client.post(
+        "/v1/discord-mcp/oauth2/authorize/approve",
+        data={"csrf": csrf, "allow": "yes"},
+        headers={"Origin": "null"},
+    )
+    assert blocked.status_code == 403
+    assert "Invalid request origin" in blocked.text
+    # The invalid POST must not consume the authorization attempt.
+    approved = client.post(
+        "/v1/discord-mcp/oauth2/authorize/approve",
+        data={"csrf": csrf, "allow": "yes"},
+        headers={"Origin": "https://discord.ailinux.me"},
+    )
+    assert approved.status_code == 303
+
+
 def test_redirect_integrity_and_dcr_validation(scenario):
     client, _, _ = scenario
     rejected = client.post("/v1/discord-mcp/oauth2/register", json={
@@ -158,3 +209,74 @@ def test_consent_refuses_csrf_and_one_time(scenario):
     assert "access_denied" in first.headers["location"]
     second = client.post("/v1/discord-mcp/oauth2/authorize/approve", data={"csrf": csrf, "allow": "yes"})
     assert second.status_code == 403
+
+
+def test_two_ailinux_google_accounts_get_independent_mcp_tokens(scenario, monkeypatch):
+    """After an AILinux login, OAuth tokens preserve the verified user identity."""
+    client, db, tokens = scenario
+    discord_alice = "123456789012345678"
+    discord_bob = "223456789012345678"
+    guild_alice = "323456789012345678"
+    db.link("alice", discord_alice)
+    db.link("bob", discord_bob)
+    db.grant("alice", discord_alice, guild_alice, {"mcp:read"})
+    monkeypatch.setattr(mcp, "USER_REGISTRY", {
+        "alice": {"tier": "free"}, "bob": {"tier": "free"},
+    })
+    monkeypatch.setattr(
+        auth, "_ailinux_account", lambda request: request.cookies.get("test_ailinux_identity"),
+    )
+
+    token_for = {}
+    for account in ("alice", "bob"):
+        client.cookies.set("test_ailinux_identity", account, domain="discord.ailinux.me")
+        client_id = _client_registration(client)
+        verifier, params = _start(client, client_id)
+        csrf = client.cookies.get("dmcp_consent")
+        redirect = client.post(
+            "/v1/discord-mcp/oauth2/authorize/approve",
+            data={"csrf": csrf, "allow": "yes"},
+            headers={"Origin": "https://discord.ailinux.me"},
+        )
+        assert redirect.status_code == 303
+        code = parse_qs(urlparse(redirect.headers["location"]).query)["code"][0]
+        exchange = client.post("/v1/discord-mcp/oauth2/token", data={
+            "grant_type": "authorization_code", "client_id": client_id,
+            "redirect_uri": params["redirect_uri"], "code": code,
+            "code_verifier": verifier,
+            "resource": RESOURCE,
+        })
+        assert exchange.status_code == 200
+        token_for[account] = exchange.json()["access_token"]
+        claims = tokens.verify(token_for[account])
+        assert claims["account"] == account
+        assert claims["resource"] == RESOURCE
+
+    assert token_for["alice"] != token_for["bob"]
+    for account in ("alice", "bob"):
+        response = client.post(
+            "/v1/discord-mcp/mcp",
+            headers={"Authorization": "Bearer " + token_for[account]},
+            json={"jsonrpc": "2.0", "id": 10, "method": "tools/call",
+                  "params": {"name": "discord_authorized_guilds", "arguments": {}}},
+        )
+        assert response.status_code == 200
+        servers = response.json()["result"]["structuredContent"]["servers"]
+        if account == "alice":
+            assert len(servers) == 1 and servers[0]["guild_id"] == guild_alice
+        else:
+            assert servers == []
+
+    tokens.revoke_account("alice")
+    revoked = client.post(
+        "/v1/discord-mcp/mcp",
+        headers={"Authorization": "Bearer " + token_for["alice"]},
+        json={"jsonrpc": "2.0", "id": 11, "method": "tools/list"},
+    )
+    assert revoked.status_code == 401
+    still_authorized = client.post(
+        "/v1/discord-mcp/mcp",
+        headers={"Authorization": "Bearer " + token_for["bob"]},
+        json={"jsonrpc": "2.0", "id": 12, "method": "tools/list"},
+    )
+    assert still_authorized.status_code == 200

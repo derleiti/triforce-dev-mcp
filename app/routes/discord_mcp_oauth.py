@@ -133,7 +133,7 @@ async def authorize(request: Request):
     if not account:
         url = PUBLIC + "/authorize?" + str(q)
         return RedirectResponse(
-            "https://login.ailinux.me/?" + urlencode({"redirect": url}),
+            "https://login.ailinux.me/?" + urlencode({"redirect": url, "google": "1"}),
             status_code=302,
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
@@ -145,21 +145,27 @@ async def authorize(request: Request):
                    "offline_access" in scope.split() else "")
     page = f"""<!doctype html><html lang="de"><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <meta name="referrer" content="no-referrer"><title>AILinux MCP erlauben</title>
+    <meta name="referrer" content="same-origin"><title>AILinux MCP erlauben</title>
     <style>body{{background:#101725;color:#f1f5ff;font:16px system-ui;margin:10vh auto;max-width:540px;padding:24px}}
     section{{border:1px solid #35445f;border-radius:14px;padding:24px;background:#192438}}
     button{{background:#5865f2;color:white;border:0;border-radius:8px;padding:12px 18px;cursor:pointer;margin:8px 8px 0 0}}
     button[value=no]{{background:#35445f}}p{{line-height:1.6;color:#bac7dc}}</style>
     <section><h1>MCP-Verbindung freigeben</h1>
     <p><b>{safe_name}</b> möchte über dein AILinux-Konto Discord-Statusinformationen lesen.</p>
-    <p>Angemeldet: <b>{safe_account}</b><br>Client-Redirect: <b>{safe_redirect}</b><br>
+    <p>Angemeldet bei AILinux: <b>{safe_account}</b><br>
+    Google-Anmeldung erfolgt ausschließlich über <b>login.ailinux.me</b>;
+    weder Google-Zugangsdaten noch dein AILinux-Login-Token werden an ChatGPT übertragen.<br>
+    Client-Redirect: <b>{safe_redirect}</b><br>
     Berechtigung: <b>discord:read</b> (nur lesend){long_access}<br>Die Verbindung kann ein erneuerbares Zugriffstoken erhalten und jederzeit im AILinux-Konto widerrufen werden.</p>
     <form method="POST" action="/authorize/approve">
     <input type="hidden" name="csrf" value="{html.escape(csrf)}">
     <button name="allow" value="yes" type="submit">Verbindung erlauben</button>
     <button name="allow" value="no" type="submit">Ablehnen</button>
     </form></section></html>"""
-    response = HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+    # Referrer-Policy: no-referrer sends Origin:null on normal Chrome form POSTs.
+    # Use same-origin: preserves strict origin checking and never leaks OAuth
+    # authorization codes, state or consent URLs to external redirects.
+    response = HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "same-origin",
                                            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"})
     response.set_cookie("dmcp_consent", csrf, max_age=300, httponly=True,
                         secure=True, samesite="lax", path="/")
