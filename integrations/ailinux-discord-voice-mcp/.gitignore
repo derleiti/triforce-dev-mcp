@@ -1,0 +1,10 @@
+node_modules/
+.venv/
+.env
+*.mp3
+*.wav
+*.log
+*.sock
+*.secret
+__pycache__/
+*.pyc
