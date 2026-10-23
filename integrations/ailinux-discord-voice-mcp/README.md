@@ -146,3 +146,16 @@ snapshot name. New history is never committed to Git.
 - Cached greeting lives in private state under wake-ack.mp3; missing file falls back
   to online Seraphina synthesis. It contains no recorded user audio.
 - Spoken activation without a question is not sent to the LLM or chat history.
+
+## RC0.4 - opt-in hands-free conversation
+
+- `/nova talk` enters owner-only hands-free voice mode (no activation word needed).
+- Only the configured guild owner microphone is recognized; short/noisy
+  utterances are filtered and the bot suppresses its own TTS echo.
+- `/nova quiet` disables receiving speech, `/nova listen` restores wake-word
+  mode, and `/nova leave` disconnects the bot from the channel.
+- The conversation model is the separate TriForce Groq chat, **not** this
+  ChatGPT GPT-6 conversation. Audio is transcribed only for the permitted owner.
+- Successful turns continue to use private 30-day server-side history.
+- Hands-free mode is opt-in and is not automatically resumed after a crash,
+  disconnect or reboot; reconnect with `/nova talk` to resume.

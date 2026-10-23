@@ -16,10 +16,12 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
   const receiver=session.connection.receiver;
   const worker=new SpeechRecognizer(python,root);
   const dialogue=new WakeDialogue();
+  let conversationMode=false;
+  let lastSpokenReplyAt=0;
   let lastErrorNotice=0;
   let active=true, recording=false, processing=false, recorder=null,lastRecordAt=0;
   const metrics={speaking_events:0,audio_packets:0,clips:0,transcribed:0,
-    wakes:0,wake_only:0,wake_acknowledged:0,followups:0,chat_requests:0,replies:0,errors:0,
+    wakes:0,wake_only:0,wake_acknowledged:0,followups:0,free_talk_turns:0,chat_requests:0,replies:0,errors:0,
     history_count:null,last_question_length:0,last_model:null,
     last_audio_at:null,last_wake_at:null,last_wake_ack_at:null,last_response_at:null,
     last_error:null,stt_ready:false};
@@ -41,7 +43,15 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
       const words=String(result.text||'').trim();
       if(!words)return;
       metrics.transcribed++;
-      const event=dialogue.interpret(words);
+      // Explicit opt-in open conversation: speech from the authorized owner
+      // requires no wake word, but ignore extremely short/noisy fragments.
+      const wordCount=words.split(/\s+/u).filter(Boolean).length;
+      const fullUtterance=words.length>=10 && wordCount>=3
+        && Number(result.duration_s||0)>=0.65
+        && !/^(untertitel|copyright|vielen dank fürs zuschauen)/iu.test(words);
+      const event=conversationMode
+        ? (fullUtterance ? {kind:'question',text:words,source:'free_talk'} : {kind:'ignore'})
+        : dialogue.interpret(words);
       if(event.kind==='ignore')return;
       if(event.kind==='armed'){
         metrics.wakes++;
@@ -64,6 +74,7 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
         metrics.last_wake_at=new Date().toISOString();
       }
       if(event.source==='followup')metrics.followups++;
+      if(event.source==='free_talk')metrics.free_talk_turns++;
       const userText=event.text;
       metrics.last_question_length=userText.length;
       metrics.chat_requests++;
@@ -87,6 +98,7 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
       await say(chatResult.response);
       dialogue.markReplied();
       metrics.replies++;
+      lastSpokenReplyAt=Date.now();
       metrics.last_response_at=new Date().toISOString();
     }catch(e){error('recognition',e);}
     finally{session.responding=false;processing=false;}
@@ -95,6 +107,7 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
     if(!active||!session.listening||String(userId)!==VOICE_OWNER_ID)return;
     metrics.speaking_events++;
     if(recording||processing||session.responding||session.speakingBack)return;
+    if(Date.now()-lastSpokenReplyAt<1300)return; // avoid TTS echo after playback
     if(session.connection.state.status!==VoiceConnectionStatus.Ready)return;
     if(Date.now()-lastRecordAt<400)return;
     lastRecordAt=Date.now();
@@ -150,11 +163,20 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
       if(!active)throw new Error('Listener stopped');
       if(enabled&&!worker.ready)throw new Error('STT not ready');
       session.listening=Boolean(enabled);
-      if(!enabled)dialogue.reset();
-      return {ok:true,listening:session.listening,wake_word:'nova'};
+      conversationMode=false;
+      dialogue.reset();
+      return {ok:true,listening:session.listening,conversation_mode:false,wake_word:'nova'};
+    },
+    talk(){
+      if(!active||!worker.ready)throw new Error('Speech recognizer not ready');
+      session.listening=true;
+      conversationMode=true;
+      dialogue.reset();
+      return {ok:true,listening:true,conversation_mode:true,mode:'conversation'};
     },
     close(){
       active=false;session.listening=false;
+      conversationMode=false;
       dialogue.reset();
       receiver.speaking.off('start',onStart);
       try{recorder?.destroy();}catch{}
@@ -163,6 +185,8 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
     status(){return {
       listening:Boolean(session.listening&&worker.ready),
       responding:Boolean(session.responding),
+      conversation_mode:conversationMode,
+      mode:!session.listening?'off':(conversationMode?'conversation':'wake'),
       wake_word:'nova',stt_model:'small',...metrics,...dialogue.status()
     };}
   };

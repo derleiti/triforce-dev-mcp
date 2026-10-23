@@ -15,7 +15,7 @@ def main() -> None:
     if not isinstance(request, dict):
         raise ValueError("request must be JSON object")
     operation = request.get("op")
-    if operation not in {"status", "join_user", "say", "leave", "listen"}:
+    if operation not in {"status", "join_user", "say", "leave", "listen", "talk"}:
         raise ValueError("invalid operation")
     if operation == "join_user":
         uid = request.get("user_id", "")

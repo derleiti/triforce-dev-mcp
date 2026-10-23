@@ -30,6 +30,7 @@ const command = new SlashCommandBuilder()
   .addSubcommand(sub => sub.setName('join').setDescription('Nova kommt in deinen aktuellen Sprachkanal'))
   .addSubcommand(sub => sub.setName('say').setDescription('Nova spricht einen Satz mit Seraphina')
     .addStringOption(opt => opt.setName('text').setDescription('Was soll Nova sagen?').setRequired(true).setMaxLength(400)))
+  .addSubcommand(sub => sub.setName('talk').setDescription('Freies Sprachgespräch ohne Nova-Aktivierungswort'))
   .addSubcommand(sub => sub.setName('listen').setDescription('Auf das Aktivierungswort Nova hören'))
   .addSubcommand(sub => sub.setName('quiet').setDescription('Spracherkennung pausieren'))
   .addSubcommand(sub => sub.setName("history").setDescription("Letzte gespeicherte Nova Gespraeche anzeigen"))
@@ -46,7 +47,7 @@ function token() {
 }
 
 function doctor() {
-  console.log('Nova Discord Voice RC0.3.1');
+  console.log('Nova Discord Voice RC0.4.0');
   if (!GUILD_ID || !APP_ID) throw new Error('GuildControl must have exactly one allowed guild and app id');
   token();
   const node = process.versions.node;
@@ -93,7 +94,7 @@ function publicStatus() {
     connected:Boolean(s?.connection && s.connection.state.status === VoiceConnectionStatus.Ready),
     guild_id:GUILD_ID, channel_id:s?.channelId || null,
     channel_name:s?.channelName || null, state:s?.connection?.state?.status || 'none',
-    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.3.1'
+    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.4.0'
   };
 }
 
@@ -240,6 +241,11 @@ async function processControl(request) {
   }
   if (request.op === 'join_user') return await joinUser(request.user_id);
   if (request.op === 'say') return await say(request.text);
+  if (request.op === 'talk') {
+    const session=sessions.get(GUILD_ID);
+    if(!session?.voice)throw new Error('Nova is not in a voice channel');
+    return session.voice.talk();
+  }
   if (request.op === 'listen') {
     const session=sessions.get(GUILD_ID);
     if(!session?.voice)throw new Error('Nova is not in a voice channel');
@@ -312,6 +318,11 @@ async function handleInteraction(interaction) {
       const result = await joinChannel(channel.id);
       if(!result.reused) await say('Servus! Nova ist da. Und Brumo kontrolliert natürlich wieder die Tonqualität.');
       await interaction.editReply('Nova ist in ' + result.channel_name + '. Sag Nova und stell eine Frage. /nova quiet schaltet das Zuhören aus.');
+    } else if(sub === 'talk') {
+      const s=sessions.get(GUILD_ID);
+      if(!s?.voice)throw new Error('Nova ist nicht im Sprachkanal.');
+      s.voice.talk();
+      await interaction.editReply('Freies Gespräch aktiv – ich antworte ohne Aktivierungswort. /nova quiet beendet das Zuhören.');
     } else if(sub === 'listen' || sub === 'quiet') {
       const s=sessions.get(GUILD_ID);
       if(!s?.voice)throw new Error('Nova ist nicht im Sprachkanal.');

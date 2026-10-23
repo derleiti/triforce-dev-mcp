@@ -41,7 +41,7 @@ function result(data) {
 
 const server = new McpServer({
   name:'ailinux-discord-voice-mcp',
-  version:'0.3.1'
+  version:'0.4.0'
 });
 
 server.registerTool('discord_voice_status',{
@@ -63,6 +63,11 @@ server.registerTool('discord_voice_listen',{
   description:'Enable or disable owner-only Discord voice recognition. Wake word Nova.',
   inputSchema:{enabled:z.boolean()}
 },async({enabled})=>result(await invoke({op:'listen',enabled})));
+
+server.registerTool('discord_voice_talk',{
+  description:'Opt in to persistent, owner-only hands-free Discord conversation; no wake word. Only the authorized guild owner microphone is processed. Use discord_voice_listen(enabled=false) or leave to stop.',
+  inputSchema:{}
+},async()=>result(await invoke({op:'talk'})));
 
 server.registerTool('discord_voice_leave',{
   description:'Disconnect Nova from Discord voice and stop playback.',
