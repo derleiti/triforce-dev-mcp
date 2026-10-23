@@ -340,3 +340,45 @@ def test_mcp_consent_nonce_required_one_time_and_account_bound(scenario, monkeyp
     assert approved.status_code == 303
     replay = client.post(url, data={"csrf": csrf, "allow": "yes"}, headers=headers)
     assert replay.status_code == 403
+
+
+def test_single_click_consent_uses_hidden_decision_and_nonce_csp(scenario):
+    """Normal submit must work once, and script can disable buttons safely."""
+    import re
+    client, _, _ = scenario
+    client_id = _client_registration(client)
+    _, _, csrf = _start(client, client_id)
+    verifier = "A" * 60
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    params = {
+        "response_type": "code", "client_id": client_id,
+        "redirect_uri": "https://chatgpt.com/connector_platform_oauth_redirect",
+        "scope": "discord:read", "state": "anotherlongrandomstate01234567",
+        "code_challenge": challenge, "code_challenge_method": "S256", "resource": RESOURCE,
+    }
+    page = client.get("/v1/discord-mcp/oauth2/authorize", params=params)
+    assert page.status_code == 200
+    forms = re.findall(r'<form method="POST" action="/authorize/approve"[^>]*>(.*?)</form>',
+                       page.text, re.DOTALL)
+    assert len(forms) == 2
+    assert 'name="allow" value="yes"' in forms[0]
+    assert 'name="allow" value="no"' in forms[1]
+    assert 'name="allow" value=' not in re.sub(r'<input[^>]+>', '', page.text)
+    nonce = re.search(r'<script nonce="([^"]+)">', page.text)
+    assert nonce is not None
+    assert f"script-src 'nonce-{nonce.group(1)}'" in page.headers["content-security-policy"]
+    assert 'for (const button of document.querySelectorAll' in page.text
+    # Submit just once and confirm that it redirects immediately.
+    latest_csrf = re.findall(r'name="csrf" value="([^"]+)"', forms[0])[0]
+    assert latest_csrf != csrf
+    clicked = client.post("/v1/discord-mcp/oauth2/authorize/approve",
+                          data={"csrf": latest_csrf, "allow": "yes"},
+                          headers={"Origin": "https://discord.ailinux.me",
+                                   "Sec-Fetch-Site": "same-origin"})
+    assert clicked.status_code == 303
+    assert clicked.headers["location"].startswith("https://chatgpt.com/")
+    second = client.post("/v1/discord-mcp/oauth2/authorize/approve",
+                         data={"csrf": latest_csrf, "allow": "yes"},
+                         headers={"Origin": "https://discord.ailinux.me"})
+    assert second.status_code == 403
+    assert "ChatGPT-Tab" in second.text

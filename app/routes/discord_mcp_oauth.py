@@ -143,13 +143,20 @@ async def authorize(request: Request):
     safe_redirect = html.escape(urlsplit(redirect).hostname or "")
     long_access = ("<br>Dauerhafte Verbindung: <b>ja, widerrufbar</b>" if
                    "offline_access" in scope.split() else "")
+    import secrets
+    script_nonce = secrets.token_urlsafe(20)
     page = f"""<!doctype html><html lang="de"><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="referrer" content="same-origin"><title>AILinux MCP erlauben</title>
     <style>body{{background:#101725;color:#f1f5ff;font:16px system-ui;margin:10vh auto;max-width:540px;padding:24px}}
     section{{border:1px solid #35445f;border-radius:14px;padding:24px;background:#192438}}
     button{{background:#5865f2;color:white;border:0;border-radius:8px;padding:12px 18px;cursor:pointer;margin:8px 8px 0 0}}
-    button[value=no]{{background:#35445f}}p{{line-height:1.6;color:#bac7dc}}</style>
+    button.deny{{background:#35445f}}p{{line-height:1.6;color:#bac7dc}}
+    .consent-actions{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+    .consent-actions form{{display:inline-block;margin:0}}
+    button:disabled{{opacity:.55;cursor:wait}}
+    #consent-progress{{font-size:14px;color:#8df2ba}}
+    </style>
     <section><h1>MCP-Verbindung freigeben</h1>
     <p><b>{safe_name}</b> möchte über dein AILinux-Konto Discord-Statusinformationen lesen.</p>
     <p>Angemeldet bei AILinux: <b>{safe_account}</b><br>
@@ -157,16 +164,45 @@ async def authorize(request: Request):
     weder Google-Zugangsdaten noch dein AILinux-Login-Token werden an ChatGPT übertragen.<br>
     Client-Redirect: <b>{safe_redirect}</b><br>
     Berechtigung: <b>discord:read</b> (nur lesend){long_access}<br>Die Verbindung kann ein erneuerbares Zugriffstoken erhalten und jederzeit im AILinux-Konto widerrufen werden.</p>
-    <form method="POST" action="/authorize/approve">
+    <div class="consent-actions">
+    <form method="POST" action="/authorize/approve" class="consent-form">
     <input type="hidden" name="csrf" value="{html.escape(csrf)}">
-    <button name="allow" value="yes" type="submit">Verbindung erlauben</button>
-    <button name="allow" value="no" type="submit">Ablehnen</button>
-    </form></section></html>"""
+    <input type="hidden" name="allow" value="yes">
+    <button type="submit">Verbindung erlauben</button>
+    </form>
+    <form method="POST" action="/authorize/approve" class="consent-form">
+    <input type="hidden" name="csrf" value="{html.escape(csrf)}">
+    <input type="hidden" name="allow" value="no">
+    <button type="submit" class="deny">Ablehnen</button>
+    </form>
+    </div>
+    <p id="consent-progress" role="status" aria-live="polite"></p>
+    </section>
+    <script nonce="{script_nonce}">
+    (() => {{
+      let submitted = false;
+      for (const form of document.querySelectorAll(".consent-form")) {{
+        form.addEventListener("submit", event => {{
+          if (submitted) {{ event.preventDefault(); return; }}
+          submitted = true;
+          const action = form.querySelector('input[name="allow"]').value;
+          document.getElementById("consent-progress").textContent =
+            action === "yes" ? "Freigabe gesendet. Weiterleitung zu ChatGPT läuft …" :
+            "Ablehnung gesendet. Weiterleitung zu ChatGPT läuft …";
+          // Hidden fields keep both the consent nonce and decision in form data,
+          // even when all submit buttons become disabled on submission.
+          for (const button of document.querySelectorAll('button[type="submit"]')) {{
+            button.disabled = true;
+          }}
+        }});
+      }}
+    }})();
+    </script></html>"""
     # Referrer-Policy: no-referrer sends Origin:null on normal Chrome form POSTs.
     # Use same-origin: preserves strict origin checking and never leaks OAuth
     # authorization codes, state or consent URLs to external redirects.
     response = HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "same-origin",
-                                           "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"})
+                                           "Content-Security-Policy": f"default-src 'none'; script-src 'nonce-{script_nonce}'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"})
     # An authorization has its own high-entropy, account-bound, single-use
     # consent nonce stored server-side. Do not use one mutable cookie across
     # independent OAuth tabs (old dmcp_consent cookies might also survive).
@@ -195,7 +231,16 @@ async def approve(request: Request):
     # prevents replay without depending on a browser-wide mutable cookie.
     record = store().finish_authorize(csrf, account, data["allow"] == "yes")
     if not record:
-        return HTMLResponse("Consent expired, invalid, or already used", status_code=403)
+        return HTMLResponse(
+            '<!doctype html><html lang="de"><meta charset="utf-8">'
+            '<title>Freigabe bereits verwendet</title>'
+            '<body><h1>Die Freigabe ist nicht mehr gültig</h1>'
+            '<p>Diese Bestätigung wurde bereits verwendet oder ist abgelaufen.'
+            ' Bitte kehre zum ChatGPT-Tab zurück. Falls dort keine Verbindung'
+            ' zustande gekommen ist, starte die MCP-Anmeldung in ChatGPT neu.'
+            ' Nicht erneut auf derselben Seite bestätigen.</p></body></html>',
+            status_code=403, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
     payload = {"state": record["state"]}
     if "code" in record:
         payload["code"] = record["code"]
