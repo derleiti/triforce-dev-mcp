@@ -154,6 +154,10 @@ async def authorize(request: Request):
         return HTMLResponse("Invalid callback origin", status_code=400)
     long_access = ("<br>Dauerhafte Verbindung: <b>ja, widerrufbar</b>" if
                    "offline_access" in scope.split() else "")
+    voice_access = ("<br>Optionale Sprachsteuerung: <b>angefragt</b>. "
+                    "Nur mit zusaetzlicher, eigener Discord-Serverfreigabe nutzbar."
+                    if "discord:voice" in scope.split() else "")
+    approved_scopes = html.escape(scope)
     import secrets
     script_nonce = secrets.token_urlsafe(20)
     page = f"""<!doctype html><html lang="de"><meta charset="utf-8">
@@ -169,12 +173,12 @@ async def authorize(request: Request):
     #consent-progress{{font-size:14px;color:#8df2ba}}
     </style>
     <section><h1>MCP-Verbindung freigeben</h1>
-    <p><b>{safe_name}</b> möchte über dein AILinux-Konto Discord-Statusinformationen lesen.</p>
+    <p><b>{safe_name}</b> moechte sich mit deinem AILinux-Konto beim Discord-MCP anmelden.</p>
     <p>Angemeldet bei AILinux: <b>{safe_account}</b><br>
     Google-Anmeldung erfolgt ausschließlich über <b>login.ailinux.me</b>;
     weder Google-Zugangsdaten noch dein AILinux-Login-Token werden an ChatGPT übertragen.<br>
     Client-Redirect: <b>{safe_redirect}</b><br>
-    Berechtigung: <b>discord:read</b> (nur lesend){long_access}<br>Die Verbindung kann ein erneuerbares Zugriffstoken erhalten und jederzeit im AILinux-Konto widerrufen werden.</p>
+    Angeforderte OAuth-Berechtigungen: <b>{approved_scopes}</b>.{voice_access}{long_access}<br>Die Verbindung kann ein erneuerbares Zugriffstoken erhalten und jederzeit im AILinux-Konto widerrufen werden.</p>
     <div class="consent-actions">
     <form method="POST" action="/authorize/approve" class="consent-form">
     <input type="hidden" name="csrf" value="{html.escape(csrf)}">

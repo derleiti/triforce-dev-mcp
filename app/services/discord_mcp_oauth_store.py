@@ -12,7 +12,7 @@ import sqlite3
 import time
 
 RESOURCE = "https://discord.ailinux.me/mcp"
-SCOPES = frozenset({"discord:read", "offline_access"})
+SCOPES = frozenset({"discord:read", "discord:voice", "offline_access"})
 ACCESS_TTL = 3600
 REFRESH_TTL = 30 * 24 * 3600
 

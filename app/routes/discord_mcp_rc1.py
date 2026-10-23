@@ -11,7 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from .client_auth import decode_authorization_header, USER_REGISTRY
+from .client_auth import decode_authorization_header, USER_REGISTRY, resolve_user_authority
+from ..services.shared_authority import AuthorityRole
 from ..services.discord_mcp_registry import DiscordRegistry
 
 router = APIRouter(prefix="/v1/discord-mcp", tags=["Discord MCP RC1"])
@@ -52,6 +53,68 @@ def pair(request: PairRequest, account: str = Depends(account_identity)):
     code = registry().create_pair(account, request.ttl_seconds)
     return {"ok": True, "pairing_code": code, "expires_in": request.ttl_seconds,
             "warning": "Code is one-time. No Discord permissions granted until OAuth verified."}
+
+
+# The currently deployed RC0.5 voice bridge is single-guild/owner-scoped.
+# Expose it ONLY after independent verification of the AILinux root owner role
+# AND the Discord identity proven via Discord OAuth on this account.
+LEGACY_ALLOWED_SCOPES = frozenset({"mcp:read", "voice:join", "voice:listen", "voice:speak"})
+
+
+class LegacyGrantRequest(BaseModel):
+    scopes: list[str] = Field(default_factory=list, max_length=4)
+
+
+def legacy_owner_allowed(account: str, database: DiscordRegistry) -> bool:
+    from .discord_voice_bridge import OWNER_ID
+    role, _level, _source = resolve_user_authority(account, USER_REGISTRY.get(account))
+    return role == AuthorityRole.HUMAN_OWNER and OWNER_ID in database.linked_ids(account)
+
+
+@router.get("/permissions")
+def permissions(account: str = Depends(account_identity)):
+    from .discord_voice_bridge import GUILD_ID
+    db = registry()
+    authorized = legacy_owner_allowed(account, db)
+    return {
+        "ok": True,
+        "linked": bool(db.linked_ids(account)),
+        "servers": db.authorized_guilds(account),
+        "legacy_voice": {
+            "available": authorized,
+            "guild_id": GUILD_ID if authorized else None,
+            "name": "Nova RC0.5 (bestehender Discord-Server)" if authorized else None,
+            "available_scopes": sorted(LEGACY_ALLOWED_SCOPES) if authorized else [],
+            "requires_reconnect_for_voice": True,
+        },
+        "migration_note": (
+            "Nur der vorhandene RC0.5-Server kann bereits aktiv gesteuert werden. "
+            "Weitere Server benoetigen nachweisbare Discord-Mitgliedschaft, Bot-Installation "
+            "und getrennte Voice-Sitzungen."
+        ),
+    }
+
+
+@router.post("/permissions/legacy")
+def legacy_grant(request: LegacyGrantRequest, account: str = Depends(account_identity)):
+    from .discord_voice_bridge import GUILD_ID, OWNER_ID
+    db = registry()
+    if not legacy_owner_allowed(account, db):
+        raise HTTPException(403, "Verified AILinux owner and linked Discord owner required")
+    scopes = set(request.scopes)
+    if len(scopes) != len(request.scopes) or not scopes.issubset(LEGACY_ALLOWED_SCOPES):
+        raise HTTPException(422, "Unknown or duplicate permission")
+    if scopes and "mcp:read" not in scopes:
+        raise HTTPException(422, "MCP read permission required for voice controls")
+    if scopes:
+        db.grant(account, OWNER_ID, GUILD_ID, scopes)
+    else:
+        db.revoke_guild(account, GUILD_ID)
+    return {
+        "ok": True, "guild_id": GUILD_ID, "scopes": sorted(scopes),
+        "voice_oauth_needed": bool(scopes & {"voice:join", "voice:listen", "voice:speak"}),
+        "message": "Permissions saved. Reconnect the ChatGPT MCP to grant the optional discord:voice OAuth scope.",
+    }
 
 
 @router.post("/revoke")

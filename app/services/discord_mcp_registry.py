@@ -59,6 +59,13 @@ class DiscordRegistry:
                   ON discord_oauth_pending(expires_at);
                 CREATE INDEX IF NOT EXISTS discord_pair_expiry
                   ON discord_pair_codes(expires_at);
+                CREATE TABLE IF NOT EXISTS discord_guild_grant_audit (
+                  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ailinux_subject TEXT NOT NULL,
+                  guild_id TEXT NOT NULL,
+                  scopes TEXT NOT NULL,
+                  changed_at INTEGER NOT NULL
+                );
             """)
 
     @staticmethod
@@ -89,6 +96,20 @@ class DiscordRegistry:
                 raise PermissionError("Discord OAuth identity not linked")
             db.execute("INSERT OR REPLACE INTO discord_guild_grants VALUES (?, ?, ?, ?, ?)",
                        (account, discord_user, guild, " ".join(sorted(scopes)), int(time.time())))
+            db.execute(
+                "INSERT INTO discord_guild_grant_audit (ailinux_subject,guild_id,scopes,changed_at)"
+                " VALUES (?,?,?,?)",
+                (account, guild, " ".join(sorted(scopes)), int(time.time())))
+
+    def revoke_guild(self, account: str, guild: str) -> None:
+        if not self._valid_id(account) or not self._discord_id(guild):
+            raise ValueError("invalid account or guild")
+        with self._connect() as db:
+            db.execute("DELETE FROM discord_guild_grants WHERE ailinux_subject=? AND guild_id=?",
+                       (account, guild))
+            db.execute(
+                "INSERT INTO discord_guild_grant_audit (ailinux_subject,guild_id,scopes,changed_at)"
+                " VALUES (?,?,?,?)", (account, guild, "", int(time.time())))
 
     def can(self, account: str, discord_user: str, guild: str, scope: str) -> bool:
         with self._connect() as db:
