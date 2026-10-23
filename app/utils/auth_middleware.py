@@ -73,6 +73,7 @@ PUBLIC_EXACT_PATHS = {
     "/v1/bugs/report",
     "/v1/bugs/health",
     "/v1/sipgate/oauth/callback",
+    "/v1/discord-mcp/oauth/callback",  # One-time OAuth state verified by RC1 handler
     # Public Nova demo: intentionally usable without an account. Keep agent
     # sub-routes protected; only the stateless chat endpoint and health check
     # bypass account authentication.
@@ -107,6 +108,7 @@ ROUTE_JWT_AUTH_PATHS = {
 # handlers. Keep the prefix narrow and boundary-aware so similarly named paths
 # cannot inherit the bypass accidentally.
 ROUTE_JWT_AUTH_PREFIXES = (
+    "/v1/discord-mcp",  # RC1 endpoints validate AILinux JWT in their own dependencies
     "/v1/notify-network",
 )
 
