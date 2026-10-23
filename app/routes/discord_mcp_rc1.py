@@ -5,7 +5,7 @@ import os
 from urllib.parse import urlencode
 
 import httpx
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -15,6 +15,12 @@ from .client_auth import decode_authorization_header, USER_REGISTRY
 from ..services.discord_mcp_registry import DiscordRegistry
 
 router = APIRouter(prefix="/v1/discord-mcp", tags=["Discord MCP RC1"])
+
+
+@router.get("/dashboard", include_in_schema=False)
+def dashboard():
+    return FileResponse(Path(__file__).parent.parent / "static" / "discord-mcp.html",
+                        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 def account_identity(authorization: str | None = Header(default=None)) -> str:
