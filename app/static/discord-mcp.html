@@ -10,11 +10,11 @@ button,.button{background:#5865f2;border:0;color:white;padding:12px 16px;border-
 button:disabled{opacity:.45;cursor:not-allowed}.secondary{background:#283755}.error{color:#ffc5c5}.success{color:#8df2ba}
 code{display:block;overflow-wrap:anywhere;background:#080f20;padding:12px;border-radius:8px}small{color:#92a4c2}
 </style></head><body>
-<header><strong>✦ AILinux <span style="color:#96a8ff">Discord MCP</span></strong><a class="button secondary" href="https://login.ailinux.me/">AILinux Konto</a></header>
+<header><strong>✦ AILinux <span style="color:#96a8ff">Discord MCP</span></strong><a class="button secondary" href="https://login.ailinux.me/?redirect=https%3A%2F%2Fdiscord.ailinux.me%2F">AILinux Konto</a></header>
 <main><h1>Discord und KI verbinden.</h1><p>Dein AILinux-Konto, deine Discord-Verknüpfung und deine MCP-Berechtigungen. Die bisherige Nova-Voice-Bridge bleibt während der RC1-Einrichtung aktiv.</p>
 <p id="status" role="status">Kontostatus wird geprüft …</p>
 <div class="grid">
-<article><h2>1 · AILinux anmelden</h2><p id="account">Wir prüfen deine bestehende AILinux-Sitzung.</p><a class="button secondary" href="https://login.ailinux.me/">Zum AILinux Login</a></article>
+<article><h2>1 · AILinux anmelden</h2><p id="account">Wir prüfen deine bestehende AILinux-Sitzung.</p><a class="button secondary" href="https://login.ailinux.me/?redirect=https%3A%2F%2Fdiscord.ailinux.me%2F">Zum AILinux Login</a></article>
 <article><h2>2 · Discord verknüpfen</h2><p id="discord">Deine Discord-Identität wird nur nach deiner OAuth-Freigabe verbunden.</p><button id="oauth" disabled>Discord verbinden</button></article>
 <article><h2>3 · MCP-Verbindungscode</h2><p>Einmaliger Code, fünf Minuten gültig. Nur nach Anmeldung verfügbar.</p><button id="pair" disabled>Code erstellen</button><p id="pairresult" aria-live="polite"></p></article>
 <article><h2>4 · Berechtigungen</h2><p>Serverauswahl, Sprachkanäle, Tools, Modelle und Freigaben werden nach geprüfter Discord-Bot-Installation aktiviert.</p><button disabled>Server konfigurieren (folgt)</button></article>
@@ -22,13 +22,13 @@ code{display:block;overflow-wrap:anywhere;background:#080f20;padding:12px;border
 </main><script>
 'use strict';
 const status=document.getElementById('status');
-const token=(()=>{let p=document.cookie.split('; ').find(x=>x.startsWith('ailinux_token='));try{return p?decodeURIComponent(p.slice(14)):''}catch{return ''}})();
+const token=(()=>{let p=document.cookie.split('; ').find(x=>x.startsWith('ailinux_token='));try{return p?decodeURIComponent(p.slice('ailinux_token='.length)):''}catch{return ''}})();
 async function api(path,opt={}){
  const r=await fetch('/v1/discord-mcp'+path,{...opt,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json',...(opt.headers||{})},credentials:'omit',cache:'no-store'});
  const d=await r.json().catch(()=>({detail:'Unerwartete Antwort'}));if(!r.ok)throw Error(d.detail||'Fehler '+r.status);return d;
 }
 async function init(){
- if(!token){status.textContent='Bitte zuerst bei login.ailinux.me anmelden.';return}
+ if(!token){status.textContent='AILinux-Anmeldung erforderlich. Du wirst zum zentralen Login weitergeleitet.';setTimeout(()=>location.assign('https://login.ailinux.me/?redirect='+encodeURIComponent(location.origin+'/')),900);return}
  try{const me=await api('/me');document.getElementById('account').textContent='Angemeldet als '+me.account;
  document.getElementById('discord').textContent=me.discord_oauth_connected?'Discord-Konto verbunden.':'Noch kein Discord-Konto verbunden.';
  status.className='success';status.textContent='AILinux-Anmeldung bestätigt · RC1 Staging';
