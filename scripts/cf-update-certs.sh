@@ -1,243 +1,172 @@
 #!/usr/bin/env bash
+# AILinux Let's Encrypt renewal: Cloudflare DNS-01; all existing lineages.
+# DNS credentials and R2 credentials are intentionally separate.
 set -Eeuo pipefail
+umask 077
+export HOME=/home/zombie
 
-# systemd does not guarantee a login HOME; TriForce config paths belong to zombie.
-export HOME="${HOME:-/home/zombie}"
-
-# ================================================================
-# AILinux Cloudflare + Let's Encrypt Certificate Manager
-# - Ubuntu 26.04 / APT only -- NO SNAP
-# - DNS-01 via Cloudflare
-# - Certificate lineage: ailinux.me
-# - Domains: ailinux.me + *.ailinux.me
-# - Reloads Docker Apache after successful renewal
-# ================================================================
-
-LOG_DIR="/var/log/cf-le"
-LOG_FILE="${LOG_DIR}/cf-update-certs.log"
-
-CERT_NAME="${CERT_NAME:-ailinux.me}"
-DOMAINS=(
-  "ailinux.me"
-  "*.ailinux.me"
-)
-
+CONFIG_FILE="/home/zombie/workspace/triforce/config/triforce.env"
 CRED_FILE="/etc/letsencrypt/cloudflare.ini"
-
-ENV_CANDIDATES=(
-  "/home/zombie/workspace/triforce/config/triforce.env"
-  "/home/zombie/workspace/triforce/.env"
-  "/home/zombie/scripts/.env"
-  "/etc/ailinux.env"
-)
-
+LOG_DIR="/var/log/cf-le"
+LOG_FILE="$LOG_DIR/cf-update-certs.log"
+LOCK_FILE="/run/lock/ailinux-cert-renew.lock"
 
 log() {
-  printf '[CF-LE] %s\n' "$*" | tee -a "$LOG_FILE"
+  printf '[CF-LE] %s %s\n' "$(date -Iseconds)" "$*" | tee -a "$LOG_FILE"
 }
-
-warn() {
-  printf '[CF-LE][WARN] %s\n' "$*" | tee -a "$LOG_FILE" >&2
-}
-
-die() {
-  printf '[CF-LE][ERR] %s\n' "$*" | tee -a "$LOG_FILE" >&2
+fail() {
+  log "ERROR: $*"
   exit 1
 }
 
-require_root() {
-  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "Bitte mit sudo/root ausführen."
-}
-
-init_log() {
-  install -d -m 0750 "$LOG_DIR"
-  touch "$LOG_FILE"
-  chmod 0640 "$LOG_FILE"
-  log "============================================================"
-  log "Start: $(date -Iseconds)"
-}
-
-load_env() {
-  local env_file=""
-
-  for candidate in "${ENV_CANDIDATES[@]}"; do
-    if [[ -f "$candidate" ]]; then
-      env_file="$candidate"
-      break
-    fi
-  done
-
-  if [[ -n "$env_file" ]]; then
-    log "Lade Environment aus: $env_file"
-    set -a
-    # shellcheck disable=SC1090
-    source "$env_file"
-    set +a
-  else
-    warn "Keine Environment-Datei gefunden; vorhandene Cloudflare-Credentials werden verwendet."
-  fi
-
-  # Unterstützte Alias-Namen
-  CF_API_TOKEN="${CF_API_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
-  CF_EMAIL="${CF_EMAIL:-${CLOUDFLARE_EMAIL:-}}"
-  CF_GLOBAL_API_KEY="${CF_GLOBAL_API_KEY:-${CLOUDFLARE_GLOBAL_API_KEY:-${CLOUDFLARE_API_KEY:-}}}"
-
-  LE_EMAIL="${LETSENCRYPT_EMAIL:-${CF_EMAIL:-admin@ailinux.me}}"
-}
-
-ensure_packages() {
-  if command -v certbot >/dev/null 2>&1 \
-     && certbot plugins 2>/dev/null | grep -q 'dns-cloudflare'; then
-    log "Certbot + dns-cloudflare bereits vorhanden."
-    return
-  fi
-
-  log "Installiere Certbot + Cloudflare-Plugin via APT..."
-
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    certbot \
-    python3-certbot-dns-cloudflare
-
-  command -v certbot >/dev/null 2>&1 \
-    || die "Certbot wurde nicht korrekt installiert."
-
-  certbot plugins 2>/dev/null | grep -q 'dns-cloudflare' \
-    || die "dns-cloudflare Plugin fehlt."
-}
-
-credentials_valid() {
-  [[ -s "$CRED_FILE" ]] || return 1
-
-  grep -Eq '^[[:space:]]*dns_cloudflare_api_token[[:space:]]*=' "$CRED_FILE" \
-    && return 0
-
-  grep -Eq '^[[:space:]]*dns_cloudflare_api_key[[:space:]]*=' "$CRED_FILE" \
-    && grep -Eq '^[[:space:]]*dns_cloudflare_email[[:space:]]*=' "$CRED_FILE" \
-    && return 0
-
-  return 1
-}
-
-setup_credentials() {
-  install -d -m 0700 /etc/letsencrypt
-
-  if [[ -n "${CF_API_TOKEN:-}" ]]; then
-    log "Aktualisiere Cloudflare-Credentials aus API Token."
-    umask 077
-    printf 'dns_cloudflare_api_token = %s\n' "$CF_API_TOKEN" > "$CRED_FILE"
-
-  elif [[ -n "${CF_EMAIL:-}" && -n "${CF_GLOBAL_API_KEY:-}" ]]; then
-    log "Aktualisiere Cloudflare-Credentials aus Global API Key."
-    umask 077
-    {
-      printf 'dns_cloudflare_email = %s\n' "$CF_EMAIL"
-      printf 'dns_cloudflare_api_key = %s\n' "$CF_GLOBAL_API_KEY"
-    } > "$CRED_FILE"
-
-  elif credentials_valid; then
-    log "Verwende vorhandene Cloudflare-Credentials: $CRED_FILE"
-
-  else
-    die "Keine nutzbaren Cloudflare-Credentials gefunden."
-  fi
-
-  chown root:root "$CRED_FILE"
-  chmod 0600 "$CRED_FILE"
-}
-
-install_deploy_hook() {
-  local hook="/etc/letsencrypt/renewal-hooks/deploy/20-ailinux-services.sh"
-
-  install -d -m 0755 "$(dirname "$hook")"
-
-  cat > "$hook" <<'HOOK'
-#!/usr/bin/env bash
-set -u
-
-COMPOSE="/home/zombie/workspace/triforce/docker/wordpress/docker-compose.yml"
-
-logger -t ailinux-certbot "Let's Encrypt certificate deployed"
-
-if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
-  docker compose -f "$COMPOSE" restart apache \
-    || logger -t ailinux-certbot "WARNING: WordPress Apache restart failed"
+[ "$(id -u)" -eq 0 ] || { echo "Must run as root." >&2; exit 1; }
+install -d -m 0750 "$LOG_DIR"
+touch "$LOG_FILE"
+chmod 0640 "$LOG_FILE"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  log "Another certificate renewal is running; skipping overlap."
+  exit 0
 fi
 
-for service in postfix dovecot; do
-  if systemctl is-active --quiet "$service" 2>/dev/null; then
-    systemctl reload "$service" \
-      || systemctl restart "$service" \
-      || true
-  fi
-done
-HOOK
+if [ "$#" -eq 0 ]; then
+  MODE="--renew"
+else
+  MODE="$1"
+fi
+case "$MODE" in
+  --renew|--dry-run|--check) ;;
+  *) echo "Usage: $0 [--renew|--dry-run|--check]" >&2; exit 2 ;;
+esac
 
-  chmod 0755 "$hook"
-}
+command -v certbot >/dev/null 2>&1 || fail "Certbot missing"
+certbot plugins 2>/dev/null | grep -q 'dns-cloudflare' || fail "Certbot dns-cloudflare plugin missing"
 
-request_or_renew() {
-  local args=()
+# Validate the DNS-zone visibility before changing any credential file.
+# The config reader deliberately does not source/eval triforce.env.
+# Never use CLOUDFLARE_R2_* credentials for ACME DNS challenges.
+log "Checking Cloudflare zone access for ailinux.me ($MODE)."
+if ! python3 - "$CONFIG_FILE" "$CRED_FILE" <<'PY' 2>&1 | tee -a "$LOG_FILE"; then
+import json
+import os
+import pathlib
+import shutil
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
 
-  for domain in "${DOMAINS[@]}"; do
-    args+=(-d "$domain")
-  done
+config_path = pathlib.Path(sys.argv[1])
+cred_path = pathlib.Path(sys.argv[2])
+zone = "ailinux.me"
 
-  log "Prüfe Zertifikat: ${DOMAINS[*]}"
+def parse_kv(path):
+    values = {}
+    if not path.is_file():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] in "'\"" and value[-1] == value[0]:
+            value = value[1:-1]
+        values[key.strip()] = value
+    return values
 
-  certbot certonly \
-    --cert-name "$CERT_NAME" \
-    --dns-cloudflare \
-    --dns-cloudflare-credentials "$CRED_FILE" \
-    --dns-cloudflare-propagation-seconds 30 \
-    --preferred-challenges dns \
-    --agree-tos \
-    --non-interactive \
-    --keep-until-expiring \
-    --email "$LE_EMAIL" \
-    "${args[@]}"
+settings = parse_kv(config_path)
+expected_zone_id = settings.get("CLOUDFLARE_ZONE_ID", "")
+if not (len(expected_zone_id) == 32 and all(x in "0123456789abcdef" for x in expected_zone_id.lower())):
+    print("BLOCKED: CLOUDFLARE_ZONE_ID must be a 32-character hexadecimal zone identifier.")
+    sys.exit(78)
+stored = parse_kv(cred_path)
+current = stored.get("dns_cloudflare_api_token", "")
+# Deliberately never use generic Cloudflare, Workers AI or R2 tokens for DNS.
+candidates = [
+    ("CLOUDFLARE_DNS_API_TOKEN", settings.get("CLOUDFLARE_DNS_API_TOKEN", "")),
+    ("existing credential file", current),
+]
 
-  [[ -s "/etc/letsencrypt/live/${CERT_NAME}/fullchain.pem" ]] \
-    || die "fullchain.pem fehlt nach Certbot-Lauf."
+seen = set()
+selected = None
+for label, token in candidates:
+    if not token or token in seen:
+        continue
+    seen.add(token)
+    url = "https://api.cloudflare.com/client/v4/zones?" + urllib.parse.urlencode(
+        {"name": zone, "per_page": "1"}
+    )
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": "Bearer " + token,
+            "User-Agent": "AILinux-Cert-Renew/1.1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            result = json.load(response)
+            status_code = response.status
+        matches = [
+            item for item in result.get("result", [])
+            if isinstance(item, dict) and item.get("name") == zone and item.get("id") == expected_zone_id
+        ]
+        if status_code == 200 and result.get("success") and matches:
+            selected = (label, token)
+            print("ZONE_CHECK_OK source=" + label + " zone=" + zone + " zone_id=" + expected_zone_id)
+            break
+        print("ZONE_CHECK_FAIL source=" + label + " http=" + str(status_code)
+              + " visible_zones=" + str(len(matches)))
+    except urllib.error.HTTPError as exc:
+        print("ZONE_CHECK_FAIL source=" + label + " http=" + str(exc.code))
+    except Exception as exc:
+        print("ZONE_CHECK_FAIL source=" + label
+              + " reason=" + type(exc).__name__)
 
-  [[ -s "/etc/letsencrypt/live/${CERT_NAME}/privkey.pem" ]] \
-    || die "privkey.pem fehlt nach Certbot-Lauf."
+if selected is None:
+    print("BLOCKED: No DNS API token can read zone ailinux.me; existing credentials untouched.")
+    sys.exit(78)
 
-  log "Zertifikat vorhanden: /etc/letsencrypt/live/${CERT_NAME}/"
-}
+label, validated_token = selected
+if validated_token != current:
+    cred_path.parent.mkdir(parents=True, exist_ok=True)
+    if cred_path.exists():
+        backup_dir = pathlib.Path("/var/backups/ailinux-cert-renew")
+        backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        backup = backup_dir / (
+            "cloudflare.ini.pre-sync-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        )
+        shutil.copy2(cred_path, backup)
+        os.chmod(backup, 0o600)
+    fd, temp_name = tempfile.mkstemp(prefix=".cloudflare.", dir=str(cred_path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write("dns_cloudflare_api_token = " + validated_token + "\n")
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, cred_path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+    print("CREDENTIALS_SYNC_OK validated DNS token activated; previous credentials backed up")
+else:
+    print("CREDENTIALS_OK existing validated token unchanged")
+PY
+  fail "Cloudflare DNS-01 preflight failed; certificates were not modified."
+fi
 
-show_expiry() {
-  if command -v openssl >/dev/null 2>&1; then
-    local expiry
-    expiry="$(
-      openssl x509 \
-        -in "/etc/letsencrypt/live/${CERT_NAME}/cert.pem" \
-        -noout -enddate 2>/dev/null || true
-    )"
-    [[ -n "$expiry" ]] && log "$expiry"
-  fi
-}
-
-main() {
-  require_root
-  init_log
-  load_env
-  ensure_packages
-  setup_credentials
-  install_deploy_hook
-
-  case "${1:-}" in
-    --dry-run)
-      log "Starte Certbot Renewal Dry-Run."
-      certbot renew --dry-run
-      ;;
-    *)
-      request_or_renew
-      show_expiry
-      ;;
-  esac
-
-  log "Fertig: $(date -Iseconds)"
-}
-
-main "$@"
+log "Running Certbot for all existing certificate lineages."
+case "$MODE" in
+  --check)
+    certbot certificates 2>&1 | tee -a "$LOG_FILE"
+    ;;
+  --dry-run)
+    certbot renew --dry-run --non-interactive --no-random-sleep-on-renew 2>&1 | tee -a "$LOG_FILE"
+    ;;
+  --renew)
+    certbot renew --non-interactive --no-random-sleep-on-renew 2>&1 | tee -a "$LOG_FILE"
+    ;;
+esac
+log "Certbot $MODE completed successfully."

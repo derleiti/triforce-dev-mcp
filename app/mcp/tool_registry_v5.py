@@ -1605,6 +1605,27 @@ V5_TOOLS += [
 
 
 # =============================================================================
+# FL STUDIO — restricted owner/admin only, SSH to zombie-pc via WireGuard
+V5_TOOLS += [
+    {
+        "name": "flstudio",
+        "description": "Owner/admin FL Studio MCP gateway over persistent private Unix socket and WireGuard SSH with legacy fallback. status confirms controller; list enumerates tools; call invokes one fl_* tool; batch runs 1-24 sequential actions or dry_run preview. Batch writes are not atomic. Back up FL projects before editing.",
+        "x_inventory": "admin",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["status", "list", "call", "batch"], "default": "status"},
+                "tool": {"type": "string", "description": "Upstream fl_* MCP tool (action=call)"},
+                "arguments": {"type": "object", "description": "Upstream tool arguments"},
+                "calls": {"type": "array", "maxItems": 24, "items": {"type": "object"}, "description": "Upstream calls, action=batch; executed sequentially, partial writes are not rolled back"},
+                "dry_run": {"type": "boolean", "default": False, "description": "For action=batch: validate and preview without executing"},
+            },
+            "required": ["action"],
+        },
+    },
+]
+
+
 # DEDUPLICATION GUARD — Bug-Fix 2026-04-28 (Code Review)
 # Removes accidental duplicate tool definitions (e.g. flarum_* re-definitions
 # in the V5_TOOLS += [...] block). First occurrence wins — preserves the

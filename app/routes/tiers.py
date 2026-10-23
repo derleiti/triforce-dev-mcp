@@ -12,6 +12,8 @@ from ..services.user_tiers import (
     FREE_MODELS, ALL_OPENROUTER_MODELS
 )
 
+from .client_auth import require_admin
+
 router = APIRouter(prefix="/tiers", tags=["Tiers & Pricing"])
 
 
@@ -50,7 +52,7 @@ async def get_pricing():
 
 
 @router.get("/user/{user_id}", response_model=TierResponse)
-async def get_user_tier(user_id: str):
+async def get_user_tier(user_id: str, _admin: dict = Depends(require_admin)):
     """
     Hole Tier eines Users
     
@@ -65,7 +67,7 @@ async def get_user_tier(user_id: str):
 
 
 @router.get("/user/{user_id}/models", response_model=ModelListResponse)
-async def get_user_models(user_id: str):
+async def get_user_models(user_id: str, _admin: dict = Depends(require_admin)):
     """
     Hole verfügbare Modelle für einen User
     
@@ -86,7 +88,7 @@ async def get_user_models(user_id: str):
 
 
 @router.post("/user/upgrade")
-async def upgrade_user_tier(request: UserTierRequest):
+async def upgrade_user_tier(request: UserTierRequest, _admin: dict = Depends(require_admin)):
     """
     Upgrade User-Tier (nach Payment-Bestätigung)
     
@@ -157,7 +159,7 @@ async def get_all_models():
 
 
 @router.post("/check-model")
-async def check_model_access(user_id: str, model: str):
+async def check_model_access(user_id: str, model: str, _admin: dict = Depends(require_admin)):
     """
     Prüfe ob User Zugriff auf ein Modell hat
     

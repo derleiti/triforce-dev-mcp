@@ -71,6 +71,7 @@ INVENTORY_OVERRIDES: Dict[str, str] = {
     "container_status": "admin",
     "remote_hosts": "network",
     "remote_task": "network",
+    "flstudio": "admin",
     "mesh_status": "network",
     "mesh_task": "network",
     "remote_status": "network",
@@ -194,7 +195,7 @@ TRIFORCE_ADMIN_TOOLS = frozenset({
     "shell", "binary_exec", "task_runner", "server_control", "service_control", "container_control", "docker_stack", "hot_reload",
     "config", "config_set", "debug", "evolve", "prompt_set",
     "ollama_status", "ollama_pull", "ollama_delete",
-    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin",
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin", "flstudio",
     "vault_status", "vault_keys", "vault_add",
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_close",
     "memory_clear", "memory_history", "memory_training", "feature_experience_store",
@@ -238,7 +239,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Ollama/model operations
     "ollama_status", "ollama_pull", "ollama_delete",
     # Mesh/remote
-    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin",
+    "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin", "flstudio",
     # Vault
     "vault_status", "vault_keys", "vault_add",
     # Memory

@@ -1,10 +1,10 @@
 <?php
 /**
- * Nova AI Admin Dashboard
+ * AILinux Platform Admin Dashboard
  * Enhanced Admin Interface for AILinux.me
  *
  * @package NovAI
- * @version 4.6.4
+ * @version 7.0.0
  */
 
 defined('ABSPATH') || exit;
@@ -91,8 +91,8 @@ $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'dashboa
 <div class="wrap nov-ai-admin">
     <h1 class="nov-header">
         <span class="nov-logo">🚀</span>
-        Nova AI Frontend
-        <span class="nov-version">v4.6.4</span>
+        AILinux Platform
+        <span class="nov-version">v<?php echo esc_html(NOVA_AI_VERSION); ?></span>
     </h1>
 
     <!-- Tab Navigation -->

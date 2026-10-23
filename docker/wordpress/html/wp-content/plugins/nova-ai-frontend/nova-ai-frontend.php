@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: Nova AI Frontend
- * Description: AILinux AI Playground & Downloads — Chat, Vision, Media Generation + Admin Dashboard
- * Version: 6.8.0
+ * Plugin Name: AILinux Platform
+ * Description: Unified AILinux WordPress platform — Nova AI, accounts, downloads, shop, payments, MCP/API and administration
+ * Version: 7.0.0
  * Author: zombie@ailinux
  * Text Domain: nova-ai-frontend
  */
@@ -13,7 +13,7 @@ defined('ABSPATH') || exit;
 if ( ! defined( 'NOVA_AI_BACKEND' ) )       define('NOVA_AI_BACKEND',      'https://api.ailinux.me');
 if ( ! defined( 'NOVA_AI_LOCAL_BACKEND' ) )  define('NOVA_AI_LOCAL_BACKEND', 'http://localhost:9000');
 if ( ! defined( 'NOVA_AI_INTERNAL_KEY' ) )   define('NOVA_AI_INTERNAL_KEY',  getenv('NOVA_AI_INTERNAL_KEY') ?: '');
-define('NOVA_AI_VERSION', '6.8.0');
+define('NOVA_AI_VERSION', '7.0.0');
 define('NOVA_AI_PLUGIN_URL',  plugin_dir_url(__FILE__));
 define('NOVA_AI_PLUGIN_DIR',  plugin_dir_path(__FILE__));
 
@@ -40,6 +40,23 @@ if (!defined('NOVA_LS_PRODUCT_ENTITLEMENTS'))  define('NOVA_LS_PRODUCT_ENTITLEME
 
 // 2026-04-24: PSR-4 Autoloader + Plugin bootstrap
 require_once NOVA_AI_PLUGIN_DIR . 'includes/autoloader.php';
+
+// AILinux Platform modules. During a rolling deployment the former MU/standalone
+// plugins may still be loaded, so only bootstrap a module when its legacy symbol
+// is not already present.
+if (!function_exists('ailinux_triforce_setting')) {
+    require_once NOVA_AI_PLUGIN_DIR . 'modules/TriforceSettings.php';
+}
+if (!class_exists('AILinux_User_Plugin')) {
+    require_once NOVA_AI_PLUGIN_DIR . 'modules/UserManagement.php';
+}
+AILinux_User_Plugin::instance();
+if (!function_exists('nova_account_email_label')) {
+    require_once NOVA_AI_PLUGIN_DIR . 'modules/AccountHeader.php';
+}
+if (!function_exists('nova_copa_admin_allowed')) {
+    require_once NOVA_AI_PLUGIN_DIR . 'modules/CopaCompat.php';
+}
 if (is_file(NOVA_AI_PLUGIN_DIR . 'config/lemonsqueezy.php')) { require_once NOVA_AI_PLUGIN_DIR . 'config/lemonsqueezy.php'; }
 // 2026-06-01: Minimal shop bootstrap fix.
 // Keep the former shop permalink working after the canonical move to /shop/.
@@ -970,14 +987,18 @@ add_action('wp_enqueue_scripts', function () {
 /* ── Admin Menu ─────────────────────────────────────────────────────────────── */
 add_action('admin_menu', function () {
     add_menu_page(
-        'Nova AI',
-        'Nova AI',
+        'AILinux Platform',
+        'AILinux',
         'manage_options',
         'nova-ai',
         'nova_render_admin_page',
-        'dashicons-format-chat',
+        'dashicons-cloud',
         30
     );
+
+    $users = AILinux_User_Plugin::instance();
+    add_submenu_page('nova-ai', 'AILinux Users', 'Users', 'manage_options', 'ailinux-users', [$users, 'render_users_page']);
+    add_submenu_page('nova-ai', 'AILinux Statistics', 'User Stats', 'manage_options', 'ailinux-stats', [$users, 'render_stats_page']);
 });
 
 add_action('admin_enqueue_scripts', function ($hook) {
@@ -1017,7 +1038,7 @@ function nova_render_admin_page(): void {
     }
     ?>
 <div class="wrap" id="nova-admin-wrap">
-<h1>🚀 Nova AI <span style="font-size:13px;opacity:.6;font-weight:400">v<?= esc_html(NOVA_AI_VERSION) ?></span></h1>
+<h1>🚀 AILinux Platform <span style="font-size:13px;opacity:.6;font-weight:400">v<?= esc_html(NOVA_AI_VERSION) ?></span></h1>
 
 <nav class="nav-tab-wrapper">
 <?php foreach ([

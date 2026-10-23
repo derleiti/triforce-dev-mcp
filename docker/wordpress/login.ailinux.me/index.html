@@ -1083,9 +1083,10 @@ function openApp(){
   }
 
   // Restore session via Backend verify
-  const restored=await verifyAndRestoreSession();
-  const redirect=params.get('redirect');
   const pendingAppLogin=appLoginRequest();
+  // Native app sign-in must use a freshly chosen identity, never a cached browser session.
+  const restored=pendingAppLogin ? false : await verifyAndRestoreSession();
+  const redirect=params.get('redirect');
   if(restored && (redirect || pendingAppLogin)){
     const token=lsGet('ailinux_token');
     if(token){

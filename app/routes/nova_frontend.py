@@ -287,33 +287,20 @@ def _categorize(model: Dict[str, Any]) -> Dict[str, Any]:
         "id": mid,
         "name": name,
         "provider": provider,
+        "free_status": model.get("free_status", "unknown"),
+        "pricing": model.get("pricing") or {},
+        "availability": model.get("availability", "unknown"),
         **caps,
         "categories": [k for k in ("chat", "vision", "media_image", "media_video", "audio", "ocr", "embedding", "code", "reasoning") if caps[k]],
     }
 
 async def _get_models() -> List[Dict[str, Any]]:
-    urls = [
-        f"{_base_url()}/v1/models/all",
-        f"{_base_url()}/v1/models?include_unavailable=true",
-        f"{_base_url()}/models?include_unavailable=true",
-        f"{_base_url()}/v1/tristar/models",
-    ]
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        for url in urls:
-            try:
-                r = await client.get(url)
-                if r.status_code != 200:
-                    continue
-                data = r.json()
-                if isinstance(data, list):
-                    return [x for x in data if isinstance(x, dict)]
-                if isinstance(data, dict):
-                    for k in ("models", "data", "items", "available_models"):
-                        if isinstance(data.get(k), list):
-                            return [x for x in data[k] if isinstance(x, dict)]
-            except Exception:
-                pass
-    return []
+    """Use the one verified TriForce catalog; never fall back to unverified lists."""
+    from ..services.model_registry import registry
+    from ..services.model_availability import availability_service
+    discovered = await registry.list_models()
+    return [m.to_dict() for m in discovered
+            if m.availability == "ok" and availability_service.is_available(m.id)]
 
 async def _chat_proxy(payload: Dict[str, Any]) -> Dict[str, Any]:
     urls = [
@@ -646,14 +633,9 @@ async def _image_proxy(req: ImageRequest) -> Dict[str, Any]:
     if m.startswith("cloudflare/@cf/"):
         import os as _os
         cf_account = _os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
-        # Workers-AI-spezifischer Token (cfut_…) hat Vorrang — der generische
-        # CLOUDFLARE_API_TOKEN ist oft ein Global API Key (37-char hex), der
-        # für /ai/run mit Bearer-Auth nicht akzeptiert wird (CF Code 10000).
-        cf_token = (
-            _os.getenv("CLOUDFLARE_AI_WORKERS_API")
-            or _os.getenv("CLOUDFLARE_API_TOKEN")
-            or ""
-        ).strip()
+        # Workers AI uses its own scoped Bearer token, never the DNS or
+        # legacy general-purpose Cloudflare credentials.
+        cf_token = (_os.getenv("CLOUDFLARE_AI_WORKERS_API") or "").strip()
         if not cf_account or not cf_token:
             raise HTTPException(status_code=503, detail="Cloudflare Workers AI nicht konfiguriert (CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_AI_WORKERS_API fehlen)")
         # Modell-ID ohne "cloudflare/" prefix
@@ -1029,6 +1011,8 @@ async def models(response: Response) -> Dict[str, Any]:
     # without staleness blocking new providers from showing up.
     response.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
     raw = await _get_models()
+    # Public UI is fail-closed: unknown or unhealthy models are not advertised.
+    raw = [m for m in raw if str(m.get("availability", "unknown")).lower() == "ok"]
     items = [_categorize(m) for m in raw]
     # Paused-flag entfernt 2026-04-20 — Anthropic API-Pause lief am 2026-04-01 aus
     items.sort(key=lambda x: (not x["backend_supported"], *_model_sort_key(x)))
@@ -1049,8 +1033,27 @@ async def models(response: Response) -> Dict[str, Any]:
         "models": items,
     }
 
+async def _require_verified_unbilled_model(model_id: str, capability: str = "chat") -> None:
+    """WP server authentication is not end-user billing consent."""
+    from ..services.model_registry import registry
+    from ..services.model_availability import availability_service
+    catalog = await registry.list_models()
+    selected = next((m for m in catalog if m.id == model_id), None)
+    if not selected or selected.availability != "ok" or not availability_service.is_available(model_id):
+        raise HTTPException(status_code=503, detail="Model is not verified as available")
+    if capability not in selected.capabilities:
+        raise HTTPException(status_code=422, detail="Model does not support this capability")
+    # A provider's free tier and catalog pricing are not a spending guarantee.
+    # Only self-hosted inference is safe until verified per-visitor billing exists.
+    # Ollama Cloud models share the Ollama provider prefix but are not local.
+    # Treat them as externally billed until per-visitor authorization exists.
+    if selected.provider != "ollama" or selected.id.lower().endswith((":cloud", "-cloud")) or ":cloud" in selected.id.lower():
+        raise HTTPException(status_code=403, detail="Cloud inference requires authenticated end-user billing authorization")
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest) -> Dict[str, Any]:
+    await _require_verified_unbilled_model(req.model, "chat")
     # Build messages: prefer req.messages[] (multi-turn from JS), fall back to req.message string
     if req.messages:
         messages = list(req.messages)
@@ -1081,6 +1084,7 @@ async def chat(req: ChatRequest) -> Dict[str, Any]:
 
 @router.post("/vision")
 async def vision(req: VisionRequest) -> Dict[str, Any]:
+    await _require_verified_unbilled_model(req.model, "vision")
     if not req.image_url and not req.image_base64:
         raise HTTPException(status_code=400, detail="image_url or image_base64 required")
     result = await _vision_proxy(req.model, req.prompt, req.image_url, req.image_base64, req.mime_type)
@@ -1101,6 +1105,7 @@ async def vision_upload(
         mime = "image/jpeg"
     b64 = _b64.b64encode(raw_bytes).decode()
     mdl = model or "gemini/gemini-2.5-flash"
+    await _require_verified_unbilled_model(mdl, "vision")
     result = await _vision_proxy(mdl, prompt, None, b64, mime)
     return {"ok": True, "mode": "vision", "raw": result}
 
@@ -1117,6 +1122,7 @@ async def media_image(req: ImageRequest) -> Dict[str, Any]:
     - data[]     – top-level mirror of result.data[] (OpenAI-style)
     - url        – first image URL (single-image case)
     """
+    await _require_verified_unbilled_model(req.model, "image_gen")
     proxy_result = await _image_proxy(req)
     data_blocks = (proxy_result.get("result", {}) or {}).get("data", []) or []
     data_urls: List[str] = []
@@ -1150,6 +1156,7 @@ async def media_image(req: ImageRequest) -> Dict[str, Any]:
 
 @router.post("/media/video")
 async def media_video(req: VideoRequest) -> Dict[str, Any]:
+    await _require_verified_unbilled_model(req.model, "video_gen")
     return await _video_proxy(req)
 
 @router.get("/downloads")
