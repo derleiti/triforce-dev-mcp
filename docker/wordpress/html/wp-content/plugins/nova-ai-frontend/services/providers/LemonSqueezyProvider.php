@@ -125,9 +125,9 @@ class LemonSqueezyProvider implements PaymentProviderInterface {
 
             case 'order_created':
                 // Lemon Squeezy emits order_created for successful orders. Still require
-                // a paid status when one is present, so unpaid orders never unlock Copa.
+                // an explicit paid status, so missing or unpaid orders never unlock Copa.
                 $status = strtolower((string) ($attrs['status'] ?? ''));
-                if ($product_id && (!$status || $status === 'paid')) {
+                if ($product_id && $status === 'paid') {
                     $entitlement = $this->entitlement_for_product($product_id);
                     $base['action'] = 'purchase';
                     $base['extra']  = [$entitlement];

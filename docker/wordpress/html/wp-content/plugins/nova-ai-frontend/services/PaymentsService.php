@@ -163,7 +163,8 @@ class PaymentsService {
         if (($ents['action'] ?? 'none') === 'none') {
             $this->mark_event_processed($event_id);
             $this->log('INFO', 'Webhook event ignored (no entitlement action)', ['event' => $event_name]);
-            return new \WP_REST_Response(['status' => 'ignored'], 202);
+            // Lemon Squeezy treats only HTTP 200 as successful delivery.
+            return new \WP_REST_Response(['status' => 'ignored'], 200);
         }
 
         if ($user_id <= 0) {
