@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
@@ -141,6 +142,16 @@ async def authorize(request: Request):
     safe_name = html.escape(client["name"])
     safe_account = html.escape(account)
     safe_redirect = html.escape(urlsplit(redirect).hostname or "")
+    # Chrome validates the final 303 target after a form POST against the
+    # consent page's CSP form-action directive. Permit the registered callback
+    # origin only. Validate it before interpolating into the CSP header.
+    parts = urlsplit(redirect)
+    callback_origin = f"{parts.scheme}://{parts.netloc}"
+    https_ok = bool(re.fullmatch(r"https://(?:[A-Za-z0-9.-]+|\[[A-Fa-f0-9:]+\])(?::[0-9]{1,5})?", callback_origin))
+    loopback_ok = (parts.scheme == "http" and parts.hostname in {"127.0.0.1", "localhost", "::1"}
+                   and parts.port and bool(re.fullmatch(r"http://(?:localhost|127\.0\.0\.1|\[::1\]):[0-9]{1,5}", callback_origin)))
+    if not (https_ok or loopback_ok):
+        return HTMLResponse("Invalid callback origin", status_code=400)
     long_access = ("<br>Dauerhafte Verbindung: <b>ja, widerrufbar</b>" if
                    "offline_access" in scope.split() else "")
     import secrets
@@ -202,7 +213,7 @@ async def authorize(request: Request):
     # Use same-origin: preserves strict origin checking and never leaks OAuth
     # authorization codes, state or consent URLs to external redirects.
     response = HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "same-origin",
-                                           "Content-Security-Policy": f"default-src 'none'; script-src 'nonce-{script_nonce}'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"})
+                                           "Content-Security-Policy": f"default-src 'none'; script-src 'nonce-{script_nonce}'; style-src 'unsafe-inline'; form-action 'self' {callback_origin}; base-uri 'none'; frame-ancestors 'none'"})
     # An authorization has its own high-entropy, account-bound, single-use
     # consent nonce stored server-side. Do not use one mutable cookie across
     # independent OAuth tabs (old dmcp_consent cookies might also survive).

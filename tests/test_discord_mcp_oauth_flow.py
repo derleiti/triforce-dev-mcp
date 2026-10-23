@@ -367,6 +367,9 @@ def test_single_click_consent_uses_hidden_decision_and_nonce_csp(scenario):
     nonce = re.search(r'<script nonce="([^"]+)">', page.text)
     assert nonce is not None
     assert f"script-src 'nonce-{nonce.group(1)}'" in page.headers["content-security-policy"]
+    # Chromium checks cross-origin redirects of consent form submissions.
+    assert "form-action 'self' https://chatgpt.com;" in page.headers["content-security-policy"]
+    assert "https://chatgpt.com.evil.example" not in page.headers["content-security-policy"]
     assert 'for (const button of document.querySelectorAll' in page.text
     # Submit just once and confirm that it redirects immediately.
     latest_csrf = re.findall(r'name="csrf" value="([^"]+)"', forms[0])[0]
@@ -382,3 +385,30 @@ def test_single_click_consent_uses_hidden_decision_and_nonce_csp(scenario):
                          headers={"Origin": "https://discord.ailinux.me"})
     assert second.status_code == 403
     assert "ChatGPT-Tab" in second.text
+
+
+def test_csp_form_redirect_allows_only_current_registered_oauth_callback(scenario):
+    client, _, _ = scenario
+    callback = "https://connector.example.org/custom/oauth/return"
+    registered = client.post("/v1/discord-mcp/oauth2/register", json={
+        "client_name": "Third-party MCP client",
+        "redirect_uris": [callback],
+        "token_endpoint_auth_method": "none",
+    })
+    assert registered.status_code == 201
+    verifier = "Q" * 55
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    page = client.get("/v1/discord-mcp/oauth2/authorize", params={
+        "response_type": "code", "client_id": registered.json()["client_id"],
+        "redirect_uri": callback, "scope": "discord:read",
+        "state": "nonrepeatingstatefortesting12345678",
+        "code_challenge": challenge, "code_challenge_method": "S256",
+        "resource": RESOURCE,
+    })
+    assert page.status_code == 200
+    policy = page.headers["content-security-policy"]
+    assert "form-action 'self' https://connector.example.org;" in policy
+    assert "https://chatgpt.com" not in policy
+    assert "/custom/oauth/return" not in policy
