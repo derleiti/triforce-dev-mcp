@@ -147,3 +147,70 @@ async def test_listening_state_calls_rpc(monkeypatch):
     disabled=await bridge.do_nova_action('quiet', bridge.OWNER_ID, '')
     assert calls == [{'op': 'listen', 'enabled': True}, {'op': 'listen', 'enabled': False}]
     assert 'hört' in enabled and 'ausgeschaltet' in disabled
+
+@pytest.mark.asyncio
+async def test_history_exposed_only_through_owner_scoped_command(monkeypatch, tmp_path):
+    from app.services.discord_voice_history import VoiceHistoryStore
+    import uuid
+    monkeypatch.setenv('NOVA_VOICE_HISTORY_DB', str(tmp_path / 'voice.sqlite3'))
+    storage = VoiceHistoryStore()
+    storage.save(str(uuid.uuid4()), bridge.GUILD_ID, bridge.OWNER_ID,
+                 'Ich benutze KDE Plasma.', 'Verstanden, du nutzt KDE Plasma.')
+    message = await bridge.do_nova_action('history', bridge.OWNER_ID, '')
+    assert 'Ich benutze KDE Plasma.' in message
+    assert 'Verstanden, du nutzt KDE Plasma.' in message
+
+    async def fake_status(_request):
+        return {'ok': True, 'connected': True, 'channel_name': 'Allgemein', 'listening': True}
+    monkeypatch.setattr(bridge, 'voice_rpc', fake_status)
+    status = await bridge.do_nova_action('status', bridge.OWNER_ID, '')
+    assert 'Gespeicherte Gesprächsrunden: 1' in status
+    assert 'Zuhören: an' in status
+    after = await bridge.do_nova_action('forget', bridge.OWNER_ID, '')
+    assert '1 Runde(n)' in after
+    assert storage.count(bridge.GUILD_ID, bridge.OWNER_ID) == 0
+
+
+@pytest.mark.asyncio
+async def test_signed_history_requires_guild_owner(signed_app, monkeypatch):
+    key, app = signed_app
+    called = []
+    async def fake_finish(action, user_id, text, token):
+        called.append(action)
+    monkeypatch.setattr(bridge, 'finish_nova_command', fake_finish)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        owner_raw, owner_headers = build_request(key, nova_payload('history'))
+        owner = await client.post('/discord', content=owner_raw, headers=owner_headers)
+        bad_raw, bad_headers = build_request(key, nova_payload('forget', user_id='111111111111111111'))
+        rejected = await client.post('/discord', content=bad_raw, headers=bad_headers)
+    assert owner.json()['type'] == 5
+    assert rejected.json()['type'] == 4
+    assert called == ['history']
+
+@pytest.mark.asyncio
+async def test_free_talk_discord_command_is_owner_only(signed_app, monkeypatch):
+    key, app = signed_app
+    requested = []
+    async def fake_finish(action, user_id, text, token):
+        requested.append((action, user_id))
+    monkeypatch.setattr(bridge, 'finish_nova_command', fake_finish)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        content, headers = build_request(key, nova_payload('talk'))
+        response = await client.post('/discord', content=content, headers=headers)
+        assert response.json()['type'] == 5
+        bad_content, bad_headers = build_request(key, nova_payload('talk', '111111111111111111'))
+        denied = await client.post('/discord', content=bad_content, headers=bad_headers)
+        assert denied.json()['type'] == 4
+    assert requested == [('talk', bridge.OWNER_ID)]
+
+
+@pytest.mark.asyncio
+async def test_free_talk_calls_voice_bridge(monkeypatch):
+    requests = []
+    async def fake_rpc(request):
+        requests.append(request)
+        return {'ok': True, 'listening': True, 'conversation_mode': True}
+    monkeypatch.setattr(bridge, 'voice_rpc', fake_rpc)
+    msg = await bridge.do_nova_action('talk', bridge.OWNER_ID, '')
+    assert requests == [{'op': 'talk'}]
+    assert 'ohne Aktivierungswort' in msg

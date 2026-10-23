@@ -26,7 +26,7 @@ OWNER_ID = "965583496435367956"
 REMOTE_TARGET = "zombie-pc"
 REMOTE_CLIENT = "/home/zombie/workspace/triforce/integrations/ailinux-discord-voice-mcp/remote_client.py"
 
-SUPPORTED = {"join", "say", "leave", "status", "listen", "quiet", "history", "forget"}
+SUPPORTED = {"join", "say", "leave", "status", "listen", "quiet", "talk", "history", "forget"}
 
 
 def private_message(content: str) -> JSONResponse:
@@ -117,7 +117,7 @@ async def do_nova_action(action: str, user_id: str, text: str) -> str:
             return (f"Nova ist in #{data.get('channel_name', 'Sprachkanal')}. "
                     f"Seraphina: aktiv. Zuhören: {'an' if data.get('listening') else 'aus'}. "
                     f"Gespeicherte Gesprächsrunden: {history_count}. "
-                    f"Aktivierungswort: Nova.")
+                    f"Modus: {'freies Gespräch' if data.get('conversation_mode') else 'Nova-Weckwort' if data.get('listening') else 'ausgeschaltet'}.")
         return (f"Nova ist online, aber nicht im Sprachkanal. "
                 f"Gespeicherte Gesprächsrunden: {history_count}. Nutze /nova join.")
 
@@ -144,6 +144,11 @@ async def do_nova_action(action: str, user_id: str, text: str) -> str:
             except Exception as error:
                 return f"Nova ist in #{channel}, aber die Begrüßung konnte nicht abgespielt werden: {str(error)[:135]}"
         return f"Nova ist jetzt in #{channel}! Sag laut Nova und stelle eine Frage. /nova quiet pausiert das Zuhören."
+
+    if action == "talk":
+        data = await voice_rpc({"op": "talk"})
+        return ("Freies Gespräch aktiviert: Nova reagiert jetzt auf deine vollständigen "
+                "Sprachsätze auch ohne Aktivierungswort. Mit /nova quiet stoppst du das Zuhören.")
 
     if action in ("listen", "quiet"):
         data = await voice_rpc({"op": "listen", "enabled": action == "listen"})
