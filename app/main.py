@@ -444,6 +444,8 @@ def create_app() -> FastAPI:
     app.include_router(crawler_router, prefix="/v1", tags=["Crawler"])
     app.include_router(health_router, tags=["Monitoring"])
     app.include_router(discord_interactions_router, tags=["Discord Interactions"])
+    from .routes.discord_mcp_rc1 import router as discord_mcp_rc1_router
+    app.include_router(discord_mcp_rc1_router)
     app.include_router(rag_router, prefix="/v1", tags=["RAG"])
     app.include_router(search_curated_router, prefix="/v1", tags=["Search Curated"])
     app.include_router(bug_reports_router, prefix="/v1", tags=["Bug Reports"])
