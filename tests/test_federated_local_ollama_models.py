@@ -301,3 +301,40 @@ async def test_anonymous_playground_cannot_route_to_private_worker():
     assert response["mode"] == "error"
     agent = await nova_playground_agent(AgentRequest(topic="hello", model_id="ollama/gemma4:12b"))
     assert agent["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_anonymous_wordpress_catalog_hides_federated_models(monkeypatch):
+    from fastapi import Response
+    from app.routes import nova_frontend
+
+    data = [
+        {"id": "ollama/gemma4:12b", "provider": "ollama", "capabilities": ["chat"],
+         "availability": "ok"},
+        {"id": "ollama/openbmb/minicpm-v4.7:1b", "provider": "ollama", "capabilities": ["chat"],
+         "availability": "ok"},
+        {"id": "ollama/openbmb/minicpm-v4.7:35b-a3b", "provider": "ollama", "capabilities": ["chat"],
+         "availability": "ok"},
+        {"id": "ollama/gemma4:cloud", "provider": "ollama", "capabilities": ["chat"],
+         "availability": "ok"},
+    ]
+
+    async def discovered():
+        return data
+
+    monkeypatch.setattr(nova_frontend, "_get_models", discovered)
+    response = await nova_frontend.models(Response())
+    ids = {m["id"] for m in response["models"]}
+    assert not ids.intersection(LOCAL_OLLAMA_MODELS)
+    assert "ollama/gemma4:cloud" in ids
+
+
+@pytest.mark.asyncio
+async def test_wordpress_shared_internal_key_cannot_use_private_worker():
+    from fastapi import HTTPException
+    from app.routes import nova_frontend
+
+    for model_id in LOCAL_OLLAMA_MODELS:
+        with pytest.raises(HTTPException) as e:
+            await nova_frontend._require_verified_unbilled_model(model_id)
+        assert e.value.status_code == 403

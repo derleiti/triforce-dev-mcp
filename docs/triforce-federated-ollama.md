@@ -25,6 +25,8 @@ catalog behavior is unchanged.
   when requesting these pinned local models.
 - The deliberately anonymous `/v1/nova/playground` endpoint does not allow
   selecting private fleet workers.
+- The anonymous WordPress dashboard catalog omits the private models; its
+  backend proxy also refuses private-worker inference without per-user auth.
 - Guest/free Cloud Ollama catalog remains independent; registered users and
   paid tiers can select the three local models when online. Token limits still
   apply to registered users.
