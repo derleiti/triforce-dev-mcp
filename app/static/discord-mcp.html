@@ -16,12 +16,16 @@ code{display:block;overflow-wrap:anywhere;background:#080f20;padding:12px;border
 <div class="grid">
 <article><h2>1 · AILinux anmelden</h2><p id="account">Wir prüfen deine bestehende AILinux-Sitzung.</p><a class="button secondary" href="https://login.ailinux.me/?redirect=https%3A%2F%2Fdiscord.ailinux.me%2F">Zum AILinux Login</a></article>
 <article><h2>2 · Discord verknüpfen</h2><p id="discord">Deine Discord-Identität wird nur nach deiner OAuth-Freigabe verbunden.</p><button id="oauth" disabled>Discord verbinden</button></article>
-<article><h2>3 · MCP-Verbindungscode</h2><p>Einmaliger Code, fünf Minuten gültig. Nur nach Anmeldung verfügbar.</p><button id="pair" disabled>Code erstellen</button><p id="pairresult" aria-live="polite"></p></article>
+<article><h2>3 · In ChatGPT als MCP hinzufügen</h2><p>In ChatGPT: Plugins → + → <b>Add custom MCP server</b>. Als Server-URL diesen Endpunkt verwenden:</p>
+<code id="mcpurl">https://discord.ailinux.me/mcp</code><button id="copyurl" class="secondary">MCP-Adresse kopieren</button>
+<p>Authentifizierung: <b>OAuth</b>. Im Anmeldedialog mit deinem AILinux-Konto anmelden und den lesenden Zugriff bestätigen. <small>Der Discord-Verbindungscode wird dafür nicht benötigt.</small></p></article>
 <article><h2>4 · Berechtigungen</h2><p>Serverauswahl, Sprachkanäle, Tools, Modelle und Freigaben werden nach geprüfter Discord-Bot-Installation aktiviert.</p><button disabled>Server konfigurieren (folgt)</button></article>
+<article><h2>5 · Verbindungscode für andere Clients</h2><p>Einmaliger Code, fünf Minuten gültig. Diese Pairing-Funktion bleibt erhalten, ist aber nicht der ChatGPT-OAuth-Login.</p><button id="pair" disabled>Code erstellen</button><p id="pairresult" aria-live="polite"></p></article>
 </div><p><small>RC1 · Entwicklungsstand. Ohne erfolgreiche AILinux- und Discord-Authentifizierung werden keine Discord-Tools freigegeben.</small></p>
 </main><script>
 'use strict';
 const status=document.getElementById('status');
+document.getElementById('copyurl').onclick=()=>navigator.clipboard.writeText(document.getElementById('mcpurl').textContent);
 const token=(()=>{let p=document.cookie.split('; ').find(x=>x.startsWith('ailinux_token='));try{return p?decodeURIComponent(p.slice('ailinux_token='.length)):''}catch{return ''}})();
 async function api(path,opt={}){
  const r=await fetch('/v1/discord-mcp'+path,{...opt,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json',...(opt.headers||{})},credentials:'omit',cache:'no-store'});

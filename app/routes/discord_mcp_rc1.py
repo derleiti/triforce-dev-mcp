@@ -56,7 +56,10 @@ def pair(request: PairRequest, account: str = Depends(account_identity)):
 
 @router.post("/revoke")
 def revoke(account: str = Depends(account_identity)):
-    registry().revoke(account)
+    from ..services.discord_mcp_oauth_store import DiscordMcpOAuthStore
+    database = registry()
+    database.revoke(account)
+    DiscordMcpOAuthStore(database.database).revoke_account(account)
     return {"ok": True, "revoked": True}
 
 

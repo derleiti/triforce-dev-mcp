@@ -446,6 +446,10 @@ def create_app() -> FastAPI:
     app.include_router(discord_interactions_router, tags=["Discord Interactions"])
     from .routes.discord_mcp_rc1 import router as discord_mcp_rc1_router
     app.include_router(discord_mcp_rc1_router)
+    from .routes.discord_mcp_oauth import router as discord_mcp_oauth_router
+    from .routes.discord_mcp_transport import router as discord_mcp_transport_router
+    app.include_router(discord_mcp_oauth_router)
+    app.include_router(discord_mcp_transport_router)
     app.include_router(rag_router, prefix="/v1", tags=["RAG"])
     app.include_router(search_curated_router, prefix="/v1", tags=["Search Curated"])
     app.include_router(bug_reports_router, prefix="/v1", tags=["Bug Reports"])

@@ -153,6 +153,15 @@ class DiscordRegistry:
                 "SELECT discord_subject FROM discord_links WHERE ailinux_subject=?", (account,)
             ).fetchall()]
 
+    def authorized_guilds(self, account: str) -> list[dict]:
+        with self._connect() as db:
+            return [{"discord_user_id": row["discord_subject"], "guild_id": row["guild_id"],
+                     "scopes": row["scopes"].split()}
+                    for row in db.execute(
+                        "SELECT discord_subject,guild_id,scopes FROM discord_guild_grants "
+                        "WHERE ailinux_subject=? ORDER BY guild_id", (account,)
+                    ).fetchall()]
+
     def revoke(self, account: str):
         with self._connect() as db:
             db.execute("DELETE FROM discord_pair_codes WHERE ailinux_subject=?", (account,))
