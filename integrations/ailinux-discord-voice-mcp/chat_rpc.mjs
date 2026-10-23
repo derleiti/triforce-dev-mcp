@@ -14,7 +14,7 @@ function callHub(data, timeoutMs = 40000) {
       '-o','StrictHostKeyChecking=yes','-o','LogLevel=ERROR',
       '10.10.0.1',
       '/home/zombie/workspace/triforce/.venv/bin/python',
-      '/home/zombie/workspace/triforce/scripts/discord_voice_chat.py'
+      '/home/zombie/workspace/triforce/scripts/discord_voice_agent.py'
     ],{stdio:['pipe','pipe','pipe']});
     let output='';
     let finished=false;

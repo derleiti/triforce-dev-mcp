@@ -41,13 +41,18 @@ function result(data) {
 
 const server = new McpServer({
   name:'ailinux-discord-voice-mcp',
-  version:'0.4.1'
+  version:'0.5.0'
 });
 
 server.registerTool('discord_voice_status',{
   description:'Read Nova voice connection state. Does not join or record anything.',
   inputSchema:{}
 },async()=>result(await invoke({op:'status'})));
+
+server.registerTool('discord_voice_connect',{
+  description:'Connect the configured Discord owner in their current voice channel and enable owner-only free conversation. Useful when a NEW ChatGPT GPT-6 chat requests Nova, verbinde dich mit Discord. This does not run this GPT-6 chat autonomously between tool calls; the background voice agent is separate TriForce Nova. Use discord_voice_exchange for explicit GPT-6 speech/reply turns.',
+  inputSchema:{}
+},async()=>result(await invoke({op:'connect'})));
 
 server.registerTool('discord_voice_join',{
   description:'Join one authorized Discord voice channel. Explicit channel ID only. Enables owner-only wake-word recognition.',

@@ -174,3 +174,28 @@ snapshot name. New history is never committed to Git.
   saved; only the limited turn transcript is returned to the authorized caller.
 - The GPT-6 ChatGPT session must be actively making MCP calls; this does not
   create an always-on or unsupervised GPT-6 background loop.
+
+## RC0.5 - fresh-chat connect and narrowly allowlisted voice MCP reads
+
+- In a fresh ChatGPT GPT-6 conversation, request: Nova, verbinde dich mit
+  Discord und nutze das AILinux-Voice-MCP. The discord_voice_connect MCP
+  tool then joins ONLY the authorized owner's present guild voice channel
+  and enables owner-only free conversation, no extra audio command needed.
+- discord_voice_exchange remains the explicit, bounded GPT-6 voice round trip.
+  This DOES NOT log in a ChatGPT browser session to Discord or give Discord
+  the ability to invoke an inactive ChatGPT thread.
+- The normal long-running TriForce Nova uses the persistent private SQLite chat
+  history and can now issue a small set of real MCP read-only operations:
+  - Read an AILinux/TriForce hub status summary.
+  - Query the TriForce registered model catalog.
+- The broker invokes two fixed TriForce MCP handler functions with fixed
+  read-only parameters. Voice transcripts CANNOT select arbitrary method names,
+  shell commands, process modifications, filesystem changes, or privileged tools.
+  It is intentionally not a general-purpose MCP agent yet.
+- Those capabilities are executed under strict guild/owner identity checks and
+  returned as short spoken German facts. Raw data and credentials are not
+  forwarded to the language model.
+- Stop microphone listening with /nova quiet, restore conversation with
+  /nova talk, or disconnect entirely with /nova leave.
+- The desktop service auto-starts, but DOES NOT autojoin Discord after a reboot:
+  the user must explicitly reconnect to resume live microphone processing.

@@ -47,7 +47,7 @@ function token() {
 }
 
 function doctor() {
-  console.log('Nova Discord Voice RC0.4.1');
+  console.log('Nova Discord Voice RC0.5.0');
   if (!GUILD_ID || !APP_ID) throw new Error('GuildControl must have exactly one allowed guild and app id');
   token();
   const node = process.versions.node;
@@ -94,7 +94,7 @@ function publicStatus() {
     connected:Boolean(s?.connection && s.connection.state.status === VoiceConnectionStatus.Ready),
     guild_id:GUILD_ID, channel_id:s?.channelId || null,
     channel_name:s?.channelName || null, state:s?.connection?.state?.status || 'none',
-    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.4.1'
+    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.5.0'
   };
 }
 
@@ -240,6 +240,20 @@ async function processControl(request) {
     return await joinChannel(request.channel_id);
   }
   if (request.op === 'join_user') return await joinUser(request.user_id);
+  if (request.op === 'connect') {
+    // One explicit opt-in action for a fresh ChatGPT conversation.
+    // Join only the configured owner's CURRENT voice channel, never a
+    // guessed channel or an unauthorized Discord server.
+    await joinUser('965583496435367956');
+    const session=sessions.get(GUILD_ID);
+    if(!session?.voice)throw new Error('Voice recognizer missing after join');
+    session.voice.talk();
+    return {
+      ...publicStatus(),
+      chatgpt_scope:'only active ChatGPT tool calls',
+      background_model:'separate TriForce Nova'
+    };
+  }
   if (request.op === 'say') return await say(request.text);
   if (request.op === 'exchange') {
     if(typeof request.text!=='string'||request.text.trim().length<1||request.text.length>400)
