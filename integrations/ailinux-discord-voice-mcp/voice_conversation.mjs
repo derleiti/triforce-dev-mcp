@@ -8,18 +8,23 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {SpeechRecognizer} from './stt_client.mjs';
-import {queryTriForce,extractWake,VOICE_OWNER_ID,VOICE_GUILD_ID} from './chat_rpc.mjs';
+import {queryTriForce,historyAction,VOICE_OWNER_ID,VOICE_GUILD_ID} from './chat_rpc.mjs';
+import {WakeDialogue} from './wake_dialogue.mjs';
 
 function remove(p){try{if(existsSync(p))unlinkSync(p);}catch{}}
-export function attachConversation(session,{python,root,say}) {
+export function attachConversation(session,{python,root,say,chat=queryTriForce}) {
   const receiver=session.connection.receiver;
   const worker=new SpeechRecognizer(python,root);
+  const dialogue=new WakeDialogue();
+  let lastErrorNotice=0;
   let active=true, recording=false, processing=false, recorder=null,lastRecordAt=0;
   const metrics={speaking_events:0,audio_packets:0,clips:0,transcribed:0,
-    wakes:0,replies:0,errors:0,last_audio_at:null,last_wake_at:null,
-    last_response_at:null,last_error:null,stt_ready:false};
+    wakes:0,wake_only:0,followups:0,chat_requests:0,replies:0,errors:0,
+    history_count:null,last_question_length:0,last_model:null,
+    last_audio_at:null,last_wake_at:null,last_response_at:null,
+    last_error:null,stt_ready:false};
   session.listening=false; session.responding=false;
-  session.history=[];session.metrics=metrics;
+  session.metrics=metrics;
   const error=(stage,e)=>{
     metrics.errors++;metrics.last_error=stage;
     console.error('Nova voice '+stage+':',String(e?.message||e).slice(0,155));
@@ -36,19 +41,41 @@ export function attachConversation(session,{python,root,say}) {
       const words=String(result.text||'').trim();
       if(!words)return;
       metrics.transcribed++;
-      const userText=extractWake(words);
-      if(userText===null)return;
-      metrics.wakes++;
-      metrics.last_wake_at=new Date().toISOString();
+      const event=dialogue.interpret(words);
+      if(event.kind==='ignore')return;
+      if(event.kind==='armed'){
+        metrics.wakes++;
+        metrics.wake_only++;
+        metrics.last_wake_at=new Date().toISOString();
+        return; // Wake-only: wait for next clip, never invent a question.
+      }
+      if(event.source==='wake'){
+        metrics.wakes++;
+        metrics.last_wake_at=new Date().toISOString();
+      }
+      if(event.source==='followup')metrics.followups++;
+      const userText=event.text;
+      metrics.last_question_length=userText.length;
+      metrics.chat_requests++;
       if(!active||!session.listening)return;
       session.responding=true;
-      let answer;
-      try{answer=await queryTriForce(userText,session.history);}
-      catch(e){error('chat',e);answer='Der KI-Chat hakt gerade. Versuch es bitte noch einmal.';}
+      let chatResult;
+      try{
+        chatResult=await chat(userText);
+      }catch(e){
+        error('chat',e);
+        // Do not persist or endlessly repeat a fallback as conversation history.
+        if(Date.now()-lastErrorNotice>45000 && active && session.listening){
+          lastErrorNotice=Date.now();
+          await say('Die Chatverbindung hat gerade ein Problem. Frag mich gleich noch mal.');
+        }
+        return;
+      }
       if(!active||!session.listening)return;
-      session.history.push({role:'user',content:userText},{role:'assistant',content:answer});
-      if(session.history.length>10)session.history.splice(0,session.history.length-10);
-      await say(answer);
+      metrics.history_count=chatResult.history_count;
+      metrics.last_model=chatResult.model||metrics.last_model;
+      await say(chatResult.response);
+      dialogue.markReplied();
       metrics.replies++;
       metrics.last_response_at=new Date().toISOString();
     }catch(e){error('recognition',e);}
@@ -102,7 +129,10 @@ export function attachConversation(session,{python,root,say}) {
     if(!active)return;
     metrics.stt_ready=true;session.listening=true;
     receiver.speaking.on('start',onStart);
-    console.log('Nova wake receiver active.');
+    historyAction('count').then(result=>{
+      if(active)metrics.history_count=chatResult.history_count;
+    }).catch(()=>{});
+    console.log('Nova wake receiver active with split-wake/follow-up support.');
   }).catch(e=>{error('start',e);throw e;});
   const listener={
     ready,
@@ -110,10 +140,12 @@ export function attachConversation(session,{python,root,say}) {
       if(!active)throw new Error('Listener stopped');
       if(enabled&&!worker.ready)throw new Error('STT not ready');
       session.listening=Boolean(enabled);
+      if(!enabled)dialogue.reset();
       return {ok:true,listening:session.listening,wake_word:'nova'};
     },
     close(){
       active=false;session.listening=false;
+      dialogue.reset();
       receiver.speaking.off('start',onStart);
       try{recorder?.destroy();}catch{}
       worker.close();
@@ -121,7 +153,7 @@ export function attachConversation(session,{python,root,say}) {
     status(){return {
       listening:Boolean(session.listening&&worker.ready),
       responding:Boolean(session.responding),
-      wake_word:'nova',stt_model:'small',...metrics
+      wake_word:'nova',stt_model:'small',...metrics,...dialogue.status()
     };}
   };
   session.voice=listener;

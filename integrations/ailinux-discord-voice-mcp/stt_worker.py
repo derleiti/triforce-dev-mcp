@@ -45,7 +45,7 @@ def transcribe(source: str) -> tuple[str, float]:
         vad_filter=False,
         temperature=0,
         no_speech_threshold=0.65,
-        initial_prompt="Nova, hallo Nova, kannst du mich hören? Deutschsprachige Unterhaltung.",
+        initial_prompt="Ein deutschsprachiges Gespräch über Linux, Technik, Musik und den Alltag.",
     )
     pieces = []
     for part in segments:

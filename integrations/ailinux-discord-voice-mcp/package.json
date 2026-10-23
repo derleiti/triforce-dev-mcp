@@ -1,6 +1,6 @@
 {
   "name": "ailinux-discord-voice-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Nova Discord DAVE voice bridge with German neural TTS and MCP control",
   "type": "module",

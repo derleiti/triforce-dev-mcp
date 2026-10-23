@@ -32,6 +32,8 @@ const command = new SlashCommandBuilder()
     .addStringOption(opt => opt.setName('text').setDescription('Was soll Nova sagen?').setRequired(true).setMaxLength(400)))
   .addSubcommand(sub => sub.setName('listen').setDescription('Auf das Aktivierungswort Nova hören'))
   .addSubcommand(sub => sub.setName('quiet').setDescription('Spracherkennung pausieren'))
+  .addSubcommand(sub => sub.setName("history").setDescription("Letzte gespeicherte Nova Gespraeche anzeigen"))
+  .addSubcommand(sub => sub.setName("forget").setDescription("Gespeicherte Nova Historie loeschen"))
   .addSubcommand(sub => sub.setName('status').setDescription('Verbindung und Sprachstatus anzeigen'))
   .addSubcommand(sub => sub.setName('leave').setDescription('Nova verlässt den Sprachkanal'));
 
@@ -44,7 +46,7 @@ function token() {
 }
 
 function doctor() {
-  console.log('Nova Discord Voice RC0.2');
+  console.log('Nova Discord Voice RC0.3');
   if (!GUILD_ID || !APP_ID) throw new Error('GuildControl must have exactly one allowed guild and app id');
   token();
   const node = process.versions.node;
@@ -91,7 +93,7 @@ function publicStatus() {
     connected:Boolean(s?.connection && s.connection.state.status === VoiceConnectionStatus.Ready),
     guild_id:GUILD_ID, channel_id:s?.channelId || null,
     channel_name:s?.channelName || null, state:s?.connection?.state?.status || 'none',
-    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.2.0'
+    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.3.0'
   };
 }
 

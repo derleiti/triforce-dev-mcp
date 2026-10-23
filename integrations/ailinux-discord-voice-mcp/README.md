@@ -92,8 +92,8 @@ placeholder still responds to /nova, check the TriForce HTTPS webhook deployment
 - /nova status shows listening, wake word and diagnostic counters.
 - Temporary WAV clips are removed after transcription. No permanent audio
   recording, no raw transcript logging and no microphone access when disconnected.
-- Conversation history is temporary and stored in memory only for the active
-  voice session; it is cleared on leave/restart.
+- Conversation history is now stored on the TriForce host (private SQLite),
+  with up to 200 successful turns retained for 30 days.
 - This is a SEPARATE TriForce AI chat (Groq gpt-oss-20b), not this particular
   ChatGPT conversation or its full memories.
 - Audio receive on Discord is not an officially stable API. Test actual DAVE
@@ -108,3 +108,31 @@ Version 0.1 files are backed up under
 ~/.local/state/ailinux-nova-voice/backup-pre-listening-20261023.
 To roll back, stop the user service, restore bot.mjs, mcp.mjs, and
 remote_client.py from this backup, restore package metadata, then restart.
+
+## RC0.3: reliable conversational memory and segmented wake word
+
+- Wake-word-only clips arm a follow-up input window for 18 seconds. The bot
+  never substitutes a fake question when only Nova was heard.
+- After a completed answer, the authorized speaker can ask a short follow-up
+  for another 35 seconds without repeating Nova.
+- Real questions are sent over authenticated SSH to TriForce, which loads
+  private SQLite chat history server-side and calls a verified Groq model.
+- A second Groq model is attempted if the primary request fails. An error
+  response is never written to the conversation history, and repeat error
+  notices are throttled.
+- The remote server stores only recognized questions and successful answers,
+  not raw microphone audio or ignored speech clips.
+- History survives disconnects and service restarts. Per-owner history is
+  limited to 200 turns with a 30-day retention window. Hub DB permissions 0600.
+- /nova history shows the recent exchanges privately. /nova forget deletes
+  the saved Nova Discord conversation ONLY when explicitly invoked.
+- /nova status reports the conversation count alongside the listening state.
+- The Discord voice session is powered by a separate TriForce chat provider,
+  not this exact ChatGPT conversation or its saved context.
+
+### Rollback
+
+Voice files prior to this patch are in
+~/.local/state/ailinux-nova-voice/pre-conversation-fix-20261023/.
+The TriForce script and webhook backups are on the ailinux host under the same
+snapshot name. New history is never committed to Git.
