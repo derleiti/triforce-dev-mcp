@@ -41,7 +41,7 @@ function result(data) {
 
 const server = new McpServer({
   name:'ailinux-discord-voice-mcp',
-  version:'0.1.0'
+  version:'0.2.0'
 });
 
 server.registerTool('discord_voice_status',{
@@ -50,7 +50,7 @@ server.registerTool('discord_voice_status',{
 },async()=>result(await invoke({op:'status'})));
 
 server.registerTool('discord_voice_join',{
-  description:'Join one authorized Discord voice channel. Explicit channel ID only. No audio recording.',
+  description:'Join one authorized Discord voice channel. Explicit channel ID only. Enables owner-only wake-word recognition.',
   inputSchema:{channel_id:z.string().regex(/^\d{17,20}$/)}
 },async({channel_id})=>result(await invoke({op:'join',channel_id})));
 
@@ -58,6 +58,11 @@ server.registerTool('discord_voice_say',{
   description:'Speak a German text into the active Discord voice channel using Seraphina neural TTS. Other connected users can hear it.',
   inputSchema:{text:z.string().min(1).max(400)}
 },async({text})=>result(await invoke({op:'say',text})));
+
+server.registerTool('discord_voice_listen',{
+  description:'Enable or disable owner-only Discord voice recognition. Wake word Nova.',
+  inputSchema:{enabled:z.boolean()}
+},async({enabled})=>result(await invoke({op:'listen',enabled})));
 
 server.registerTool('discord_voice_leave',{
   description:'Disconnect Nova from Discord voice and stop playback.',

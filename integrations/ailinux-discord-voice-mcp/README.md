@@ -78,3 +78,33 @@ token were not altered. npm run unregister intentionally deletes only /nova.
 
 RC0.1 does NOT listen to people's microphones or transcribe voice. If the old
 placeholder still responds to /nova, check the TriForce HTTPS webhook deployment.
+
+## RC0.2: spoken conversation (owner-only)
+
+- Discord DAVE voice receive: uses selfDeaf=false and subscribes exclusively to
+  the verified guild owners audio. Other members are ignored.
+- When /nova join completes, the offline faster-whisper small model is warm.
+- Wake word: start an utterance with Nova or Hey Nova, followed by your question.
+- The recognized text after the wake word is sent via SSH to a restricted
+  TriForce chat script on the AILinux server. The model and API keys stay there.
+- Responses are converted to speech with Seraphina and played in the channel.
+- /nova quiet pauses reception; /nova listen resumes; /nova leave disconnects.
+- /nova status shows listening, wake word and diagnostic counters.
+- Temporary WAV clips are removed after transcription. No permanent audio
+  recording, no raw transcript logging and no microphone access when disconnected.
+- Conversation history is temporary and stored in memory only for the active
+  voice session; it is cleared on leave/restart.
+- This is a SEPARATE TriForce AI chat (Groq gpt-oss-20b), not this particular
+  ChatGPT conversation or its full memories.
+- Audio receive on Discord is not an officially stable API. Test actual DAVE
+  receive with the guild owners microphone, not just synthesized Opus packets.
+
+## Diagnostics / rollback
+
+Use the local socket control/status to see speaking_events, audio_packets,
+transcribed, wakes, replies and errors. The bot cannot verify capture of
+actual Discord mic input until the user speaks after it has joined.
+Version 0.1 files are backed up under
+~/.local/state/ailinux-nova-voice/backup-pre-listening-20261023.
+To roll back, stop the user service, restore bot.mjs, mcp.mjs, and
+remote_client.py from this backup, restore package metadata, then restart.

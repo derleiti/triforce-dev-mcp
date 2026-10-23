@@ -15,7 +15,7 @@ def main() -> None:
     if not isinstance(request, dict):
         raise ValueError("request must be JSON object")
     operation = request.get("op")
-    if operation not in {"status", "join_user", "say", "leave"}:
+    if operation not in {"status", "join_user", "say", "leave", "listen"}:
         raise ValueError("invalid operation")
     if operation == "join_user":
         uid = request.get("user_id", "")
@@ -27,6 +27,11 @@ def main() -> None:
         if not isinstance(text, str) or not 1 <= len(text.strip()) <= 400:
             raise ValueError("invalid text length")
         request = {"op": "say", "text": text.strip()}
+    elif operation == "listen":
+        enabled = request.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("invalid listening state")
+        request = {"op": "listen", "enabled": enabled}
     else:
         request = {"op": operation}
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:

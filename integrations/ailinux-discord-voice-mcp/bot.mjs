@@ -6,6 +6,7 @@ import { join, dirname, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
+import {attachConversation} from './voice_conversation.mjs';
 
 const ROOT = dirname(new URL(import.meta.url).pathname);
 const GCFG = JSON.parse(readFileSync(join(homedir(), '.config/guildcontrol/guildcontrol.json'), 'utf8'));
@@ -24,11 +25,13 @@ let createdSocket = false;
 
 const command = new SlashCommandBuilder()
   .setName('nova')
-  .setDescription('Nova spricht mit dir im Discord-Sprachkanal')
+  .setDescription('Nova hört und spricht im Discord-Sprachkanal')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addSubcommand(sub => sub.setName('join').setDescription('Nova kommt in deinen aktuellen Sprachkanal'))
   .addSubcommand(sub => sub.setName('say').setDescription('Nova spricht einen Satz mit Seraphina')
     .addStringOption(opt => opt.setName('text').setDescription('Was soll Nova sagen?').setRequired(true).setMaxLength(400)))
+  .addSubcommand(sub => sub.setName('listen').setDescription('Auf das Aktivierungswort Nova hören'))
+  .addSubcommand(sub => sub.setName('quiet').setDescription('Spracherkennung pausieren'))
   .addSubcommand(sub => sub.setName('status').setDescription('Verbindung und Sprachstatus anzeigen'))
   .addSubcommand(sub => sub.setName('leave').setDescription('Nova verlässt den Sprachkanal'));
 
@@ -41,7 +44,7 @@ function token() {
 }
 
 function doctor() {
-  console.log('Nova Discord Voice RC0.1');
+  console.log('Nova Discord Voice RC0.2');
   if (!GUILD_ID || !APP_ID) throw new Error('GuildControl must have exactly one allowed guild and app id');
   token();
   const node = process.versions.node;
@@ -88,7 +91,7 @@ function publicStatus() {
     connected:Boolean(s?.connection && s.connection.state.status === VoiceConnectionStatus.Ready),
     guild_id:GUILD_ID, channel_id:s?.channelId || null,
     channel_name:s?.channelName || null, state:s?.connection?.state?.status || 'none',
-    tts_voice:VOICE, listening:false, version:'0.1.0'
+    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.2.0'
   };
 }
 
@@ -109,6 +112,7 @@ function generateSpeech(text, output) {
 
 async function play(session, text) {
   const file = join(tmpdir(), 'nova-voice-' + randomUUID() + '.mp3');
+  session.speakingBack=true;
   try {
     await generateSpeech(text, file);
     if (sessions.get(GUILD_ID) !== session) throw new Error('voice connection closed during TTS');
@@ -116,6 +120,7 @@ async function play(session, text) {
     await entersState(session.player, AudioPlayerStatus.Idle, 45000);
     return {ok:true, spoken_characters:text.length};
   } finally {
+    session.speakingBack=false;
     try {if (existsSync(file)) unlinkSync(file);} catch {}
   }
 }
@@ -148,7 +153,7 @@ async function joinChannel(channelId) {
   if (previous) await leave();
   const connection = joinVoiceChannel({
     channelId:channel.id, guildId:GUILD_ID, adapterCreator:guild.voiceAdapterCreator,
-    selfDeaf:true, selfMute:false
+    selfDeaf:false, selfMute:false
   });
   connection.on('error', error => console.error('Voice connection error:', error.message));
   const player = createAudioPlayer({behaviors:{noSubscriber:NoSubscriberBehavior.Pause}});
@@ -162,12 +167,17 @@ async function joinChannel(channelId) {
     await leave();
     throw new Error('Discord voice/DAVE handshake failed: ' + err.message);
   }
-  console.log('Voice connected to authorized channel: ' + channel.name);
-  return {ok:true, channel_id:channel.id, channel_name:channel.name, reused:false};
+  const listening=attachConversation(session,{
+    python:PYTHON, root:ROOT, say,
+  });
+  try {await listening.ready;}
+  catch(error){await leave();throw new Error('Offline speech recognition unavailable: '+error.message);}
+  console.log('Voice connected with owner-only wake word: ' + channel.name);
+  return {ok:true, channel_id:channel.id, channel_name:channel.name, reused:false, listening:session.listening};
 }
 
 async function joinUser(userId) {
-  if (!/^\d{17,20}$/.test(String(userId || ''))) throw new Error('Invalid Discord user ID');
+  if (String(userId)!=='965583496435367956') throw new Error('Only the guild owner may activate listening');
   if (!client?.isReady()) throw new Error('Discord bot is not ready');
   const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID);
   let channelId = guild.voiceStates.cache.get(String(userId))?.channelId;
@@ -187,6 +197,7 @@ async function leave() {
   const s = sessions.get(GUILD_ID);
   if (!s) return {ok:true, already_left:true};
   sessions.delete(GUILD_ID);
+  try{s.voice?.close();}catch{}
   try{s.player.stop(true);}catch{}
   try{s.connection.destroy();}catch{}
   return {ok:true, left:true};
@@ -201,6 +212,12 @@ async function processControl(request) {
   }
   if (request.op === 'join_user') return await joinUser(request.user_id);
   if (request.op === 'say') return await say(request.text);
+  if (request.op === 'listen') {
+    const session=sessions.get(GUILD_ID);
+    if(!session?.voice)throw new Error('Nova is not in a voice channel');
+    if(typeof request.enabled!=='boolean')throw new Error('Expected boolean enabled');
+    return session.voice.set(request.enabled);
+  }
   if (request.op === 'leave') return await leave();
   throw new Error('Unsupported control operation');
 }
@@ -248,7 +265,7 @@ async function handleInteraction(interaction) {
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'nova') return;
   if (interaction.guildId !== GUILD_ID) return;
   const member = interaction.memberPermissions;
-  if (!member?.has(PermissionFlagsBits.Administrator)) {
+  if (!member?.has(PermissionFlagsBits.Administrator) || interaction.user.id !== '965583496435367956') {
     await interaction.reply({content:'Nur für Server-Administratoren.', flags:MessageFlags.Ephemeral});
     return;
   }
@@ -256,7 +273,7 @@ async function handleInteraction(interaction) {
   try {
     if (sub === 'status') {
       const info=publicStatus();
-      await interaction.reply({content:'Nova Voice: ' + (info.connected ? 'in ' + info.channel_name : 'nicht verbunden') + ', Stimme: Seraphina, Zuhören: aus.',flags:MessageFlags.Ephemeral});
+      await interaction.reply({content:'Nova Voice: ' + (info.connected ? 'in ' + info.channel_name : 'nicht verbunden') + ', Seraphina, Zuhören: ' + (info.listening ? 'an' : 'aus') + '.',flags:MessageFlags.Ephemeral});
       return;
     }
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
@@ -266,7 +283,12 @@ async function handleInteraction(interaction) {
       if(!channel) throw new Error('Geh zuerst in einen Discord-Sprachkanal.');
       const result = await joinChannel(channel.id);
       if(!result.reused) await say('Servus! Nova ist da. Und Brumo kontrolliert natürlich wieder die Tonqualität.');
-      await interaction.editReply('Nova ist im Sprachkanal ' + result.channel_name + '. Sag mit /nova say einen Satz an. /nova leave beendet die Verbindung.');
+      await interaction.editReply('Nova ist in ' + result.channel_name + '. Sag Nova und stell eine Frage. /nova quiet schaltet das Zuhören aus.');
+    } else if(sub === 'listen' || sub === 'quiet') {
+      const s=sessions.get(GUILD_ID);
+      if(!s?.voice)throw new Error('Nova ist nicht im Sprachkanal.');
+      const info=s.voice.set(sub==='listen');
+      await interaction.editReply('Zuhören '+(info.listening?'eingeschaltet':'ausgeschaltet')+'.');
     } else if(sub === 'say') {
       const text=interaction.options.getString('text',true);
       await say(text);
