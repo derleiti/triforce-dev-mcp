@@ -24,6 +24,24 @@ OWNER_ID = "965583496435367956"
 MODELS = ("groq/openai/gpt-oss-20b", "groq/openai/gpt-oss-120b")
 SYSTEM = (
     "Du bist Nova, die technische, freundliche Sprachassistentin von AILinux. "
+    "WICHTIGER LAUFZEITKONTEXT: Du befindest dich JETZT in einer funktionierenden "
+    "Discord-Sprachverbindung. Das Mikrofon deines Gesprächspartners wird durch "
+    "Whisper in deine Nutzerfrage transkribiert. Jede Antwort von dir wird "
+    "durch Seraphina Neural-TTS direkt hörbar im Discord-Sprachkanal abgespielt. "
+    "Du KANNST ihn also hören und mit ihm sprechen. Behaupte NIE, du seist "
+    "nur textbasiert, könntest keine Texte vorlesen, hättest keine Sprachfunktion "
+    "oder könntest ausschließlich schriftlich antworten. Frühere entsprechende "
+    "Selbstaussagen waren falsch und dürfen nicht wiederholt werden. "
+    "Du kannst derzeit NICHT seinen Bildschirm, den Spielstream oder Spielzustand "
+    "direkt sehen. Du kannst ihm aber per Sprache Tipps geben, wenn er die "
+    "Situation beschreibt. Behaupte nicht, einen Bildschirm gesehen zu haben. "
+    "Wenn er sagt, du seist zu leise, bestätige die Sprachausgabe und empfehle "
+    "die Discord-Benutzerlautstärke zu prüfen, statt deine Stimme zu leugnen. "
+    "Du kannst die Discord-Lautstärke nicht selbst einstellen. Behaupte das nie. "
+    "Du kannst Spieltipps aus gesprochenen Beschreibungen geben, nicht nur schriftlich. "
+    "Bei aktuellen WoW-Klassenrankings oder Patches hast du ohne Abfrage keine "
+    "verifizierten Live-Daten. Erfinde deshalb keine aktuelle beste Klasse, "
+    "sondern frage nach Rolle, Spielmodus und Version. "
     "Dein Gesprächspartner Zombie entwickelt AILinux und TriForce und mag Linux, KI, "
     "Musik und direkte, ruhige Antworten. Brumo ist gelegentlich sein scherzhafter "
     "Qualitätsbeauftragter. Sprich locker auf Deutsch, leicht bayerischer Schmäh ist okay. "
@@ -45,7 +63,60 @@ def normalize_answer(answer: str) -> str:
     text = re.sub(r"(?m)^[-*#]+\s*", "", text)
     text = text.replace(chr(96), "").replace("*", "").replace("_", "")
     text = re.sub(r"\s+", " ", text)
-    return text[:380].strip()
+    if len(text) > 380:
+        last_sentence = max(text.rfind(c, 150, 380) for c in '.?!')
+        if last_sentence >= 150:
+            text = text[:last_sentence + 1]
+        else:
+            cut = text.rfind(" ", 0, 379)
+            text = text[:cut if cut > 0 else 379].rstrip() + "."
+    return text.strip()
+
+
+def inaccurate_voice_output(answer: str) -> bool:
+    """Reject inaccurate claims that a live Discord voice bot cannot speak."""
+    text = str(answer or "").casefold()
+    bad = (
+        "nur textbasiert", "ausschließlich textbasiert", "keine sprachfunktion",
+        "keine sprachausgabe", "keine sprachunterstützung", "oder sprachunterstützung",
+        "nur schriftlich", "in kurzen textnachrichten", "nur textnachrichten",
+        "nicht laut vorlesen", "keine texte laut vorlesen", "nur textantworten",
+        "ich kann nur schriftlich", "ich kann dir nur schriftlich",
+        "passe ich die lautstärke an", "ich passe die lautstärke an",
+    )
+    return any(fragment in text for fragment in bad)
+
+
+def prepare_messages(message: str, history: list[dict]) -> list[dict]:
+    """Preserve prior questions without reinforcing false assistant self-claims."""
+    prepared = [{"role": "system", "content": SYSTEM}]
+    for item in history:
+        if not isinstance(item, dict) or item.get("role") not in ("user", "assistant"):
+            continue
+        content = str(item.get("content", ""))[:600]
+        if item["role"] == "assistant" and inaccurate_voice_output(content):
+            content = ("Korrektur meiner früheren falschen Aussage: Dieser Discord-Bot "
+                       "kann Sprache hören und mit Seraphina hörbar antworten. "
+                       "Einen Bildschirm kann er nicht sehen.")
+        if content:
+            prepared.append({"role": item["role"], "content": content})
+    prepared.append({"role": "user", "content": message})
+    return prepared
+
+
+def grounded_voice_fallback(question: str) -> str:
+    """Truthful limited answer only when models persistently misstate voice capabilities."""
+    q = question.casefold()
+    if any(term in q for term in ("zuschauen", "bildschirm", "stream", "spiel", "wow")):
+        return ("Ich höre dich hier über Discord und antworte mit Seraphina. "
+                "Deinen Bildschirm sehe ich noch nicht. Beschreib mir, was im "
+                "Spiel passiert, dann kann ich dir direkt Tipps geben.")
+    if any(term in q for term in ("leise", "lautstärke", "lautstaerke", "laut")):
+        return ("Ich spreche hier über Discord mit Seraphina. Wenn ich zu leise "
+                "bin, prüfe bitte meine Benutzerlautstärke in Discord. "
+                "Den Pegel kann ich gerade nicht selbst ändern.")
+    return ("Doch, wir reden hier über Discord miteinander: Ich höre dich "
+            "über Whisper und antworte hörbar mit Seraphina. Was möchtest du wissen?")
 
 
 async def respond(message: str, history: list[dict]) -> tuple[str, str]:
@@ -57,8 +128,9 @@ async def respond(message: str, history: list[dict]) -> tuple[str, str]:
         raise RuntimeError("Groq provider is not configured")
     os.environ["GROQ_API_KEY"] = settings.groq_api_key
 
-    messages = [{"role": "system", "content": SYSTEM}, *history, {"role": "user", "content": message}]
+    messages = prepare_messages(message, history)
     last_error: Exception | None = None
+    had_bad_answer = False
     for model in MODELS:
         try:
             response = await asyncio.wait_for(
@@ -66,6 +138,10 @@ async def respond(message: str, history: list[dict]) -> tuple[str, str]:
                 timeout=25,
             )
             answer = normalize_answer(response)
+            if inaccurate_voice_output(answer):
+                had_bad_answer = True
+                print("Rejected inaccurate Discord voice capability claim", file=sys.stderr)
+                continue
             if answer:
                 return answer, model
             raise RuntimeError("Provider returned an empty answer")
@@ -75,6 +151,8 @@ async def respond(message: str, history: list[dict]) -> tuple[str, str]:
             print(f"Voice chat model {model.split('/')[-1]} failed: {type(error).__name__}",
                   file=sys.stderr)
             last_error = error
+    if had_bad_answer:
+        return grounded_voice_fallback(message), "voice-grounding-fallback"
     raise RuntimeError("All configured voice chat models failed") from last_error
 
 

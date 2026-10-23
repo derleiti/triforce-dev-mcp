@@ -61,3 +61,60 @@ async def test_voice_model_fallback_preserves_history(monkeypatch):
     assert len(calls) == 2
     assert calls[0][1][-3]['content'] == 'Meine Lieblingsfarbe ist Azurblau.'
     assert calls[1][1][-1]['content'] == 'Welche Farbe habe ich genannt?'
+
+
+def test_inaccurate_voice_claims_are_detected():
+    examples = [
+        'Ich bin nur textbasiert und habe keine Sprachfunktion.',
+        'Ich kann dir in kurzen Textnachrichten helfen.',
+        'Ich habe keine Sprachausgabe.',
+        'Ich kann leider keine Texte laut vorlesen.',
+        'Dann passe ich die Lautstärke an.',
+    ]
+    for text in examples:
+        assert bridge.inaccurate_voice_output(text), text
+    assert not bridge.inaccurate_voice_output('Ich kann deine Stimme über Discord hören und antworte mit Seraphina.')
+    assert not bridge.inaccurate_voice_output('Deinen Bildschirm kann ich aktuell nicht sehen.')
+
+
+def test_old_false_history_is_corrected_only_in_model_context():
+    incorrect = 'Ich bin nur textbasiert, ich kann leider nicht sprechen.'
+    history = [
+        {'role': 'user', 'content': 'Kannst du mich hören?'},
+        {'role': 'assistant', 'content': incorrect},
+    ]
+    prompts = bridge.prepare_messages('Und jetzt?', history)
+    assert prompts[1]['content'] == 'Kannst du mich hören?'
+    assert 'Korrektur' in prompts[2]['content']
+    assert incorrect not in [p['content'] for p in prompts]
+    assert prompts[-1]['content'] == 'Und jetzt?'
+    assert history[1]['content'] == incorrect  # Database archive remains unchanged.
+
+
+@pytest.mark.asyncio
+async def test_invalid_first_model_is_replaced_by_grounded_second_model(monkeypatch):
+    from app.services.chat_router import api_proxy
+    calls = []
+    async def chat(model, messages, **kwargs):
+        calls.append(model)
+        if model.endswith('gpt-oss-20b'):
+            return 'Ich bin leider nur textbasiert und kann nicht sprechen.'
+        return 'Ja, wir reden über Discord und ich antworte mit Seraphina.'
+    monkeypatch.setattr(api_proxy, 'chat', chat)
+    answer, model = await bridge.respond('Kannst du sprechen?', [])
+    assert 'wir reden über Discord' in answer
+    assert model.endswith('120b')
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_false_voice_claim_escapes_if_models_repeat_it(monkeypatch):
+    from app.services.chat_router import api_proxy
+    async def chat(*args, **kwargs):
+        return 'Ich kann dir nur in kurzen Textnachrichten helfen.'
+    monkeypatch.setattr(api_proxy, 'chat', chat)
+    answer, model = await bridge.respond('Kannst du beim WoW-Zocken zuschauen?', [])
+    assert 'Bildschirm' in answer
+    assert 'Seraphina' in answer
+    assert model == 'voice-grounding-fallback'
+    assert not bridge.inaccurate_voice_output(answer)
