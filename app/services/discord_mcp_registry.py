@@ -50,6 +50,13 @@ class DiscordRegistry:
                   issued_at INTEGER NOT NULL,
                   expires_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS discord_oauth_pending (
+                  state_hash TEXT PRIMARY KEY,
+                  ailinux_subject TEXT NOT NULL,
+                  expires_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS discord_oauth_expiry
+                  ON discord_oauth_pending(expires_at);
                 CREATE INDEX IF NOT EXISTS discord_pair_expiry
                   ON discord_pair_codes(expires_at);
             """)
@@ -116,8 +123,39 @@ class DiscordRegistry:
                 return record["ailinux_subject"]
         return None
 
+    def begin_oauth(self, account: str, ttl: int = 300) -> str:
+        if not self._valid_id(account) or not 30 <= ttl <= 600:
+            raise ValueError("invalid account or TTL")
+        state = secrets.token_urlsafe(32)
+        digest = hashlib.sha256(state.encode("ascii")).hexdigest()
+        now = int(time.time())
+        with self._connect() as db:
+            db.execute("DELETE FROM discord_oauth_pending WHERE expires_at <= ?", (now,))
+            db.execute("INSERT INTO discord_oauth_pending VALUES (?, ?, ?)",
+                       (digest, account, now + ttl))
+        return state
+
+    def consume_oauth(self, state: str) -> str | None:
+        if not isinstance(state, str) or not 20 <= len(state) <= 128:
+            return None
+        digest = hashlib.sha256(state.encode("utf8")).hexdigest()
+        with self._connect() as db:
+            row = db.execute("SELECT ailinux_subject, expires_at FROM discord_oauth_pending WHERE state_hash=?",
+                             (digest,)).fetchone()
+            db.execute("DELETE FROM discord_oauth_pending WHERE state_hash=?", (digest,))
+            if row and row["expires_at"] > int(time.time()):
+                return row["ailinux_subject"]
+        return None
+
+    def linked_ids(self, account: str) -> list[str]:
+        with self._connect() as db:
+            return [x["discord_subject"] for x in db.execute(
+                "SELECT discord_subject FROM discord_links WHERE ailinux_subject=?", (account,)
+            ).fetchall()]
+
     def revoke(self, account: str):
         with self._connect() as db:
             db.execute("DELETE FROM discord_pair_codes WHERE ailinux_subject=?", (account,))
+            db.execute("DELETE FROM discord_oauth_pending WHERE ailinux_subject=?", (account,))
             db.execute("DELETE FROM discord_guild_grants WHERE ailinux_subject=?", (account,))
             db.execute("DELETE FROM discord_links WHERE ailinux_subject=?", (account,))

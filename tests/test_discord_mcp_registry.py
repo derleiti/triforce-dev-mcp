@@ -45,3 +45,13 @@ def test_revocation_clears_access(registry):
     registry.grant("alice", USER, GUILD, {"voice:join"})
     registry.revoke("alice")
     assert not registry.can("alice", USER, GUILD, "voice:join")
+
+def test_oauth_state_one_time(registry):
+    state = registry.begin_oauth("alice")
+    assert registry.consume_oauth(state) == "alice"
+    assert registry.consume_oauth(state) is None
+
+def test_oauth_state_revoked(registry):
+    state = registry.begin_oauth("alice")
+    registry.revoke("alice")
+    assert registry.consume_oauth(state) is None
