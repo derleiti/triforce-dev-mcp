@@ -140,10 +140,11 @@ class DiscordMcpOAuthStore:
         now = int(time.time())
         with self._db() as db:
             row = db.execute(
-                "DELETE FROM discord_mcp_authorizations WHERE csrf_hash=? RETURNING *",
-                (_hash(csrf),),
+                "DELETE FROM discord_mcp_authorizations "
+                "WHERE csrf_hash=? AND account=? AND expires_at>? RETURNING *",
+                (_hash(csrf), account, now),
             ).fetchone()
-            if not row or row["account"] != account or row["expires_at"] <= now:
+            if not row:
                 return None
             data = dict(row)
             if approved:

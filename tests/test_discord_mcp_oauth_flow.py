@@ -1,6 +1,7 @@
 """End-to-end isolated OAuth DCR/PKCE and MCP handshake tests."""
 import base64
 import hashlib
+import re
 from urllib.parse import urlencode, urlparse, parse_qs
 import pytest
 from fastapi import FastAPI
@@ -54,15 +55,18 @@ def _start(client, client_id):
     assert r.headers["referrer-policy"] == "same-origin"
     assert '<meta name="referrer" content="same-origin">' in r.text
     assert "login.ailinux.me" in r.text
-    assert "dmcp_consent" in client.cookies
-    return verifier, q
+    match = re.search(r'name="csrf" value="([^"]+)"', r.text)
+    assert match is not None
+    assert len(match.group(1)) >= 32
+    # No browser-wide consent cookie: concurrent authorizations must not clash.
+    assert "dmcp_consent" not in client.cookies
+    return verifier, q, match.group(1)
 
 
 def test_dcr_authorize_token_refresh_and_mcp(scenario):
     client, _, _ = scenario
     client_id = _client_registration(client)
-    verifier, q = _start(client, client_id)
-    csrf = client.cookies.get("dmcp_consent")
+    verifier, q, csrf = _start(client, client_id)
     approved = client.post(
         "/v1/discord-mcp/oauth2/authorize/approve",
         data={"csrf": csrf, "allow": "yes"},
@@ -162,8 +166,7 @@ def test_google_ailinux_sign_in_redirect_for_unauthenticated_user(scenario, monk
 def test_null_origin_is_still_rejected(scenario):
     client, _, _ = scenario
     client_id = _client_registration(client)
-    _start(client, client_id)
-    csrf = client.cookies.get("dmcp_consent")
+    _, _, csrf = _start(client, client_id)
     blocked = client.post(
         "/v1/discord-mcp/oauth2/authorize/approve",
         data={"csrf": csrf, "allow": "yes"},
@@ -198,8 +201,7 @@ def test_redirect_integrity_and_dcr_validation(scenario):
 def test_consent_refuses_csrf_and_one_time(scenario):
     client, _, _ = scenario
     client_id = _client_registration(client)
-    _, _ = _start(client, client_id)
-    csrf = client.cookies.get("dmcp_consent")
+    _, _, csrf = _start(client, client_id)
     rejected = client.post("/v1/discord-mcp/oauth2/authorize/approve",
                            data={"csrf": csrf, "allow": "yes"},
                            headers={"Origin": "https://evil.example"})
@@ -231,8 +233,7 @@ def test_two_ailinux_google_accounts_get_independent_mcp_tokens(scenario, monkey
     for account in ("alice", "bob"):
         client.cookies.set("test_ailinux_identity", account, domain="discord.ailinux.me")
         client_id = _client_registration(client)
-        verifier, params = _start(client, client_id)
-        csrf = client.cookies.get("dmcp_consent")
+        verifier, params, csrf = _start(client, client_id)
         redirect = client.post(
             "/v1/discord-mcp/oauth2/authorize/approve",
             data={"csrf": csrf, "allow": "yes"},
@@ -280,3 +281,62 @@ def test_two_ailinux_google_accounts_get_independent_mcp_tokens(scenario, monkey
         json={"jsonrpc": "2.0", "id": 12, "method": "tools/list"},
     )
     assert still_authorized.status_code == 200
+
+
+
+def test_parallel_oauth_consent_tabs_do_not_share_mutable_cookie(scenario):
+    client, _, _ = scenario
+    client_id = _client_registration(client)
+    _, _, first_csrf = _start(client, client_id)
+    _, _, second_csrf = _start(client, client_id)
+    assert first_csrf != second_csrf
+    for csrf in (first_csrf, second_csrf):
+        approved = client.post(
+            "/v1/discord-mcp/oauth2/authorize/approve",
+            data={"csrf": csrf, "allow": "yes"},
+            headers={"Origin": "https://discord.ailinux.me", "Sec-Fetch-Site": "same-origin"},
+        )
+        assert approved.status_code == 303
+        assert "code=" in approved.headers["location"]
+    assert "dmcp_consent" not in client.cookies
+
+
+def test_stale_legacy_consent_cookie_does_not_block_valid_page(scenario):
+    client, _, _ = scenario
+    # Earlier deployments used a single cookie for all OAuth tabs and
+    # even set different path attributes; Chrome can retain both.
+    client.cookies.set("dmcp_consent", "old-nonce", domain="discord.ailinux.me", path="/authorize")
+    client.cookies.set("dmcp_consent", "another-old-nonce", domain="discord.ailinux.me", path="/")
+    client_id = _client_registration(client)
+    _, _, csrf = _start(client, client_id)
+    approved = client.post(
+        "/v1/discord-mcp/oauth2/authorize/approve",
+        data={"csrf": csrf, "allow": "yes"},
+        headers={"Origin": "https://discord.ailinux.me"},
+    )
+    assert approved.status_code == 303
+    assert "code=" in approved.headers["location"]
+
+
+def test_mcp_consent_nonce_required_one_time_and_account_bound(scenario, monkeypatch):
+    client, _, _ = scenario
+    client_id = _client_registration(client)
+    _, _, csrf = _start(client, client_id)
+    url = "/v1/discord-mcp/oauth2/authorize/approve"
+    headers = {"Origin": "https://discord.ailinux.me"}
+    missing = client.post(url, data={"allow": "yes"}, headers=headers)
+    assert missing.status_code == 403
+    random_nonce = client.post(url, data={"csrf": "z" * 43, "allow": "yes"}, headers=headers)
+    assert random_nonce.status_code == 403
+    wrong_site = client.post(url, data={"csrf": csrf, "allow": "yes"},
+                             headers={**headers, "Sec-Fetch-Site": "cross-site"})
+    assert wrong_site.status_code == 403
+    # A stolen nonce cannot be approved under a different account.
+    monkeypatch.setattr(auth, "_ailinux_account", lambda request: "bob")
+    other_user = client.post(url, data={"csrf": csrf, "allow": "yes"}, headers=headers)
+    assert other_user.status_code == 403
+    monkeypatch.setattr(auth, "_ailinux_account", lambda request: "alice")
+    approved = client.post(url, data={"csrf": csrf, "allow": "yes"}, headers=headers)
+    assert approved.status_code == 303
+    replay = client.post(url, data={"csrf": csrf, "allow": "yes"}, headers=headers)
+    assert replay.status_code == 403

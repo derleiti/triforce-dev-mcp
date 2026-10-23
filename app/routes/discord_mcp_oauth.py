@@ -167,8 +167,11 @@ async def authorize(request: Request):
     # authorization codes, state or consent URLs to external redirects.
     response = HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "same-origin",
                                            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"})
-    response.set_cookie("dmcp_consent", csrf, max_age=300, httponly=True,
-                        secure=True, samesite="lax", path="/")
+    # An authorization has its own high-entropy, account-bound, single-use
+    # consent nonce stored server-side. Do not use one mutable cookie across
+    # independent OAuth tabs (old dmcp_consent cookies might also survive).
+    response.delete_cookie("dmcp_consent", path="/", secure=True, samesite="lax")
+    response.delete_cookie("dmcp_consent", path="/authorize", secure=True, samesite="lax")
     return response
 
 
@@ -177,16 +180,22 @@ async def approve(request: Request):
     origin = request.headers.get("origin")
     if origin and origin != PUBLIC:
         return HTMLResponse("Invalid request origin", status_code=403)
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site and fetch_site != "same-origin":
+        return HTMLResponse("Invalid request site", status_code=403)
     account = _ailinux_account(request)
     if not account:
         return HTMLResponse("Session expired. Sign in again.", status_code=401)
     data = await _urlencoded(request)
     csrf = data.get("csrf", "")
-    if not csrf or csrf != request.cookies.get("dmcp_consent"):
+    if not csrf or data.get("allow") not in {"yes", "no"}:
         return HTMLResponse("Consent verification failed", status_code=403)
-    record = store().finish_authorize(csrf, account, data.get("allow") == "yes")
+    # The nonce is stored hashed and bound to the verified AILinux identity,
+    # OAuth client, redirect, S256 challenge, and expiry. Atomic consume
+    # prevents replay without depending on a browser-wide mutable cookie.
+    record = store().finish_authorize(csrf, account, data["allow"] == "yes")
     if not record:
-        return HTMLResponse("Consent expired or already used", status_code=403)
+        return HTMLResponse("Consent expired, invalid, or already used", status_code=403)
     payload = {"state": record["state"]}
     if "code" in record:
         payload["code"] = record["code"]
@@ -196,7 +205,6 @@ async def approve(request: Request):
     glue = "&" if "?" in redirect else "?"
     response = RedirectResponse(redirect + glue + urlencode(payload), status_code=303,
                                 headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
-    response.delete_cookie("dmcp_consent", path="/")
     return response
 
 
