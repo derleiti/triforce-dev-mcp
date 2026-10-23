@@ -649,7 +649,7 @@ async def _cloudflare(
 ) -> dict[str, Any]:
     settings = get_settings()
     account = _key(settings, "cloudflare_account_id", "CLOUDFLARE_ACCOUNT_ID")
-    api_key = _key(settings, "cloudflare_api_token", "CLOUDFLARE_API_TOKEN")
+    api_key = os.getenv("CLOUDFLARE_AI_WORKERS_API") or _key(settings, "cloudflare_ai_workers_api", "CLOUDFLARE_AI_WORKERS_API")
     if not account or not api_key:
         raise HTTPException(503, "Cloudflare support is not configured")
     try:
@@ -893,11 +893,11 @@ async def stream_completion(
     }
     if provider == "cloudflare":
         account = _key(settings, "cloudflare_account_id", "CLOUDFLARE_ACCOUNT_ID")
-        api_key = _key(settings, "cloudflare_api_token", "CLOUDFLARE_API_TOKEN")
+        api_key = os.getenv("CLOUDFLARE_AI_WORKERS_API") or _key(settings, "cloudflare_ai_workers_api", "CLOUDFLARE_AI_WORKERS_API")
         if not account or not api_key:
             raise HTTPException(503, "Cloudflare support is not configured")
         base = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1"
-        attr, env_names, timeout = "cloudflare_api_token", ("CLOUDFLARE_API_TOKEN",), 60.0
+        attr, env_names, timeout = "cloudflare_ai_workers_api", ("CLOUDFLARE_AI_WORKERS_API",), 60.0
     elif provider in configs:
         base, attr, env_names, timeout = configs[provider]
         api_key = _key(settings, attr, *env_names)

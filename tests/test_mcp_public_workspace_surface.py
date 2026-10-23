@@ -281,7 +281,8 @@ def test_browser_workspace_page_contains_direct_folder_runtime_without_helper_ur
     assert 'isSameEntry' in html
     assert 'Folder shared. Starting sandbox executor automatically' in html
     assert 'await connect();' in html
-    assert 'id="connectBtn" class="secondary hidden"' in html
+    assert 'id="connectBtn" class="secondary"' in html
+    assert 'Generate Share ID / connect' in html
     assert 'Saved directory handle restored · permission=' in html
     assert '&resume_token=' not in html
     assert 'data-cfasync="false"' in html
@@ -401,9 +402,9 @@ async def test_workspace_pwa_routes_have_installable_metadata_and_offline_shell(
     worker_path = getattr(worker, 'path', '')
     assert str(worker_path).endswith('/apps/web/sw.js')
     worker_source = __import__('pathlib').Path(worker_path).read_text(encoding='utf-8')
-    assert "const CACHE='ailinux-helper-'+BUILD" in worker_source
-    assert "const SHELL='/v1/mcp?app='+encodeURIComponent(BUILD)" in worker_source
-    assert 'caches.delete' in worker_source
+    assert "self.clients.claim()" in worker_source
+    assert "caches.delete" in worker_source
+    assert "addEventListener('fetch'" not in worker_source
 
 
 

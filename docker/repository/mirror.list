@@ -21,6 +21,9 @@ set limit_rate        100m
 deb-amd64 https://archive.ubuntu.com/ubuntu resolute main restricted universe multiverse
 deb-amd64 https://archive.ubuntu.com/ubuntu resolute-updates main restricted universe multiverse
 deb-amd64 https://security.ubuntu.com/ubuntu resolute-security main restricted universe multiverse
+deb-i386 https://archive.ubuntu.com/ubuntu resolute main restricted universe multiverse
+deb-i386 https://archive.ubuntu.com/ubuntu resolute-updates main restricted universe multiverse
+deb-i386 https://security.ubuntu.com/ubuntu resolute-security main restricted universe multiverse
 deb [arch=amd64] https://deb.nodesource.com/node_22.x nodistro main
 deb [arch=amd64] https://deb.nodesource.com/node_20.x nodistro main
 deb [arch=amd64] https://dl.google.com/linux/chrome/deb stable main
@@ -28,12 +31,14 @@ deb-amd64 https://dl.winehq.org/wine-builds/ubuntu resolute main
 deb [arch=amd64] https://download.docker.com/linux/ubuntu resolute stable
 deb [arch=amd64] https://ppa.launchpadcontent.net/cappelikan/ppa/ubuntu resolute main
 deb [arch=amd64] https://ppa.launchpadcontent.net/kisak/kisak-mesa/ubuntu resolute main
+deb-i386 https://ppa.launchpadcontent.net/kisak/kisak-mesa/ubuntu resolute main
 deb [arch=amd64] https://ppa.launchpadcontent.net/graphics-drivers/ppa/ubuntu resolute main
 deb [arch=amd64] https://ppa.launchpadcontent.net/libreoffice/ppa/ubuntu resolute main
 deb-amd64 https://repo.steampowered.com/steam stable steam
 deb-i386 https://repo.steampowered.com/steam stable steam
 deb [arch=amd64] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64 /
 deb [arch=amd64] https://archive.neon.kde.org/stable resolute main
+deb-i386 https://archive.neon.kde.org/stable resolute main
 deb [arch=amd64] https://hub.unity3d.com/linux/repos/deb/ stable main
 deb [arch=amd64] https://packages.microsoft.com/repos/code stable main
 deb [arch=amd64] https://downloads.cursor.com/aptrepo stable main

@@ -136,7 +136,11 @@ class UserTierService:
     
     def get_user_tier(self, user_id: str = None) -> UserTier:
         # Leere, anonymous oder None IDs = GUEST
-        if not user_id or user_id in ("", "anonymous", "none", "guest"):
+        if not isinstance(user_id, str) or not user_id or user_id in ("", "anonymous", "none", "guest"):
+            return UserTier.GUEST
+        # Reject untrusted path fragments before looking up a stored account.
+        # An identity must still be authenticated by the calling route.
+        if not user_id.isascii() or len(user_id) > 128 or ".." in user_id or not all(ch.isalnum() or ch in "_-.@+" for ch in user_id):
             return UserTier.GUEST
         f = self.users_path / f"{user_id}.json"
         if not f.exists(): return UserTier.GUEST  # Unbekannte User = GUEST
@@ -146,6 +150,8 @@ class UserTierService:
         except: return UserTier.REGISTERED
     
     def set_user_tier(self, user_id: str, tier: UserTier, expires: datetime = None) -> bool:
+        if not isinstance(user_id, str) or not user_id or not user_id.isascii() or len(user_id) > 128 or ".." in user_id or not all(ch.isalnum() or ch in "_-.@+" for ch in user_id):
+            return False
         f = self.users_path / f"{user_id}.json"
         try:
             d = json.loads(f.read_text()) if f.exists() else {"user_id": user_id}
@@ -177,18 +183,23 @@ class UserTierService:
         return TIER_CONFIGS[self.get_user_tier(user_id)].cli_agents
     
     def is_model_allowed(self, user_id: str, model: str) -> bool:
-        """Prüft ob Model für User erlaubt ist"""
+        """Exact-match free tier access; verified NVIDIA free IDs are dynamic."""
         a = self.get_allowed_models(user_id)
         if a == "all":
             return True
-        # Normalize model name
-        model_clean = model.replace("ollama/", "").lower()
-        for m in a:
-            m_clean = m.replace("ollama/", "").lower()
-            if model_clean == m_clean or model_clean in m_clean or m_clean.endswith(model_clean):
-                return True
-        return False
-    
+        requested = model.strip().lower()
+        if requested in {m.lower() for m in a}:
+            return True
+        if not requested.startswith("nvidia/"):
+            return False
+        # Never infer free status from the NVIDIA provider or a public listing.
+        from .model_registry import registry
+        from .model_availability import availability_service
+        return any(m.id.lower() == requested and m.provider == "nvidia"
+                   and m.free_status == "catalog_free" and m.availability == "ok"
+                   and availability_service.is_available(m.id)
+                   for m in (registry._cache or []))
+
     def is_ollama_model(self, model: str) -> bool:
         """Prüft ob Modell ein Ollama-Modell ist"""
         if model.startswith("ollama/"):

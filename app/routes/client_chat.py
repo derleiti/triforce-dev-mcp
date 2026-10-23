@@ -23,6 +23,7 @@ from ..services.user_tiers import (
 from ..services.model_registry import OPENROUTER_FREE_ROUTER, registry
 from ..services.provider_chat import chat_completion, normalize_tools, stream_completion
 from ..services.model_availability import availability_service
+from ..services.nvidia_public_access import is_public_free_nvidia_model
 from ..mcp.agent_instructions import merge_system_policy
 
 logger = logging.getLogger("ailinux.client_chat")
@@ -183,7 +184,7 @@ def provider_is_configured(provider: str) -> bool:
         return True
     if provider == "cloudflare":
         return bool(
-            os.getenv("CLOUDFLARE_API_TOKEN")
+            os.getenv("CLOUDFLARE_AI_WORKERS_API")
             and os.getenv("CLOUDFLARE_ACCOUNT_ID")
         )
     return any(os.getenv(name) for name in PROVIDER_KEY_ENVS.get(provider, ()))
@@ -229,7 +230,7 @@ REGISTERED_FREE_PROVIDER_KEYS = {
     "groq": "GROQ_API_KEY",
     "cerebras": "CEREBRAS_API_KEY",
     "nvidia": "NVIDIA_API_KEY",
-    "cloudflare": "CLOUDFLARE_API_TOKEN",
+    "cloudflare": "CLOUDFLARE_AI_WORKERS_API",
     "huggingface": "HUGGINGFACE_API_KEY",
 }
 
@@ -244,7 +245,7 @@ def is_guest_free_model(model: str) -> bool:
     if provider == "mistral":
         return True
     if provider == "nvidia":
-        return model in NVIDIA_AICODER_FREE_MODELS
+        return is_public_free_nvidia_model(model)
     return False
 
 def guest_free_model_ids(models) -> List[str]:
@@ -264,6 +265,8 @@ def is_registered_free_model(model: str) -> bool:
     if model.startswith("openrouter/") and model.endswith(":free"):
         return bool(os.getenv("OPENROUTER_API_KEY"))
     provider = model.split("/", 1)[0]
+    if provider == "nvidia":
+        return is_public_free_nvidia_model(model)
     env_name = REGISTERED_FREE_PROVIDER_KEYS.get(provider)
     return bool(env_name and (os.getenv(env_name) or (env_name == "HUGGINGFACE_API_KEY" and os.getenv("HF_TOKEN"))))
 
@@ -1216,7 +1219,15 @@ async def get_client_models(
     for model_id in models:
         entry = by_id.get(model_id)
         if entry is not None:
-            model_details.append(entry.to_dict())
+            detail = entry.to_dict()
+            # Free Endpoint is a NVIDIA Build listing label, not AILinux guest
+            # authorization. Clients must not promote it to an entitlement.
+            detail["eligible_for_tier"] = True
+            detail["free_badge"] = bool(
+                entry.free_status == "catalog_free"
+                or (entry.provider == "nvidia" and is_public_free_nvidia_model(entry.id))
+            )
+            model_details.append(detail)
         else:
             provider = model_id.split("/", 1)[0] if "/" in model_id else "other"
             model_details.append({

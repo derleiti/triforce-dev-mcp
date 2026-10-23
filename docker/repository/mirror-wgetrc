@@ -1,0 +1,6 @@
+# AILinux apt-mirror: avoid indefinitely hung Google / third-party connections.
+# apt-mirror invokes wget with -t 5; this bounds each individual attempt.
+dns_timeout = 10
+connect_timeout = 15
+read_timeout = 25
+waitretry = 1

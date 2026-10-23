@@ -19,7 +19,7 @@ MIR="$REPO/repo/mirror"
 GNUP="$REPO/etc/gnupg"
 
 # Get current user (even if running with sudo)
-CURRENT_USER="${SUDO_USER:-$(id -un)}"
+CURRENT_USER="${REPO_MIRROR_OWNER:-${SUDO_USER:-$(stat -c %U "$REPO")}}"
 CURRENT_GROUP="$(id -gn "$CURRENT_USER")"
 
 echo "=============================================="
@@ -83,6 +83,7 @@ echo "      -> 755"
 echo "[6/6] Setting up log directory..."
 mkdir -p "$REPO/log"
 touch "$REPO/log/update-mirror.log"
+as_root chown "${CURRENT_USER}:${CURRENT_GROUP}" "$REPO/log/update-mirror.log"
 chmod 664 "$REPO/log/update-mirror.log"
 echo "      -> 664"
 

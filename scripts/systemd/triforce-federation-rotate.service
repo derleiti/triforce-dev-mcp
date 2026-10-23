@@ -1,12 +1,16 @@
 [Unit]
-Description=TriForce Federation Token Rotation
-After=network.target triforce.service
+Description=TriForce Federation credential audit (read-only)
+After=network-online.target triforce.service
+Wants=network-online.target
 Requires=triforce.service
 
 [Service]
 Type=oneshot
 User=zombie
 WorkingDirectory=/home/zombie/workspace/triforce
-ExecStart=/home/zombie/workspace/triforce/scripts/federation-token-rotate.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ExecStart=/home/zombie/workspace/triforce/scripts/federation-token-rotate.sh --check
 StandardOutput=journal
 StandardError=journal

@@ -141,6 +141,9 @@ class ModelInfo:
     api_method: str = "generateContent"  # generateContent, predict, predictLongRunning
     availability: str = "unknown"        # ok | quota_exceeded | rate_limited | unauthorised | not_found | error
     capability_source: str = "heuristic"  # declared | probed | heuristic
+    free_status: str = "unknown"  # catalog_free | paid | unknown; never implies successful inference
+    pricing: dict = field(default_factory=dict)
+    free_endpoint: bool = False  # NVIDIA Build label; not commercial free entitlement
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -151,6 +154,9 @@ class ModelInfo:
             "api_method": self.api_method,
             "availability": self.availability,
             "capability_source": self.capability_source,
+            "free_status": self.free_status,
+            "pricing": self.pricing,
+            "free_endpoint": self.free_endpoint,
         }
 
     @property
@@ -262,6 +268,11 @@ class ModelRegistry:
             capabilities=list(entry.capabilities),
             roles=list(entry.roles),
             api_method=entry.api_method,
+            availability=entry.availability,
+            capability_source=entry.capability_source,
+            free_status=entry.free_status,
+            pricing=dict(entry.pricing),
+            free_endpoint=entry.free_endpoint,
         )
 
     def normalize_model_id(self, model_id: str) -> str:
@@ -319,8 +330,14 @@ class ModelRegistry:
     async def _refresh_loop(self) -> None:
         while True:
             try:
-                await self.refresh_models_now()
-                logger.debug("Model registry refreshed successfully")
+                models = await self.refresh_models_now()
+                # Verify local models automatically; remote probes can incur charges.
+                from .model_capabilities import get_store, refresh_capabilities
+                await refresh_capabilities(models, get_store(), mode="free", probe_limit=20)
+                # Re-apply persisted verification to the cached registry.
+                async with self._lock:
+                    self._apply_capability_store({m.id: m for m in self._cache})
+                logger.debug("Model registry refreshed and local availability checked")
             except Exception as exc:
                 logger.exception("Failed to refresh model registry: %s", exc)
             await asyncio.sleep(self._refresh_interval)
@@ -402,6 +419,11 @@ class ModelRegistry:
                         capabilities=merged_capabilities,
                         roles=merged_roles,
                         api_method=existing.api_method or normalized.api_method,
+                        availability=existing.availability if existing.availability != "unknown" else normalized.availability,
+                        capability_source=existing.capability_source if existing.capability_source != "heuristic" else normalized.capability_source,
+                        free_status=existing.free_status if existing.free_status != "unknown" else normalized.free_status,
+                        pricing=dict(existing.pricing or normalized.pricing),
+                        free_endpoint=existing.free_endpoint or normalized.free_endpoint,
                     )
                 else:
                     deduped[normalized.id] = normalized
@@ -1048,6 +1070,7 @@ class ModelRegistry:
         # discoverable but not executable by the configured account. Keep an
         # account-specific denylist so those entries are not advertised to
         # clients after a backend restart. Values are raw NVIDIA model IDs.
+        from .nvidia_free_endpoints import is_nvidia_build_free_endpoint
         disabled_models = {
             item.strip()
             for item in os.getenv("NVIDIA_DISABLED_MODELS", "").split(",")
@@ -1079,9 +1102,10 @@ class ModelRegistry:
                 capabilities=sorted(set(capabilities)),
                 roles=list(dict.fromkeys(roles)),
                 api_method=api_method,
+                free_endpoint=is_nvidia_build_free_endpoint(model_id),
             ))
 
-        logger.info("Discovered %d NVIDIA NIM models from API", len(models))
+        logger.info("NVIDIA NIM catalog: %d listed, %d disabled, %d discovered", len(data.get("data", [])), len(disabled_models), len(models))
         return models
 
     async def _discover_kimi(self) -> List[ModelInfo]:
@@ -1247,8 +1271,29 @@ class ModelRegistry:
                 continue
 
             # Get pricing info to identify free models
-            pricing = model.get("pricing", {})
-            is_free = pricing.get("prompt", "0") == "0" and pricing.get("completion", "0") == "0"
+            pricing = model.get("pricing") or {}
+            # Missing price fields are UNKNOWN, not zero. Extra priced modalities also count.
+            from decimal import Decimal, InvalidOperation
+            # Free requires BOTH token rates, and every published numeric charge,
+            # to be zero. Missing or malformed values must never imply free.
+            try:
+                charges = [Decimal(str(v)) for v in pricing.values() if v is not None]
+                if any(not charge.is_finite() or charge < 0 for charge in charges):
+                    free_status = "unknown"
+                elif not {"prompt", "completion"}.issubset(pricing):
+                    free_status = "unknown"
+                elif any(charge > 0 for charge in charges):
+                    free_status = "paid"
+                elif not (set((model.get("architecture") or {}).get("output_modalities") or []) == {"text"}):
+                    # Zero token rates do not establish that audio, video, images,
+                    # reranking or other non-token output is free of charge.
+                    free_status = "unknown"
+                elif len(charges) != len(pricing):
+                    free_status = "unknown"
+                else:
+                    free_status = "catalog_free"
+            except (InvalidOperation, ValueError, TypeError):
+                free_status = "unknown"
 
             capabilities, roles, api_method = detect_capabilities(model_id)
 
@@ -1290,7 +1335,9 @@ class ModelRegistry:
                 provider="openrouter",
                 capabilities=list(dict.fromkeys(capabilities)),
                 roles=list(dict.fromkeys(roles)),
-                api_method=api_method
+                api_method=api_method,
+                free_status=free_status,
+                pricing={k: str(v) for k, v in pricing.items()} if isinstance(pricing, dict) else {},
             ))
 
         if models:

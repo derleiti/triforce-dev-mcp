@@ -73,6 +73,7 @@ from .routes.agents import router as agents_router
 from .routes.chat import router as chat_router
 from .routes.crawler import router as crawler_router
 from .routes.health import router as health_router
+from .routes.discord_interactions import router as discord_interactions_router
 from .routes.mcp import public_router as mcp_public_router
 from .routes.mcp import router as mcp_router
 from .routes.mcp_node import router as mcp_node_router
@@ -205,13 +206,13 @@ async def lifespan(app: FastAPI):
     # Fresh/local installations remain standalone and do not attempt peer calls.
     if os.environ.get("FEDERATION_SECRET", "").strip():
         try:
-            from .services.server_federation import federation_manager
+            from .services.server_federation import federation_manager, role_for_federation_node
             from .services.federation_websocket import federation_lb
             import socket
             node_id_env = os.environ.get("NODE_ID")
             _hostname = socket.gethostname().lower()
             node_id = node_id_env or ("backup" if "backup" in _hostname else "zombie-pc" if "zombie" in _hostname else "hetzner")
-            await federation_manager.initialize(node_id=node_id)
+            await federation_manager.initialize(node_id=node_id, role=role_for_federation_node(node_id))
             await federation_lb.start()
             logger.info("Federation Manager started")
         except Exception as e:
@@ -442,6 +443,13 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, prefix="/v1", tags=["Chat"])
     app.include_router(crawler_router, prefix="/v1", tags=["Crawler"])
     app.include_router(health_router, tags=["Monitoring"])
+    app.include_router(discord_interactions_router, tags=["Discord Interactions"])
+    from .routes.discord_mcp_rc1 import router as discord_mcp_rc1_router
+    app.include_router(discord_mcp_rc1_router)
+    from .routes.discord_mcp_oauth import router as discord_mcp_oauth_router
+    from .routes.discord_mcp_transport import router as discord_mcp_transport_router
+    app.include_router(discord_mcp_oauth_router)
+    app.include_router(discord_mcp_transport_router)
     app.include_router(rag_router, prefix="/v1", tags=["RAG"])
     app.include_router(search_curated_router, prefix="/v1", tags=["Search Curated"])
     app.include_router(bug_reports_router, prefix="/v1", tags=["Bug Reports"])

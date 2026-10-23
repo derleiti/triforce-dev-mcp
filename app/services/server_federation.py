@@ -47,6 +47,11 @@ class NodeRole(str, Enum):
     CONTRIBUTOR = "contributor"  # Client der Hardware teilt
 
 
+def role_for_federation_node(node_id: str) -> NodeRole:
+    """The primary Hetzner node is the hub; other registered peers are nodes."""
+    return NodeRole.HUB if node_id == "hetzner" else NodeRole.NODE
+
+
 class NodeStatus(str, Enum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"

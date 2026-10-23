@@ -97,7 +97,9 @@ def provider_is_probeable(provider: str, mode: Optional[str] = None) -> bool:
         return False
     if mode == MODE_FULL:
         return True
-    return provider in FREE_PROVIDERS
+    # A free-tier account is not proof of zero-cost inference.
+    # Only local Ollama is safe to probe automatically without billing approval.
+    return provider == "ollama"
 
 
 @dataclass

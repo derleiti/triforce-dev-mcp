@@ -1,0 +1,176 @@
+"""RC1 account-scoped Discord pairing API. Disabled for Discord voice mutations until OAuth."""
+from __future__ import annotations
+
+import os
+from urllib.parse import urlencode
+
+import httpx
+from fastapi.responses import HTMLResponse, FileResponse
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel, Field
+
+from .client_auth import decode_authorization_header, USER_REGISTRY, resolve_user_authority
+from ..services.shared_authority import AuthorityRole
+from ..services.discord_mcp_registry import DiscordRegistry
+
+router = APIRouter(prefix="/v1/discord-mcp", tags=["Discord MCP RC1"])
+
+
+@router.get("/dashboard", include_in_schema=False)
+def dashboard():
+    return FileResponse(Path(__file__).parent.parent / "static" / "discord-mcp.html",
+                        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+def account_identity(authorization: str | None = Header(default=None)) -> str:
+    payload = decode_authorization_header(authorization)
+    subject = str(payload.get("email") or payload.get("sub") or "").lower().strip()
+    if not subject or subject not in USER_REGISTRY:
+        raise HTTPException(status_code=401, detail="Valid AILinux user session required")
+    return subject
+
+
+def registry() -> DiscordRegistry:
+    location = Path(os.getenv("DISCORD_MCP_RC1_DB", "/var/lib/triforce/discord-mcp/registry.sqlite3"))
+    location.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return DiscordRegistry(location)
+
+
+class PairRequest(BaseModel):
+    ttl_seconds: int = Field(default=300, ge=30, le=600)
+
+
+@router.get("/me")
+def me(account: str = Depends(account_identity)):
+    return {"ok": True, "account": account, "login": "https://login.ailinux.me",
+            "discord_oauth_connected": bool(registry().linked_ids(account)), "rc1_status": "staging", "legacy_voice_unchanged": True}
+
+
+@router.post("/pair")
+def pair(request: PairRequest, account: str = Depends(account_identity)):
+    code = registry().create_pair(account, request.ttl_seconds)
+    return {"ok": True, "pairing_code": code, "expires_in": request.ttl_seconds,
+            "warning": "Code is one-time. No Discord permissions granted until OAuth verified."}
+
+
+# The currently deployed RC0.5 voice bridge is single-guild/owner-scoped.
+# Expose it ONLY after independent verification of the AILinux root owner role
+# AND the Discord identity proven via Discord OAuth on this account.
+LEGACY_ALLOWED_SCOPES = frozenset({"mcp:read", "voice:join", "voice:listen", "voice:speak"})
+
+
+class LegacyGrantRequest(BaseModel):
+    scopes: list[str] = Field(default_factory=list, max_length=4)
+
+
+def legacy_owner_allowed(account: str, database: DiscordRegistry) -> bool:
+    from .discord_voice_bridge import OWNER_ID
+    role, _level, _source = resolve_user_authority(account, USER_REGISTRY.get(account))
+    return role == AuthorityRole.HUMAN_OWNER and OWNER_ID in database.linked_ids(account)
+
+
+@router.get("/permissions")
+def permissions(account: str = Depends(account_identity)):
+    from .discord_voice_bridge import GUILD_ID
+    db = registry()
+    authorized = legacy_owner_allowed(account, db)
+    return {
+        "ok": True,
+        "linked": bool(db.linked_ids(account)),
+        "servers": db.authorized_guilds(account),
+        "legacy_voice": {
+            "available": authorized,
+            "guild_id": GUILD_ID if authorized else None,
+            "name": "Nova RC0.5 (bestehender Discord-Server)" if authorized else None,
+            "available_scopes": sorted(LEGACY_ALLOWED_SCOPES) if authorized else [],
+            "requires_reconnect_for_voice": True,
+        },
+        "migration_note": (
+            "Nur der vorhandene RC0.5-Server kann bereits aktiv gesteuert werden. "
+            "Weitere Server benoetigen nachweisbare Discord-Mitgliedschaft, Bot-Installation "
+            "und getrennte Voice-Sitzungen."
+        ),
+    }
+
+
+@router.post("/permissions/legacy")
+def legacy_grant(request: LegacyGrantRequest, account: str = Depends(account_identity)):
+    from .discord_voice_bridge import GUILD_ID, OWNER_ID
+    db = registry()
+    if not legacy_owner_allowed(account, db):
+        raise HTTPException(403, "Verified AILinux owner and linked Discord owner required")
+    scopes = set(request.scopes)
+    if len(scopes) != len(request.scopes) or not scopes.issubset(LEGACY_ALLOWED_SCOPES):
+        raise HTTPException(422, "Unknown or duplicate permission")
+    if scopes and "mcp:read" not in scopes:
+        raise HTTPException(422, "MCP read permission required for voice controls")
+    if scopes:
+        db.grant(account, OWNER_ID, GUILD_ID, scopes)
+    else:
+        db.revoke_guild(account, GUILD_ID)
+    return {
+        "ok": True, "guild_id": GUILD_ID, "scopes": sorted(scopes),
+        "voice_oauth_needed": bool(scopes & {"voice:join", "voice:listen", "voice:speak"}),
+        "message": "Permissions saved. Reconnect the ChatGPT MCP to grant the optional discord:voice OAuth scope.",
+    }
+
+
+@router.post("/revoke")
+def revoke(account: str = Depends(account_identity)):
+    from ..services.discord_mcp_oauth_store import DiscordMcpOAuthStore
+    database = registry()
+    database.revoke(account)
+    DiscordMcpOAuthStore(database.database).revoke_account(account)
+    return {"ok": True, "revoked": True}
+
+
+_DISCORD_CALLBACK = "https://discord.ailinux.me/api/discord/oauth/callback"
+
+
+@router.post("/oauth/start")
+def discord_oauth_start(account: str = Depends(account_identity)):
+    client_id = os.getenv("AILINUX_DISCORD_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.getenv("AILINUX_DISCORD_OAUTH_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(503, "Discord OAuth is not configured")
+    state = registry().begin_oauth(account)
+    params = {"response_type": "code", "client_id": client_id,
+              "scope": "identify", "redirect_uri": _DISCORD_CALLBACK, "state": state}
+    return {"ok": True, "authorization_url": "https://discord.com/oauth2/authorize?" + urlencode(params)}
+
+
+@router.get("/oauth/callback", response_class=HTMLResponse)
+async def discord_oauth_callback(code: str = "", state: str = ""):
+    # The state is consumed atomically before any external HTTP request; retry/replay fails.
+    account = registry().consume_oauth(state)
+    if not account or not code or len(code) > 2048:
+        raise HTTPException(400, "Invalid or expired Discord OAuth response")
+    client_id = os.getenv("AILINUX_DISCORD_OAUTH_CLIENT_ID", "")
+    client_secret = os.getenv("AILINUX_DISCORD_OAUTH_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise HTTPException(503, "Discord OAuth is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            token_response = await client.post("https://discord.com/api/v10/oauth2/token", data={
+                "client_id": client_id, "client_secret": client_secret,
+                "grant_type": "authorization_code", "code": code,
+                "redirect_uri": _DISCORD_CALLBACK,
+            }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+            token_response.raise_for_status()
+            token = token_response.json()
+            if token.get("token_type", "").lower() != "bearer" or not token.get("access_token"):
+                raise ValueError("Invalid Discord access token")
+            user_response = await client.get("https://discord.com/api/v10/users/@me", headers={
+                "Authorization": "Bearer " + token["access_token"]
+            })
+            user_response.raise_for_status()
+            discord_user = user_response.json()["id"]
+        registry().link(account, discord_user)
+    except (httpx.HTTPError, ValueError, KeyError):
+        raise HTTPException(502, "Discord identity verification failed") from None
+    except __import__("sqlite3").IntegrityError:
+        raise HTTPException(409, "Discord identity already linked to another AILinux account") from None
+    return HTMLResponse("<!doctype html><html lang='de'><meta charset='utf-8'><title>AILinux Discord</title><body><h1>Discord verbunden</h1><p>Du kannst zum AILinux Discord-Dashboard zurückkehren.</p></body></html>",
+                        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})

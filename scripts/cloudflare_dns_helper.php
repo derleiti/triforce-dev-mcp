@@ -28,11 +28,11 @@ if (!class_exists('\\SPC\\Services\\Settings_Store')) {
 }
 
 $settings = \SPC\Services\Settings_Store::get_instance();
-$email = (string)$settings->get_cloudflare_api_email();
-$key = (string)$settings->get_cloudflare_api_key();
-
-if ($email === '' || $key === '') {
-    acfd_emit(['ok'=>false,'code'=>'CREDENTIALS_MISSING','error'=>'Cloudflare credentials are not configured']);
+// Compatibility helper: only a scoped Cloudflare API token is supported.
+// TriForce MCP now uses the direct DNS backend instead of this WP bridge.
+$token = (string)$settings->get_cloudflare_api_token();
+if ($token === '') {
+    acfd_emit(['ok'=>false,'code'=>'CREDENTIALS_MISSING','error'=>'Cloudflare API token is not configured']);
 }
 
 $config = (array)get_option('swcfpc_config', []);
@@ -51,8 +51,7 @@ if ($zone_id === '') {
 }
 
 $headers = [
-    'X-Auth-Email'=>$email,
-    'X-Auth-Key'=>$key,
+    'Authorization'=>'Bearer ' . $token,
     'Content-Type'=>'application/json',
 ];
 

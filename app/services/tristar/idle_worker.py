@@ -63,12 +63,50 @@ def _is_provider_fallback_error(error: str) -> bool:
     return bool(text) and any(marker in text for marker in _PROVIDER_FALLBACK_MARKERS)
 
 
+_AUTH_FAILURE_MARKERS = (
+    "account is not linked", "verify the linked account", "not logged in",
+    "login required", "login expired", "oauth expired", "token expired",
+    "re-login", "authentication failed", "account client failed",
+)
+# Background-only circuit breaker. No auth material is cached or modified.
+_AUTH_DEFERRED: dict[str, tuple[str, float]] = {}
+
+
+def _is_account_auth_issue(error: str) -> bool:
+    text = str(error or "").strip().lower()
+    return bool(text) and any(marker in text for marker in _AUTH_FAILURE_MARKERS)
+
+
+def _remember_idle_auth_issue(profile_id: str, model: str, error: str) -> None:
+    """Retry expired/unlinked accounts periodically instead of every idle cycle."""
+    if _is_account_auth_issue(error):
+        retry_seconds = max(60, int(os.environ.get("TRISTAR_IDLE_AUTH_RETRY_SECONDS", "3600")))
+        _AUTH_DEFERRED[profile_id] = (model, time.monotonic() + retry_seconds)
+
+
 def _automatic_profile_candidates(selected: str) -> list[str]:
-    """Return the selected default followed by each remaining default once."""
+    """Rotate profiles, temporarily skipping known-broken background auth sessions.
+
+    An explicit profile request never uses this filter. If every profile is
+    deferred, attempt one anyway so the worker reports an actual failure rather
+    than silently swallowing operator-assigned work.
+    """
     if selected not in DEFAULT_PROFILES:
         return [selected]
     start = DEFAULT_PROFILES.index(selected)
-    return [DEFAULT_PROFILES[(start + offset) % len(DEFAULT_PROFILES)] for offset in range(len(DEFAULT_PROFILES))]
+    ordered = [DEFAULT_PROFILES[(start + offset) % len(DEFAULT_PROFILES)] for offset in range(len(DEFAULT_PROFILES))]
+    eligible = []
+    for name in ordered:
+        deferred = _AUTH_DEFERRED.get(name)
+        if deferred:
+            old_model, retry_at = deferred
+            current_model = str(load_profile(name).get("model") or "")
+            if time.monotonic() < retry_at and current_model == old_model:
+                logger.debug("Idle profile %s deferred after account auth failure", name)
+                continue
+            _AUTH_DEFERRED.pop(name, None)
+        eligible.append(name)
+    return eligible if eligible else ordered[:1]
 
 
 async def _provider_preflight(model: str) -> str:
@@ -312,6 +350,10 @@ async def run_idle_once(*, workspace: str | Path = DEFAULT_WORKSPACE, profile_id
                         profile_id=f"idle-{candidate}", prompt=prompt, model=model or None,
                         workspace=snapshot, home=home,
                         timeout=int(timeout or os.environ.get("TRISTAR_IDLE_TIMEOUT", "300")), team_mode="off")
+            if result.status == "success":
+                _AUTH_DEFERRED.pop(candidate, None)
+            elif not explicit_profile:
+                _remember_idle_auth_issue(candidate, model, result.error)
             has_fallback = index + 1 < len(candidates)
             if result.status == "success" or not has_fallback or not _is_provider_fallback_error(result.error):
                 break
