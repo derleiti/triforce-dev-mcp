@@ -19,9 +19,17 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
   let conversationMode=false;
   let lastSpokenReplyAt=0;
   let lastErrorNotice=0;
+  let externalWaiter=null;
+  const finishExternal=(result)=>{
+    const slot=externalWaiter;
+    if(!slot)return;
+    externalWaiter=null;
+    if(slot.timer)clearTimeout(slot.timer);
+    slot.resolve(result);
+  };
   let active=true, recording=false, processing=false, recorder=null,lastRecordAt=0;
   const metrics={speaking_events:0,audio_packets:0,clips:0,transcribed:0,
-    wakes:0,wake_only:0,wake_acknowledged:0,followups:0,free_talk_turns:0,chat_requests:0,replies:0,errors:0,
+    wakes:0,wake_only:0,wake_acknowledged:0,followups:0,free_talk_turns:0,external_replies:0,chat_requests:0,replies:0,errors:0,
     history_count:null,last_question_length:0,last_model:null,
     last_audio_at:null,last_wake_at:null,last_wake_ack_at:null,last_response_at:null,
     last_error:null,stt_ready:false};
@@ -43,6 +51,20 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
       const words=String(result.text||'').trim();
       if(!words)return;
       metrics.transcribed++;
+      // An explicit GPT-6 exchange temporarily owns the next recognized
+      // utterance. Do not also forward it to Groq or persist it as a chat turn.
+      if(externalWaiter){
+        if(!externalWaiter.ready)return;
+        if(words.length<2)return;
+        metrics.external_replies++;
+        finishExternal({
+          ok:true,heard:true,
+          transcript:words.slice(0,550),
+          duration_s:Number(result.duration_s||0),
+          received_at:new Date().toISOString()
+        });
+        return;
+      }
       // Explicit opt-in open conversation: speech from the authorized owner
       // requires no wake word, but ignore extremely short/noisy fragments.
       const wordCount=words.split(/\s+/u).filter(Boolean).length;
@@ -163,6 +185,7 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
       if(!active)throw new Error('Listener stopped');
       if(enabled&&!worker.ready)throw new Error('STT not ready');
       session.listening=Boolean(enabled);
+      if(!enabled)finishExternal({ok:false,reason:'listening_disabled'});
       conversationMode=false;
       dialogue.reset();
       return {ok:true,listening:session.listening,conversation_mode:false,wake_word:'nova'};
@@ -174,8 +197,31 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
       dialogue.reset();
       return {ok:true,listening:true,conversation_mode:true,mode:'conversation'};
     },
+    captureNext(){
+      if(!active||!worker.ready||!session.listening)throw new Error('Voice listening is unavailable');
+      if(externalWaiter||session.responding||processing)throw new Error('Voice channel is processing another exchange');
+      let resolve;
+      const promise=new Promise(r=>{resolve=r;});
+      const slot={ready:false,resolve,promise,timer:null};
+      externalWaiter=slot;
+      return {
+        wait:(waitSeconds)=>{
+          if(externalWaiter!==slot)throw new Error('Capture no longer active');
+          if(slot.ready)throw new Error('Capture already started');
+          slot.ready=true;
+          slot.timer=setTimeout(()=>{
+            if(externalWaiter===slot)finishExternal({ok:true,heard:false,timeout:true});
+          },waitSeconds*1000);
+          return promise;
+        },
+        cancel:()=>{
+          if(externalWaiter===slot)finishExternal({ok:false,reason:'cancelled'});
+        }
+      };
+    },
     close(){
       active=false;session.listening=false;
+      finishExternal({ok:false,reason:'voice_disconnected'});
       conversationMode=false;
       dialogue.reset();
       receiver.speaking.off('start',onStart);
@@ -186,6 +232,8 @@ export function attachConversation(session,{python,root,say,ack=()=>say('Ja, Zom
       listening:Boolean(session.listening&&worker.ready),
       responding:Boolean(session.responding),
       conversation_mode:conversationMode,
+      awaiting_gpt6_reply:Boolean(externalWaiter),
+      awaiting_owner_response:Boolean(externalWaiter?.ready),
       mode:!session.listening?'off':(conversationMode?'conversation':'wake'),
       wake_word:'nova',stt_model:'small',...metrics,...dialogue.status()
     };}

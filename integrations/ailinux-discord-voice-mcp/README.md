@@ -159,3 +159,18 @@ snapshot name. New history is never committed to Git.
 - Successful turns continue to use private 30-day server-side history.
 - Hands-free mode is opt-in and is not automatically resumed after a crash,
   disconnect or reboot; reconnect with `/nova talk` to resume.
+
+## RC0.4.1 - turn-based GPT-6 microphone return via MCP
+
+- `discord_voice_exchange` says a short message with Seraphina in the current
+  channel, then waits 4-22 seconds for one reply from the configured owner.
+- It returns the recognized Whisper transcript directly to the calling MCP
+  client. It does not automatically send the transcript to a ChatGPT session.
+- While an exchange is pending, the next owner utterance is intercepted and
+  is NOT forwarded to the autonomous Groq chat or persisted in its history.
+- The ordinary TriForce voice chat resumes when the exchange completes or
+  times out. /nova quiet and voice disconnect cancel any open capture.
+- Only one exchange is allowed at a time. No raw microphone recordings are
+  saved; only the limited turn transcript is returned to the authorized caller.
+- The GPT-6 ChatGPT session must be actively making MCP calls; this does not
+  create an always-on or unsupervised GPT-6 background loop.

@@ -15,13 +15,21 @@ def main() -> None:
     if not isinstance(request, dict):
         raise ValueError("request must be JSON object")
     operation = request.get("op")
-    if operation not in {"status", "join_user", "say", "leave", "listen", "talk"}:
+    if operation not in {"status", "join_user", "say", "leave", "listen", "talk", "exchange"}:
         raise ValueError("invalid operation")
     if operation == "join_user":
         uid = request.get("user_id", "")
         if not isinstance(uid, str) or not uid.isdigit() or not 17 <= len(uid) <= 20:
             raise ValueError("invalid user_id")
         request = {"op": "join_user", "user_id": uid}
+    elif operation == "exchange":
+        text = request.get("text", "")
+        wait = request.get("wait_seconds", 15)
+        if not isinstance(text, str) or not 1 <= len(text.strip()) <= 400:
+            raise ValueError("invalid exchange speech length")
+        if isinstance(wait, bool) or not isinstance(wait, int) or not 4 <= wait <= 22:
+            raise ValueError("invalid exchange wait_seconds")
+        request = {"op": "exchange", "text": text.strip(), "wait_seconds": wait}
     elif operation == "say":
         text = request.get("text", "")
         if not isinstance(text, str) or not 1 <= len(text.strip()) <= 400:
@@ -35,7 +43,7 @@ def main() -> None:
     else:
         request = {"op": operation}
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(50)
+        connection.settimeout(78)
         connection.connect(str(SOCKET))
         connection.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf8"))
         data = bytearray()

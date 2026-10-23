@@ -12,7 +12,7 @@ function invoke(data) {
   return new Promise((resolvePromise,reject) => {
     const socket = createConnection(socketPath);
     let reply='';
-    const timeout = setTimeout(()=>socket.destroy(new Error('Voice bridge timed out')),55000);
+    const timeout = setTimeout(()=>socket.destroy(new Error('Voice bridge timed out')),76000);
     socket.on('connect',()=>socket.write(JSON.stringify(data)+'\n'));
     socket.on('data',chunk=>{
       reply += chunk.toString('utf8');
@@ -41,7 +41,7 @@ function result(data) {
 
 const server = new McpServer({
   name:'ailinux-discord-voice-mcp',
-  version:'0.4.0'
+  version:'0.4.1'
 });
 
 server.registerTool('discord_voice_status',{
@@ -68,6 +68,11 @@ server.registerTool('discord_voice_talk',{
   description:'Opt in to persistent, owner-only hands-free Discord conversation; no wake word. Only the authorized guild owner microphone is processed. Use discord_voice_listen(enabled=false) or leave to stop.',
   inputSchema:{}
 },async()=>result(await invoke({op:'talk'})));
+
+server.registerTool('discord_voice_exchange',{
+  description:'Speak one GPT-6-authored message in Discord, wait for the authorized owner to reply, and return the exact Whisper transcript to the caller. Temporarily suppresses auto-Groq answers for this ONE speech turn only. Returns heard:false on timeout. Requires the voice session already joined/listening; this does not run GPT-6 continuously or create a background AI loop.',
+  inputSchema:{text:z.string().min(1).max(400),wait_seconds:z.number().int().min(4).max(22).default(15)}
+},async({text,wait_seconds})=>result(await invoke({op:'exchange',text,wait_seconds})));
 
 server.registerTool('discord_voice_leave',{
   description:'Disconnect Nova from Discord voice and stop playback.',

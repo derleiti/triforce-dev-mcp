@@ -47,7 +47,7 @@ function token() {
 }
 
 function doctor() {
-  console.log('Nova Discord Voice RC0.4.0');
+  console.log('Nova Discord Voice RC0.4.1');
   if (!GUILD_ID || !APP_ID) throw new Error('GuildControl must have exactly one allowed guild and app id');
   token();
   const node = process.versions.node;
@@ -94,7 +94,7 @@ function publicStatus() {
     connected:Boolean(s?.connection && s.connection.state.status === VoiceConnectionStatus.Ready),
     guild_id:GUILD_ID, channel_id:s?.channelId || null,
     channel_name:s?.channelName || null, state:s?.connection?.state?.status || 'none',
-    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.4.0'
+    tts_voice:VOICE, ...(s?.voice?.status() || {listening:false,wake_word:'nova',stt_ready:false}), version:'0.4.1'
   };
 }
 
@@ -241,6 +241,25 @@ async function processControl(request) {
   }
   if (request.op === 'join_user') return await joinUser(request.user_id);
   if (request.op === 'say') return await say(request.text);
+  if (request.op === 'exchange') {
+    if(typeof request.text!=='string'||request.text.trim().length<1||request.text.length>400)
+      throw new Error('Exchange message must be 1..400 characters');
+    const wait=Number(request.wait_seconds??15);
+    if(!Number.isInteger(wait)||wait<4||wait>22)
+      throw new Error('wait_seconds must be an integer from 4 to 22');
+    const session=sessions.get(GUILD_ID);
+    if(!session?.voice || session.connection.state.status!==VoiceConnectionStatus.Ready)
+      throw new Error('Nova must be in the authorized voice channel');
+    const capture=session.voice.captureNext();
+    try {
+      const spoken=await say(request.text);
+      const result=await capture.wait(wait);
+      return {...result,spoken_characters:spoken.spoken_characters,wait_seconds:wait};
+    }catch(error){
+      capture.cancel();
+      throw error;
+    }
+  }
   if (request.op === 'talk') {
     const session=sessions.get(GUILD_ID);
     if(!session?.voice)throw new Error('Nova is not in a voice channel');
@@ -272,7 +291,7 @@ async function startControlSocket() {
   }
   server = createServer(socket => {
     let input = '';
-    socket.setTimeout(50000, () => socket.destroy());
+    socket.setTimeout(78000, () => socket.destroy());
     socket.on('data', async chunk => {
       input += chunk.toString('utf8');
       if (input.length > 4096) {socket.destroy();return;}
