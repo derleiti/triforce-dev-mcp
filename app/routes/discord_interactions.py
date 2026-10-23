@@ -14,6 +14,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from .discord_voice_bridge import handle_nova_interaction
+
 router = APIRouter()
 
 # Public key from Discord Developer Portal (Application 1562939604829470741).
@@ -66,8 +68,12 @@ async def discord_interactions(request: Request) -> Response:
         # Discord verifies this PONG when saving Interactions Endpoint URL.
         return JSONResponse({"type": 1})
 
-    # No application commands are wired up yet. Do not execute arbitrary
-    # requests or claim successful guild management; acknowledge privately.
+    # Handle the dedicated Nova voice command. Other interactions remain unchanged.
+    if kind == 2 and isinstance(payload.get("data"), dict) and payload["data"].get("name") == "nova":
+        return await handle_nova_interaction(payload)
+
+    # Other application commands are not yet wired up. Preserve the existing
+    # private placeholder for unsupported interactions.
     if kind in (2, 3, 5):
         return JSONResponse(
             {
