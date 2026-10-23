@@ -100,6 +100,16 @@ async def _tool(name, account):
     raise ValueError("Unknown tool")
 
 
+@router.head("/mcp")
+async def mcp_head(request: Request):
+    if _origin_rejected(request):
+        return Response(status_code=403)
+    if not _auth(request):
+        unauthorized = _unauthorized()
+        return Response(status_code=401, headers={"WWW-Authenticate": unauthorized.headers["WWW-Authenticate"]})
+    return Response(status_code=405, headers={"Allow": "GET, POST, DELETE"})
+
+
 @router.get("/mcp")
 async def mcp_get(request: Request):
     if _origin_rejected(request):

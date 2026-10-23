@@ -118,6 +118,9 @@ def test_mcp_discovery_and_auth_boundary(scenario):
     oauth = client.get("/v1/discord-mcp/oauth2/.well-known/oauth-authorization-server")
     assert oauth.status_code == 200
     assert oauth.json()["registration_endpoint"] == "https://discord.ailinux.me/register"
+    head = client.head("/v1/discord-mcp/mcp")
+    assert head.status_code == 401
+    assert "resource_metadata=" in head.headers.get("WWW-Authenticate", "")
     unauth = client.post("/v1/discord-mcp/mcp", json={"jsonrpc": "2.0", "method": "tools/list", "id": 1})
     assert unauth.status_code == 401
     assert "resource_metadata=" in unauth.headers.get("WWW-Authenticate", "")
