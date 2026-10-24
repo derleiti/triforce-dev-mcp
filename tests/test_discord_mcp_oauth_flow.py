@@ -102,7 +102,7 @@ def test_dcr_authorize_token_refresh_and_mcp(scenario):
         "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
     })
     assert listed.status_code == 200
-    assert len(listed.json()["result"]["tools"]) == 3
+    assert len(listed.json()["result"]["tools"]) == 10
     status = client.post("/v1/discord-mcp/mcp", headers=headers, json={
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
         "params": {"name": "discord_connection_status", "arguments": {}},
@@ -412,3 +412,29 @@ def test_csp_form_redirect_allows_only_current_registered_oauth_callback(scenari
     assert "form-action 'self' https://connector.example.org;" in policy
     assert "https://chatgpt.com" not in policy
     assert "/custom/oauth/return" not in policy
+
+
+@pytest.mark.asyncio
+async def test_voice_mutation_requires_owner_scope_and_grants(tmp_path, monkeypatch):
+    from app.routes import discord_voice_bridge
+    from app.routes import discord_mcp_transport as transport
+    from app.services.discord_mcp_registry import DiscordRegistry
+    db = DiscordRegistry(tmp_path / "voice.sqlite3")
+    owner, guild = discord_voice_bridge.OWNER_ID, discord_voice_bridge.GUILD_ID
+    db.link("alice", owner)
+    db.grant("alice", owner, guild, {"mcp:read", "voice:join", "voice:listen", "voice:speak"})
+    monkeypatch.setattr(transport, "registry", lambda: db)
+    calls = []
+    async def fake_rpc(data):
+        calls.append(data)
+        return {"ok": True, "connected": True}
+    monkeypatch.setattr(discord_voice_bridge, "voice_rpc", fake_rpc)
+    without_scope = await transport._tool("discord_voice_connect", "alice", {}, {"scopes": "discord:read"})
+    assert without_scope["reason"] == "voice_oauth_scope_required" and calls == []
+    success = await transport._tool("discord_voice_connect", "alice", {}, {"scopes": "discord:read discord:voice"})
+    assert success["ok"] and calls == [{"op": "connect"}]
+    assert (await transport._tool("discord_voice_leave", "bob", {}, {"scopes":"discord:read discord:voice"}))["reason"] == "owner_identity_required"
+    db.grant("alice", owner, guild, {"mcp:read"})
+    denied = await transport._tool("discord_voice_talk", "alice", {}, {"scopes":"discord:read discord:voice"})
+    assert denied["reason"] == "server_voice_grant_required"
+    assert len(calls) == 1

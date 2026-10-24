@@ -39,6 +39,13 @@ _TOOLS = [
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "annotations": {"title": "Discord Nova voice status", "readOnlyHint": True, "openWorldHint": False},
     },
+    {'name': 'discord_voice_connect', 'description': 'Connect the verified owner to their current Discord voice channel and enable free conversation. The server-side bot remains connected, but ChatGPT only responds during active tool calls.', 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}, 'annotations': {'title': 'Discord Voice Connect', 'readOnlyHint': False, 'openWorldHint': False}},
+    {'name': 'discord_voice_talk', 'description': 'Enable owner-only hands-free conversation on the existing voice connection, with persistent server-side restart restoration.', 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}, 'annotations': {'title': 'Discord Voice Talk', 'readOnlyHint': False, 'openWorldHint': False}},
+    {'name': 'discord_voice_listen', 'description': 'Enable wake-word listening or pause listening on the owner voice connection.', 'inputSchema': {'type': 'object', 'properties': {'enabled': {'type': 'boolean'}}, 'additionalProperties': False, 'required': ['enabled']}, 'annotations': {'title': 'Discord Voice Listen', 'readOnlyHint': False, 'openWorldHint': False}},
+    {'name': 'discord_voice_say', 'description': 'Speak a short user-authorized message in the connected Discord voice room.', 'inputSchema': {'type': 'object', 'properties': {'text': {'type': 'string', 'minLength': 1, 'maxLength': 400}}, 'additionalProperties': False, 'required': ['text']}, 'annotations': {'title': 'Discord Voice Say', 'readOnlyHint': False, 'openWorldHint': False}},
+    {'name': 'discord_voice_exchange', 'description': 'Speak one ChatGPT-authored utterance and capture one owner reply. No autonomous model loop is created.', 'inputSchema': {'type': 'object', 'properties': {'text': {'type': 'string', 'minLength': 1, 'maxLength': 400}, 'wait_seconds': {'type': 'integer', 'minimum': 4, 'maximum': 22}}, 'additionalProperties': False, 'required': ['text']}, 'annotations': {'title': 'Discord Voice Exchange', 'readOnlyHint': False, 'openWorldHint': False}},
+    {'name': 'discord_voice_capture', 'description': 'Capture the next authorized owner utterance once, without speaking.', 'inputSchema': {'type': 'object', 'properties': {'wait_seconds': {'type': 'integer', 'minimum': 4, 'maximum': 22}}, 'additionalProperties': False}, 'annotations': {'title': 'Discord Voice Capture', 'readOnlyHint': False, 'openWorldHint': False}},
+    {'name': 'discord_voice_leave', 'description': 'Explicitly disconnect the server-side Nova voice bot and clear auto-rejoin.', 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}, 'annotations': {'title': 'Discord Voice Leave', 'readOnlyHint': False, 'openWorldHint': False}},
 ]
 
 
@@ -78,7 +85,8 @@ def _rpc(response_id, result=None, *, error=None):
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 
-async def _tool(name, account):
+async def _tool(name, account, args=None, claims=None):
+    args = args or {}
     db = registry()
     if name == "discord_connection_status":
         links = db.linked_ids(account)
@@ -87,16 +95,41 @@ async def _tool(name, account):
                 "status": "connected" if links else "discord_oauth_required"}
     if name == "discord_authorized_guilds":
         return {"servers": db.authorized_guilds(account)}
-    if name == "discord_voice_status":
-        # Legacy RC0.5 is private; never route a second tenant into the owner bot.
+    if name.startswith("discord_voice_"):
         from .discord_voice_bridge import GUILD_ID, OWNER_ID, voice_rpc
-        if OWNER_ID not in db.linked_ids(account) or not db.can(account, OWNER_ID, GUILD_ID, "mcp:read"):
-            return {"available": False, "reason": "server_read_grant_required"}
-        data = await voice_rpc({"op": "status"})
-        return {"available": True, "connected": bool(data.get("connected")),
-                "listening": bool(data.get("listening")), "channel": data.get("channel_name"),
-                "mode": data.get("mode"), "model": data.get("last_model"),
-                "chatgpt_scope": "active MCP invocations only"}
+        if OWNER_ID not in db.linked_ids(account):
+            return {"available": False, "reason": "owner_identity_required"}
+        is_status = name == "discord_voice_status"
+        scopes = set((claims or {}).get("scopes", "").split())
+        if not is_status and "discord:voice" not in scopes:
+            return {"available": False, "reason": "voice_oauth_scope_required"}
+        required_grants = ["mcp:read"] if is_status else {
+            "discord_voice_connect": ["voice:join", "voice:listen"],
+            "discord_voice_talk": ["voice:listen"],
+            "discord_voice_listen": ["voice:listen"],
+            "discord_voice_say": ["voice:speak"],
+            "discord_voice_exchange": ["voice:listen", "voice:speak"],
+            "discord_voice_capture": ["voice:listen"],
+            "discord_voice_leave": ["voice:join"],
+        }.get(name, [])
+        if any(not db.can(account, OWNER_ID, GUILD_ID, scope) for scope in required_grants):
+            return {"available": False, "reason": "server_voice_grant_required"}
+        if is_status:
+            data = await voice_rpc({"op": "status"})
+            return {"available": True, **data,
+                    "chatgpt_scope": "active MCP invocations only"}
+        request = {
+            "discord_voice_connect": {"op": "connect"},
+            "discord_voice_talk": {"op": "talk"},
+            "discord_voice_listen": {"op": "listen", "enabled": args.get("enabled")},
+            "discord_voice_say": {"op": "say", "text": args.get("text")},
+            "discord_voice_exchange": {"op": "exchange", "text": args.get("text"), "wait_seconds": args.get("wait_seconds", 15)},
+            "discord_voice_capture": {"op": "capture", "wait_seconds": args.get("wait_seconds", 15)},
+            "discord_voice_leave": {"op": "leave"},
+        }.get(name)
+        if request is None:
+            raise ValueError("Unknown voice tool")
+        return await voice_rpc(request)
     raise ValueError("Unknown tool")
 
 
@@ -163,7 +196,7 @@ async def mcp_post(request: Request):
         return _rpc(request_id, {
             "protocolVersion": protocol,
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "ailinux-discord-mcp", "version": "0.1.0"},
+            "serverInfo": {"name": "ailinux-discord-mcp", "version": "0.2.0"},
             "instructions": "Account-scoped Discord tools. Use only approved AILinux-linked Discord servers. "
                             "A Discord bot's persistent connection is not the same as a persistent ChatGPT model session.",
         })
@@ -174,15 +207,30 @@ async def mcp_post(request: Request):
     if method == "tools/call":
         name = params.get("name")
         arguments = params.get("arguments", {})
-        if not isinstance(arguments, dict) or arguments:
-            return _rpc(request_id, error={"code": -32602, "message": "Tool takes no parameters"})
-        if name not in {x["name"] for x in _TOOLS}:
+        tool = next((item for item in _TOOLS if item["name"] == name), None)
+        if tool is None:
             return _rpc(request_id, error={"code": -32602, "message": "Unknown tool"})
+        schema = tool["inputSchema"]
+        if not isinstance(arguments, dict) or set(arguments) - set(schema["properties"]) or any(
+            key not in arguments for key in schema.get("required", [])
+        ):
+            return _rpc(request_id, error={"code": -32602, "message": "Invalid tool arguments"})
+        for key, value in arguments.items():
+            field = schema["properties"][key]
+            kind = field["type"]
+            if (kind == "boolean" and type(value) is not bool) or (
+                kind == "integer" and type(value) is not int
+            ) or (kind == "string" and not isinstance(value, str)):
+                return _rpc(request_id, error={"code": -32602, "message": "Invalid tool argument type"})
+            if kind == "string" and not field.get("minLength", 0) <= len(value) <= field.get("maxLength", 65536):
+                return _rpc(request_id, error={"code": -32602, "message": "Invalid tool argument length"})
+            if kind == "integer" and not field.get("minimum", -999999) <= value <= field.get("maximum", 999999):
+                return _rpc(request_id, error={"code": -32602, "message": "Invalid wait time"})
         try:
-            payload = await _tool(name, claims["account"])
+            payload = await _tool(name, claims["account"], arguments, claims)
         except Exception:
             # Never leak path, token, or internal bridge error details.
-            return _rpc(request_id, {"content": [{"type": "text", "text": "Voice status unavailable."}],
+            return _rpc(request_id, {"content": [{"type": "text", "text": "Discord voice operation unavailable."}],
                                      "isError": True})
         return _rpc(request_id, {
             "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}],
