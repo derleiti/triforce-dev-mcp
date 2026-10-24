@@ -66,6 +66,14 @@ OLLAMA_MODELS = [
     "ollama/gpt-oss:20b-cloud",
 ]
 
+# Self-hosted models are exposed only to signed-in users, not anonymous guests.
+# Their presence in model listings is determined from the live TriForce registry.
+LOCAL_OLLAMA_MODELS = (
+    "ollama/openbmb/minicpm-v4.7:35b-a3b",
+    "ollama/openbmb/minicpm-v4.7:1b",
+    "ollama/gemma4:12b",
+)
+
 # Compatibility name used throughout the client API. The server currently has
 # no local generation model installed, so point the default/fallback route at a
 # current low-friction Ollama Cloud model instead of the removed llama3.2 tag.
@@ -165,6 +173,8 @@ class UserTierService:
         """Gibt erlaubte Modelle zurück - 'all' für Pro/Enterprise"""
         cfg = TIER_CONFIGS[self.get_user_tier(user_id)]
         if cfg.models == "ollama_only":
+            if self.get_user_tier(user_id) == UserTier.REGISTERED:
+                return OLLAMA_MODELS + list(LOCAL_OLLAMA_MODELS)
             return OLLAMA_MODELS
         return "all"  # Pro/Enterprise: Alle Server-Modelle
     
@@ -205,7 +215,8 @@ class UserTierService:
         if model.startswith("ollama/"):
             return True
         model_clean = model.lower()
-        return any(model_clean in m.lower() for m in OLLAMA_MODELS)
+        return any(model_clean in m.lower() for m in
+                   (*OLLAMA_MODELS, *LOCAL_OLLAMA_MODELS))
     
     def get_token_limit_for_model(self, user_id: str, model: str) -> int:
         """

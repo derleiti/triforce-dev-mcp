@@ -1,0 +1,15 @@
+[Unit]
+Description=WireGuard-only Ollama ingress for TriForce
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Socket]
+# Replace @@VPN_IP@@ with the node's exact wg0 address.
+# Never use 0.0.0.0 or the public interface here.
+ListenStream=@@VPN_IP@@:11434
+FreeBind=yes
+NoDelay=true
+Service=triforce-ollama-wg.service
+
+[Install]
+WantedBy=sockets.target

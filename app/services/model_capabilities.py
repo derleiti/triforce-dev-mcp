@@ -611,6 +611,20 @@ async def refresh_capabilities(
             record.source = "heuristic"
             stats["heuristic"] += 1
 
+        # These models are checked directly against their pinned worker's
+        # /api/tags by ModelRegistry. Probing the hub's localhost would return
+        # a misleading 404 for models hosted on backup or zombie-pc.
+        from .ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+        if (provider == "ollama" and
+                mid.removeprefix("ollama/") in LOCAL_OLLAMA_PLACEMENT):
+            record.capabilities = sorted(set(getattr(m, "capabilities", []) or []))
+            record.source = "declared"
+            record.availability = AVAIL_OK
+            record.availability_detail = "Verified on pinned Ollama worker /api/tags"
+            stats["declared"] += 1
+            store.put(record)
+            continue
+
         store.put(record)
 
         # Stage 2: probe candidates
