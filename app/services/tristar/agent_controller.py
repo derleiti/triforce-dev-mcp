@@ -984,7 +984,13 @@ class AgentController:
         elif state in {"error", "failed", "timeout", "quota_exhausted"}:
             await record("tool_failed", verification_state="failed",
                          error_type=f"agent_status:{state}")
-        if os.getenv("TRIFORCE_LOCAL_MEMORY_SUMMARIES", "false").lower() in {"1", "true", "yes"}:
+        allowed = {
+            name.strip() for name in
+            os.getenv("TRIFORCE_LOCAL_MEMORY_AGENT_ALLOWLIST", "").split(",")
+            if name.strip()
+        }
+        if (os.getenv("TRIFORCE_LOCAL_MEMORY_SUMMARIES", "false").lower()
+                in {"1", "true", "yes"} and agent_id in allowed):
             try:
                 from ..local_memory_queue import enqueue
                 enqueue(project=project, run_id=run_id, agent=agent_id,
