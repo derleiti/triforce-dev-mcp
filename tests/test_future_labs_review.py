@@ -45,3 +45,17 @@ def test_future_labs_review_registered_as_operator_readonly():
     assert tool["annotations"]["readOnlyHint"] is True
     assert tool["inputSchema"]["additionalProperties"] is False
     assert "future_labs_review" in HISTORY_HANDLERS
+
+
+@pytest.mark.asyncio
+async def test_static_evidence_never_promotes_unverified_features(tmp_path):
+    from app.services.future_labs_review import static_evidence
+    p = tmp_path / ".github/workflows"
+    p.mkdir(parents=True)
+    (p / "platform-artifacts.yml").write_text("name: stub\n")
+    report = await review(Provider(), repo_root=tmp_path)
+    topics = {r["id"]:r for r in report["topics"]}
+    assert topics["reproducible_releases"]["static_evidence"] == [".github/workflows/platform-artifacts.yml"]
+    assert all(not x["acceptance_verified"] for x in topics.values())
+    assert all(x["runtime_verification"] == "not_assessed" for x in topics.values())
+    assert static_evidence(tmp_path)["hardware_matrix"]["static_evidence_status"] == "no_mapped_evidence"
