@@ -986,10 +986,9 @@ class AgentController:
                          error_type=f"agent_status:{state}")
         if os.getenv("TRIFORCE_LOCAL_MEMORY_SUMMARIES", "false").lower() in {"1", "true", "yes"}:
             try:
-                from ..local_memory_summary import summarize_execution
-                await summarize_execution(provider=engine.provider, project=project,
-                                          run_id=run_id, agent=agent_id, status=state,
-                                          task_digest=task_digest)
+                from ..local_memory_queue import enqueue
+                enqueue(project=project, run_id=run_id, agent=agent_id,
+                        status=state, task_digest=task_digest)
             except Exception as exc:
                 logger.warning("Local memory summary degraded: %s", type(exc).__name__)
         if summarize:
