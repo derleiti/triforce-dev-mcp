@@ -71,6 +71,43 @@ async def test_persistent_claim_prevents_duplicate_after_new_invocation(tmp_path
     first = await summarize_execution(**args)
     second = await summarize_execution(**args)
     assert first["status"] == "ok"
-    assert second == {"status": "skipped", "reason": "already_claimed"}
+    assert second == {"status": "skipped", "reason": "already_claimed_or_busy"}
     assert len(calls) == 1
     assert provider.record.await_count == 1
+
+
+def test_global_generation_lease_and_expired_recovery(tmp_path):
+    import sqlite3
+    import time
+    from app.services.local_memory_summary import _claim, _transition, LEASE_SECONDS
+    path = tmp_path / "journal.db"
+    first = _claim(path, "project/run-a")
+    assert isinstance(first, str)
+    assert _claim(path, "project/run-b") is None
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE summary_runs SET claimed_at=? WHERE run_key=?",
+                   (int(time.time())-LEASE_SECONDS-10, "project/run-a"))
+    # Only expired generation is retryable; completed/persisting writes are not.
+    second = _claim(path, "project/run-a")
+    assert second and second != first
+    _transition(path, "project/run-a", first, "verified", 999)
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT state FROM summary_runs").fetchone()[0] == "generating"
+    _transition(path, "project/run-a", second, "persisting")
+    assert _claim(path, "project/run-a") is None
+    assert _claim(path, "project/run-b")
+
+
+@pytest.mark.asyncio
+async def test_failed_model_call_releases_generation_lease(tmp_path):
+    from app.services.local_memory_summary import _claim
+    path=tmp_path / "journal.db"
+    provider=AsyncMock()
+    result=await summarize_execution(
+        provider=provider,project="p",run_id="r",agent="a",
+        status="success",task_digest="h",db_path=path,
+        transport=httpx.MockTransport(lambda r: (_ for _ in ()).throw(httpx.ConnectError("offline")))
+    )
+    assert result["reason"] == "local_model_unavailable"
+    assert _claim(path, "another-run")
+    provider.record.assert_not_awaited()
