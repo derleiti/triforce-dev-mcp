@@ -198,7 +198,7 @@ TRIFORCE_ADMIN_TOOLS = frozenset({
     "mesh_status", "mesh_task", "remote_hosts", "remote_task", "remote_exec", "remote_admin", "flstudio",
     "vault_status", "vault_keys", "vault_add",
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_close",
-    "memory_clear", "memory_history", "memory_training", "feature_experience_store",
+    "memory_clear", "memory_history", "memory_training", "feature_experience_store", "future_labs_review",
 })
 
 def tool_scope(name: str, inventory: str = "") -> str:
@@ -243,7 +243,7 @@ CANONICAL_TOOL_NAMES = frozenset({
     # Vault
     "vault_status", "vault_keys", "vault_add",
     # Memory
-    "memory_store", "memory_search", "memory_clear", "memory_history", "memory_training", "feature_experience_store",
+    "memory_store", "memory_search", "memory_clear", "memory_history", "memory_training", "feature_experience_store", "future_labs_review",
     # Settings/debug
     "prompts", "prompt_set", "debug",
     # Mail
@@ -316,7 +316,7 @@ SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
     },
     "research": {
         "description": "Current web/document research plus scoped memory recall for evidence-backed work.",
-        "tools": {"search", "crawl", "memory_search", "memory_history", "memory_training", "feature_experience_store"},
+        "tools": {"search", "crawl", "memory_search", "memory_history", "memory_training", "feature_experience_store", "future_labs_review"},
     },
     "automation": {
         "description": "Execution and workflow automation primitives. Prefer typed tools over shell-like execution.",
@@ -359,7 +359,7 @@ SEMANTIC_INVENTORY_PROFILES: Dict[str, Dict[str, Any]] = {
     "admin": {
         "description": "TriForce engine/service administration and diagnostics.",
         "inventories": {"admin", "settings", "integration"},
-        "tools": {"debug", "hot_reload", "log_viewer", "mcp_analytics", "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status", "bug_report_resolve", "memory_training", "feature_experience_store"},
+        "tools": {"debug", "hot_reload", "log_viewer", "mcp_analytics", "bug_reports_list", "bug_report_get", "bug_report_stats", "bug_report_status", "bug_report_resolve", "memory_training", "feature_experience_store", "future_labs_review"},
     },
 }
 
