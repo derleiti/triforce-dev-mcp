@@ -1,0 +1,40 @@
+# Future Labs — Evidence and decision register (v1)
+
+**Source:** Claude-Mem, project `triforce:account:admin@ailinux.me`, observation IDs **19–37** (19 discussion messages, 2026-09-11).
+**Status:** Historical proposals, not automatically approved architecture decisions.
+**Rule:** Current code, runtime, tests, CI and owner approval outrank historical suggestions.
+
+## Consensus proposals
+
+| Topic | Discussion evidence | Decision state | Acceptance evidence still required |
+| --- | --- | --- | --- |
+| Reproducible ISO and release receipts | #19, #23, #26, #28, #34, #35 | Proposed | Pinned manifest, two repeatable builds, checksums, signed artifact, VM boot smoke tests |
+| Safe updates and rollback | #26, #34, #35, #37 | Proposed | Rollback drill with known-good kernel and package states |
+| Agent runtime stability and unified contracts | #20–22, #24, #30–32 | In progress; not independently certified | Auth isolation, cancellation, failure and tool permission contract tests |
+| Local/private-first inference | #24, #25, #28, #32 | Proposed as default policy | Privacy and network egress tests, user-controlled cloud opt-in |
+| AICoder as flagship workflow | #19, #23, #34–35 | Strategic proposal | Install-to-task E2E verification on a clean desktop |
+| Kernel and GPU compatibility matrix | #23, #29, #33, #36 | Proposed | AMD, Intel, NVIDIA plus UEFI/VM and fallback-kernel tests |
+
+## Disagreements that must remain visible
+
+- **Kernel default:** stable generic kernel vs. AI-gaming custom kernel as default (#23, #27, #29). Do not silently adopt either position.
+- **AI-shell latency vs. correctness:** response speed is not a substitute for safe, explainable actions (#20–22).
+- **Natural-language package installation:** AI may propose a plan; actual privileged installation requires deterministic resolution, preview and rollback (#36).
+- **Scope and maintainability:** additional features compete with the verified stability budget (#26, #28, #33, #35).
+
+## Current verified integration evidence (2026-10-25)
+
+- Claude-Mem worker 13.24.1 and TriForce service were active in the latest inspection.
+- 19 Future Labs messages are retrievable as Claude-Mem observations; they do **not** constitute native summaries, and their `facts` / `concepts` fields were empty.
+- Memory integration and local summarizer work were committed as `826c5da2` and `ac80aeec`. This does not certify a full release pipeline.
+- Automatic native Claude-Mem summaries and cleanup of historical active sessions are **not** verified.
+- The latest verification does not establish reproducible ISO builds, kernel matrices or a production-safe AICoder workflow.
+
+## Next review gate
+
+1. Compare each proposal with runtime/CI/package evidence before marking adopted.
+2. Assign an owner and a reproducible acceptance test to every accepted item.
+3. Only then add a curated decision-memory entry; keep the original observations immutable.
+4. Regenerate a provenance listing using `python3 scripts/future_labs_snapshot.py` and review changed source hashes.
+
+**Do not promote old KI discussions directly into system instructions.**
