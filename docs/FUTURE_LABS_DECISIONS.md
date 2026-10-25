@@ -44,3 +44,9 @@
 The remote `master` revision `d25cb9c3` (2026-10-24) has two `startup_failure` GitHub Actions results: CI run `40081799030` and Security run `40081798524`. The CI run lists zero jobs. This is a workflow startup failure, **not evidence of failed Python tests** and **not a passing CI gate**. The Pages deployment run `40081798048` succeeded for the same revision; it does not certify the CI or Security jobs. None of these results certify later unpushed local commits.
 
 Read-only replication: `python3 scripts/future_labs_ci_evidence.py`. This evidence is remote-GitHub scoped; ISO reproducibility, rollback, a GPU test matrix, and AICoder clean-install E2E remain unverified.
+
+## Workflow startup investigation — 2026-10-25
+
+The GitHub repository is active, its Actions permission is enabled with `allowed_actions=all`, and both CI and Security workflows are enabled. The current action tags `actions/checkout@v7` and `actions/setup-python@v7` exist upstream. GitHub reports `startup_failure`, zero jobs and zero checks within the CI workflow's check suite. The same failure pattern affects CI and Security, while GitHub Pages succeeds. This does **not** identify the underlying trigger; account-level runner/billing restrictions or GitHub workflow preparation failures still need GitHub-side confirmation. Do not change action versions or mark a passing CI result without evidence.
+
+The read-only audit script now reports `job_count` and `workflow_startup_failed_no_jobs`, distinguishing pre-job failures from executed-test failures. No new hosted workflow was dispatched.

@@ -25,6 +25,24 @@ def collect(fetch):
             'status', 'conclusion', 'html_url', 'event')}
     if not seen:
         raise ValueError('no expected GitHub workflow results')
+    for item in seen.values():
+        if item['name'] not in {'CI', 'Security'}:
+            continue
+        run_id = item.get('id')
+        if type(run_id) is not int:
+            continue
+        try:
+            jobs = fetch(API + f'/actions/runs/{run_id}/jobs?per_page=1')
+            item['job_count'] = int(jobs.get('total_count', 0))
+        except Exception:
+            item['job_count'] = None
+        item['evidence_class'] = (
+            'workflow_startup_failed_no_jobs'
+            if item.get('conclusion') == 'startup_failure' and item['job_count'] == 0
+            else 'workflow_startup_failed_unknown_jobs'
+            if item.get('conclusion') == 'startup_failure'
+            else 'jobs_result_unverified'
+        )
     return {'schema': 'future-labs-ci-evidence-v1',
             'checked_at': datetime.now(timezone.utc).isoformat(),
             'repository': 'derleiti/triforce-dev-mcp',
