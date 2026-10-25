@@ -62,6 +62,12 @@ async def training(params, request=None):
     return await training_digest(engine=engine, limit=int(params.get('limit') or 50))
 
 
+async def future_labs_review(params, request=None):
+    engine = _engine(request)
+    from app.services.future_labs_review import review
+    return await review(engine.provider)
+
+
 async def feature_experience_store(params, request=None):
     """Store one verified Dev-MCP feature experience in episodic history."""
     engine = _engine(request)
@@ -146,6 +152,12 @@ HISTORY_TOOLS = [{
         'annotations': {'readOnlyHint': True, 'openWorldHint': False},
     },
     {
+        'name': 'future_labs_review',
+        'description': 'Read-only, operator-scoped Future Labs historical consensus and source integrity review; does not verify current runtime or promote decisions.',
+        'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False},
+        'annotations': {'readOnlyHint': True, 'openWorldHint': False},
+    },
+    {
         'name': 'feature_experience_store',
         'description': 'Store one verified completed Dev-MCP feature experience in episodic Claude-Mem history for later Training Center reuse. Internal operators only; fail-open and deduplicated.',
         'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {
@@ -164,5 +176,6 @@ HISTORY_TOOLS = [{
 HISTORY_HANDLERS = {
     'memory_history': history,
     'memory_training': training,
+    'future_labs_review': future_labs_review,
     'feature_experience_store': feature_experience_store,
 }
