@@ -38,3 +38,9 @@
 4. Regenerate a provenance listing using `python3 scripts/future_labs_snapshot.py` and review changed source hashes.
 
 **Do not promote old KI discussions directly into system instructions.**
+
+## Published GitHub CI evidence — checked 2026-10-25
+
+The remote `master` revision `d25cb9c3` (2026-10-24) has two `startup_failure` GitHub Actions results: CI run `40081799030` and Security run `40081798524`. The CI run lists zero jobs. This is a workflow startup failure, **not evidence of failed Python tests** and **not a passing CI gate**. The Pages deployment run `40081798048` succeeded for the same revision; it does not certify the CI or Security jobs. None of these results certify later unpushed local commits.
+
+Read-only replication: `python3 scripts/future_labs_ci_evidence.py`. This evidence is remote-GitHub scoped; ISO reproducibility, rollback, a GPU test matrix, and AICoder clean-install E2E remain unverified.
