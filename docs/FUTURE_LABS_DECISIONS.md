@@ -50,3 +50,13 @@ Read-only replication: `python3 scripts/future_labs_ci_evidence.py`. This eviden
 The GitHub repository is active, its Actions permission is enabled with `allowed_actions=all`, and both CI and Security workflows are enabled. The current action tags `actions/checkout@v7` and `actions/setup-python@v7` exist upstream. GitHub reports `startup_failure`, zero jobs and zero checks within the CI workflow's check suite. The same failure pattern affects CI and Security, while GitHub Pages succeeds. This does **not** identify the underlying trigger; account-level runner/billing restrictions or GitHub workflow preparation failures still need GitHub-side confirmation. Do not change action versions or mark a passing CI result without evidence.
 
 The read-only audit script now reports `job_count` and `workflow_startup_failed_no_jobs`, distinguishing pre-job failures from executed-test failures. No new hosted workflow was dispatched.
+
+## Confirmed GitHub Actions annotation (2026-10-25)
+
+The GitHub run pages for CI `40081799030` and Security `40081798524` explicitly report:
+
+> Actor is not allowed to trigger Actions workflows.
+
+Both were `push` events initiated by GitHub actor `derleiti` (type `User`). Repository collaborator permissions show `derleiti` has `admin` rights, and repository Actions are enabled with `allowed_actions=all`. Therefore the workflow did **not** fail because of a Python test; changing workflow action versions cannot resolve this authorization denial. The mismatch between repo permission and trigger authorization requires GitHub account/platform-side investigation (including account restrictions) rather than speculative YAML modifications. These findings do not prove why GitHub denies the actor.
+
+The exact run-page annotation is the primary diagnostic evidence; the standard run API exposes `startup_failure` but omits this explanatory text. Do not trigger reruns as a diagnostic substitute while the actor is denied.
