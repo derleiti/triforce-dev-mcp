@@ -443,10 +443,12 @@ async def run_remote_coding_agent(
     if connection.remote_coding_run_id is not None:
         raise RuntimeError("A remote coding run is already running on this node")
     connection.remote_coding_run_id = selected_run_id
+    from .memory_runtime import remote_recall, remote_record
     try:
-        from .memory_runtime import remote_recall
         recalled = await remote_recall(connection, 'run_resumed' if run_id else 'task_started',
                                        run_id=selected_run_id, task=task, model=selected_model)
+        await remote_record(connection, 'run_resumed' if run_id else 'task_started',
+                            run_id=selected_run_id, task=task, model=selected_model)
         if recalled.get('context'):
             system = system + '\n\n' + recalled['context']
         worker_result = await _run_antigravity_worker(
@@ -456,9 +458,14 @@ async def run_remote_coding_agent(
             system=system,
             run_id=selected_run_id,
         )
+    except Exception as exc:
+        # Keep the original exception and cancellation semantics. Memory is optional.
+        await remote_record(connection, 'exception_raised', run_id=selected_run_id,
+                            task=task, model=selected_model, error_type=type(exc).__name__,
+                            error=str(exc)[:1200], verification_state='failed')
+        raise
     finally:
         connection.remote_coding_run_id = None
-    from .memory_runtime import remote_record
     await remote_record(connection, 'run_completed', run_id=selected_run_id, task=task, model=selected_model,
                         findings=str(worker_result.get("response") or "")[:4000], verification_state='completed')
     node = _node_view(client_id, connection)

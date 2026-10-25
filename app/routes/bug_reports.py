@@ -1,5 +1,6 @@
 """Public crash/self-test ingestion. Recipient and sender are fixed server-side."""
 from __future__ import annotations
+from app.services.bug_reports import bug_mail_addresses
 
 import asyncio
 from typing import Any
@@ -43,4 +44,4 @@ async def receive_bug_report(report: BugReport, request: Request) -> dict[str, A
 
 @router.get("/health")
 async def bug_report_health() -> dict[str, Any]:
-    return {"ok": True, "endpoint": "/v1/bugs/report", "recipient": "bugs@ailinux.me"}
+    return {"ok": True, "endpoint": "/v1/bugs/report", "recipient": bug_mail_addresses()[0]}
