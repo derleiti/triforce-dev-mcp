@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from typing import Any
+from pathlib import Path
 
 from .episodic_memory import redact
 
@@ -28,7 +29,37 @@ TOPICS = (
 )
 
 
-async def review(provider: Any) -> dict[str, Any]:
+# These are static indicators, NOT proof that any workflow or release passed.
+STATIC_INDICATORS = {
+    "reproducible_releases": (".github/workflows/platform-artifacts.yml",
+                              ".github/workflows/platform-package-contract.yml"),
+    "safe_updates": (),
+    "agent_contract": ("tests/test_agent_controller_aicoder_runtime.py",
+                       "tests/test_mcp_auth_requirements.py",
+                       "tests/test_agent_controller_shutdown_unittest.py"),
+    "local_privacy": ("tests/test_federated_local_ollama_models.py",
+                      "app/services/local_memory_summary.py"),
+    "aicoder_flagship": ("tests/test_aicoder_agent_events.py",
+                         "tests/test_remote_coding_agent.py"),
+    "hardware_matrix": (),
+}
+
+
+def static_evidence(repo_root: Path) -> dict[str, dict]:
+    """Detect only existing support files; never infer release or runtime success."""
+    result = {}
+    for key, files in STATIC_INDICATORS.items():
+        present = [f for f in files if (repo_root / f).is_file()]
+        result[key] = {
+            "runtime_verification": "not_assessed",
+            "static_evidence": present,
+            "static_evidence_status": "candidate_files_found" if present else "no_mapped_evidence",
+            "acceptance_verified": False,
+        }
+    return result
+
+
+async def review(provider: Any, *, repo_root: Path | None = None) -> dict[str, Any]:
     """Require the complete known source set before reporting a complete review."""
     found: dict[int, dict] = {}
     batch_size = max(1, min(int(getattr(provider.settings, "memory_max_results", 4)), 5))
@@ -58,13 +89,14 @@ async def review(provider: Any) -> dict[str, Any]:
             "created_at": row.get("created_at"),
             "sha256": hashlib.sha256(narrative.encode("utf-8")).hexdigest(),
         })
+    evidence = static_evidence(repo_root or Path(__file__).resolve().parents[2])
     topics = []
     for key, title, ids, criteria in TOPICS:
         present = [i for i in ids if i in found]
         topics.append({
             "id": key, "title": title,
             "historical_state": "proposal_not_approved",
-            "runtime_verification": "not_assessed",
+            **evidence[key],
             "evidence_ids": present,
             "missing_evidence_ids": [i for i in ids if i not in found],
             "acceptance_criteria": criteria,
