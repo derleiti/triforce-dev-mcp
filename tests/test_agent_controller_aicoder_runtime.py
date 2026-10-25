@@ -271,3 +271,69 @@ def test_native_cli_profile_explicit_team_routes_aicoder_team_on(tmp_path):
     assert result["status"] == "success"
     assert result["routing"]["mode"] == "team"
     assert seen["team_mode_override"] == "on"
+
+
+def test_cli_agent_memory_records_lifecycle_without_prompt_leak(tmp_path):
+    from unittest.mock import AsyncMock
+    controller = AgentController(data_dir=str(tmp_path / "agents"))
+    secret_message = "Please review secret sample text test-secret"
+    mocked = AsyncMock(return_value={"status": "success", "response": "private answer"})
+    engine = type("Engine", (), {})()
+    engine.settings = type("Settings", (), {
+        "episodic_memory_enabled": True,
+        "memory_record_enabled": True,
+        "memory_project_id": "triforce",
+    })()
+    engine.record_event = AsyncMock(return_value={"status": "ok"})
+    controller._call_agent_impl = mocked
+    with patch("app.services.memory_trigger.get_memory_engine", return_value=engine):
+        result = asyncio.run(controller.call_agent("claude-mcp", secret_message))
+    assert result["status"] == "success"
+    events = [c.args[0] for c in engine.record_event.await_args_list]
+    assert [event.event_type for event in events] == ["task_started", "run_completed"]
+    assert events[0].project_id == "triforce:agent:claude-mcp"
+    assert "test-secret" not in str(events)
+    assert "private answer" not in str(events)
+
+
+def test_cli_agent_memory_failure_keeps_original_error(tmp_path):
+    from unittest.mock import AsyncMock
+    controller = AgentController(data_dir=str(tmp_path / "agents"))
+    engine = type("Engine", (), {})()
+    engine.settings = type("Settings", (), {
+        "episodic_memory_enabled": True,
+        "memory_record_enabled": True,
+        "memory_project_id": "triforce",
+    })()
+    engine.record_event = AsyncMock(return_value={"status": "ok"})
+    controller._call_agent_impl = AsyncMock(side_effect=ValueError("internal details"))
+    with patch("app.services.memory_trigger.get_memory_engine", return_value=engine):
+        import pytest
+        with pytest.raises(ValueError, match="internal details"):
+            asyncio.run(controller.call_agent("codex-mcp", "private"))
+    events = [c.args[0] for c in engine.record_event.await_args_list]
+    assert [event.event_type for event in events] == ["task_started", "exception_raised"]
+    assert events[-1].error_type == "ValueError"
+    assert "internal details" not in str(events)
+
+
+def test_claude_mem_session_hooks_are_opt_in(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    controller = AgentController(str(tmp_path / 'agents'))
+    engine = type('Engine', (), {})()
+    engine.settings = type('Settings', (), {
+        'episodic_memory_enabled': True, 'memory_record_enabled': True,
+        'memory_project_id': 'triforce'})()
+    engine.record_event = AsyncMock(return_value={'status': 'ok'})
+    engine.provider = type('Provider', (), {
+        'session_init': AsyncMock(return_value={'sessionDbId': 77}),
+        'session_summarize': AsyncMock(return_value={'status': 'queued'})})()
+    controller._call_agent_impl = AsyncMock(return_value={'status': 'success'})
+    monkeypatch.setenv('TRIFORCE_CLAUDE_MEM_SESSION_SUMMARIES', 'true')
+    with patch('app.services.memory_trigger.get_memory_engine', return_value=engine):
+        result = asyncio.run(controller.call_agent('gemini-mcp', 'safe text'))
+    assert result['status'] == 'success'
+    args = engine.provider.session_init.await_args.args
+    assert args[0].startswith('cli-')
+    assert args[1] == 'triforce:agent:gemini-mcp'
+    engine.provider.session_summarize.assert_awaited_once_with(args[0])

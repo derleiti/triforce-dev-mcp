@@ -612,3 +612,47 @@ async def test_unimplemented_file_chat_does_not_claim_tool_access(monkeypatch, o
     assert error.value.status_code == 501
     client_chat.call_ollama.assert_not_awaited()
     client_chat.call_openrouter.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remote_run_records_start_and_verified_completion(monkeypatch):
+    from app.services import memory_runtime
+    conn = FakeConnection()
+    monkeypatch.setattr(service, "CONNECTED_CLIENTS", {"client-1": conn})
+    monkeypatch.setattr(service, "_run_antigravity_worker",
+                        AsyncMock(return_value={"response": "checked"}))
+    recall = AsyncMock(return_value={"status": "ok", "context": ""})
+    record = AsyncMock(return_value={"status": "ok"})
+    monkeypatch.setattr(memory_runtime, "remote_recall", recall)
+    monkeypatch.setattr(memory_runtime, "remote_record", record)
+
+    result = await service.run_remote_coding_agent(
+        client_id="client-1", task="inspect", run_id="resume-77"
+    )
+    assert result["status"] == "completed"
+    assert [call.args[1] for call in record.await_args_list] == [
+        "run_resumed", "run_completed"
+    ]
+    assert record.await_args_list[-1].kwargs["verification_state"] == "completed"
+    assert conn.remote_coding_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_remote_run_records_failure_and_releases_lock(monkeypatch):
+    from app.services import memory_runtime
+    conn = FakeConnection()
+    monkeypatch.setattr(service, "CONNECTED_CLIENTS", {"client-1": conn})
+    monkeypatch.setattr(service, "_run_antigravity_worker",
+                        AsyncMock(side_effect=RuntimeError("worker broke")))
+    monkeypatch.setattr(memory_runtime, "remote_recall",
+                        AsyncMock(return_value={"status": "ok", "context": ""}))
+    record = AsyncMock(return_value={"status": "ok"})
+    monkeypatch.setattr(memory_runtime, "remote_record", record)
+
+    with pytest.raises(RuntimeError, match="worker broke"):
+        await service.run_remote_coding_agent(client_id="client-1", task="inspect")
+    assert [call.args[1] for call in record.await_args_list] == [
+        "task_started", "exception_raised"
+    ]
+    assert record.await_args_list[-1].kwargs["verification_state"] == "failed"
+    assert conn.remote_coding_run_id is None

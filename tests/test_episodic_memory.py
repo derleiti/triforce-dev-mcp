@@ -167,3 +167,33 @@ async def test_global_search_requires_query_and_preserves_project_scope(tmp_path
     assert {row['project'] for row in rows} == {'project-a', 'project-b'}
     with pytest.raises(MemoryUnavailable):
         await adapter.search_global('', 20)
+
+
+@pytest.mark.asyncio
+async def test_claude_mem_session_hooks_use_official_worker_contract(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append((request.url.path, json.loads(request.content)))
+        if request.url.path == '/api/sessions/init':
+            return httpx.Response(200, json={'sessionDbId': 42})
+        if request.url.path == '/api/sessions/summarize':
+            return httpx.Response(200, json={'status': 'queued'})
+        raise AssertionError('unexpected route')
+
+    adapter = ClaudeMemAdapter(config(tmp_path), httpx.MockTransport(handler))
+    assert (await adapter.session_init('cli-test-42', 'triforce:agent:pilot'))['sessionDbId'] == 42
+    assert (await adapter.session_summarize('cli-test-42'))['status'] == 'queued'
+    assert [path for path, _ in requests] == ['/api/sessions/init', '/api/sessions/summarize']
+    assert requests[0][1]['project'] == 'triforce:agent:pilot'
+    assert requests[0][1]['prompt'] == '[TriForce agent execution]'
+    assert requests[1][1]['contentSessionId'] == 'cli-test-42'
+
+
+@pytest.mark.asyncio
+async def test_claude_mem_summarize_rejects_bad_worker_response(tmp_path):
+    adapter = ClaudeMemAdapter(config(tmp_path), httpx.MockTransport(
+        lambda request: httpx.Response(200, json={'status': 'unexpected'})
+    ))
+    with pytest.raises(MemoryUnavailable, match='malformed_response'):
+        await adapter.session_summarize('cli-test-42')
