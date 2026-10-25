@@ -13,6 +13,7 @@ Features:
 
 import asyncio
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -933,6 +934,72 @@ class AgentController:
         return {"status": "reloaded", "agents": reloaded}
 
     async def call_agent(
+        self,
+        agent_id: str,
+        message: str,
+        timeout: int = 120,
+        execution_mode: str = "auto",
+    ) -> Dict[str, Any]:
+        """Audit bounded agent lifecycle in Claude-Mem without storing prompts or responses.
+
+        Memory is advisory, fail-open and never receives user conversation text.
+        """
+        from ..memory_trigger import get_memory_engine, MemoryEvent
+        engine = get_memory_engine()
+        if not (engine.settings.episodic_memory_enabled and engine.settings.memory_record_enabled):
+            return await self._call_agent_impl(agent_id, message, timeout, execution_mode)
+        run_id = "cli-" + uuid.uuid4().hex
+        project = f"{engine.settings.memory_project_id or 'triforce'}:agent:{agent_id}"
+        task_digest = hashlib.sha256(message.encode("utf-8", "replace")).hexdigest()[:16]
+        task = f"agent:{agent_id} task_sha256:{task_digest}"
+        async def record(kind: str, **details):
+            try:
+                await engine.record_event(MemoryEvent(
+                    event_type=kind, project_id=project, run_id=run_id,
+                    task=task, agent=agent_id, source="triforce-cli-agent",
+                    **details,
+                ))
+            except Exception:
+                logger.warning("CLI memory event failed: %s", kind)
+        # This endpoint may invoke a billable configured AI provider.
+        summarize = os.getenv("TRIFORCE_CLAUDE_MEM_SESSION_SUMMARIES", "false").lower() in {
+            "true", "1", "yes"
+        }
+        if summarize:
+            try:
+                await engine.provider.session_init(run_id, project)
+            except Exception as exc:
+                logger.warning("CLI session init degraded: %s", type(exc).__name__)
+        await record("task_started")
+        try:
+            result = await self._call_agent_impl(agent_id, message, timeout, execution_mode)
+        except Exception as exc:
+            await record("exception_raised", error_type=type(exc).__name__,
+                         verification_state="failed")
+            raise
+        state = str(result.get("status", "")).lower() if isinstance(result, dict) else ""
+        if state in {"success", "completed", "ok"}:
+            await record("run_completed", verification_state="completed",
+                         evidence=f"controller status={state}")
+        elif state in {"error", "failed", "timeout", "quota_exhausted"}:
+            await record("tool_failed", verification_state="failed",
+                         error_type=f"agent_status:{state}")
+        if os.getenv("TRIFORCE_LOCAL_MEMORY_SUMMARIES", "false").lower() in {"1", "true", "yes"}:
+            try:
+                from ..local_memory_summary import summarize_execution
+                await summarize_execution(provider=engine.provider, project=project,
+                                          run_id=run_id, agent=agent_id, status=state,
+                                          task_digest=task_digest)
+            except Exception as exc:
+                logger.warning("Local memory summary degraded: %s", type(exc).__name__)
+        if summarize:
+            try:
+                await engine.provider.session_summarize(run_id)
+            except Exception as exc:
+                logger.warning("CLI session summary degraded: %s", type(exc).__name__)
+        return result
+
+    async def _call_agent_impl(
         self,
         agent_id: str,
         message: str,

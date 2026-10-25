@@ -181,6 +181,21 @@ class ClaudeMemAdapter:
             raise MemoryUnavailable('malformed_response')
         return redact(value)
 
+    async def session_init(self, session_id: str, project: str) -> dict:
+        value = await self._request('POST', '/api/sessions/init',
+            json={'contentSessionId': session_id, 'project': project,
+                  'prompt': '[TriForce agent execution]', 'platformSource': 'triforce'})
+        if not isinstance(value, dict):
+            raise MemoryUnavailable('malformed_response')
+        return value
+
+    async def session_summarize(self, session_id: str) -> dict:
+        value = await self._request('POST', '/api/sessions/summarize',
+            json={'contentSessionId': session_id, 'platformSource': 'triforce'})
+        if not isinstance(value, dict) or value.get('status') not in {'queued', 'skipped'}:
+            raise MemoryUnavailable('malformed_response')
+        return value
+
     async def record(self, text: str, title: str, project: str, metadata: dict) -> int:
         if not self.settings.memory_record_enabled:
             raise MemoryUnavailable('record_disabled')

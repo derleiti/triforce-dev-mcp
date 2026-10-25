@@ -108,7 +108,7 @@ async def handle_bug_report_status(params: dict[str, Any]) -> dict[str, Any]:
 
 
 async def handle_bug_report_resolve(params: dict[str, Any]) -> dict[str, Any]:
-    return resolve_report(
+    result = resolve_report(
         str(params.get("report_id") or "").strip(),
         fix_summary=str(params.get("fix_summary") or ""),
         verification=str(params.get("verification") or ""),
@@ -116,6 +116,46 @@ async def handle_bug_report_resolve(params: dict[str, Any]) -> dict[str, Any]:
         fix_version=str(params.get("fix_version") or ""),
         fix_commit=str(params.get("fix_commit") or ""),
     )
+    # Keep the verified bug resolution authoritative even when optional history fails.
+    if not result.get("ok") or result.get("idempotent"):
+        return result
+    try:
+        from app.services.memory_trigger import get_memory_engine
+        from app.services.episodic_memory import bounded_text, redact
+        engine = get_memory_engine()
+        if not (engine.settings.episodic_memory_enabled and engine.settings.memory_record_enabled):
+            return result
+        report = get_report(result["report_id"])
+        if not report or report.get("status") != "resolved":
+            return result
+        import hashlib
+        project = f"{engine.settings.memory_project_id or 'triforce'}:bugfix:{hashlib.sha256(str(report.get('repo') or report.get('app') or 'unknown').encode()).hexdigest()[:16]}"
+        # Preserve source provenance without archiving entire crash logs or private messages.
+        metadata = redact({
+            "event_type": "verified_bugfix",
+            "report_id": result["report_id"],
+            "fingerprint": report.get("fingerprint", ""),
+            "app": report.get("app", ""),
+            "repo": report.get("repo", ""),
+            "fix_commit": report.get("fix_commit", ""),
+            "fix_version": report.get("fix_version", ""),
+            "docs_ref": report.get("docs_ref", ""),
+            "verification_state": "verified",
+            "source": "triforce-bug-report",
+        })
+        text = bounded_text(str(redact(report.get("fix_summary") or "")), 2000)
+        await engine.provider.record(
+            text=text,
+            title=bounded_text(f"verified_bugfix: {report.get('app') or 'unknown'} {report.get('fingerprint') or ''}", 180),
+            project=project,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger("ailinux.bug_reports").warning(
+            "bugfix_memory_mirror_degraded", extra={"failure_type": type(exc).__name__}
+        )
+    return result
 
 
 BUG_REPORT_HANDLERS = {

@@ -25,6 +25,16 @@ from typing import Any
 _DB_PATH = Path(os.getenv("BUG_REPORT_DB", str(Path.home() / ".local/share/triforce/bug-reports.sqlite3"))).expanduser()
 _MAIL_TO = "bugs@ailinux.me"
 _MAIL_FROM = "submit@ailinux.me"
+
+def bug_mail_addresses() -> tuple[str, str]:
+    """Resolve deployment mail identities without allowing header injection."""
+    def checked(name: str, default: str) -> str:
+        value = os.getenv(name, default).strip()
+        if not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", value):
+            raise ValueError(f"invalid {name} address")
+        return value
+    return checked("BUG_REPORT_RECIPIENT", _MAIL_TO), checked("BUG_REPORT_SENDER", _MAIL_FROM)
+
 _MAX_LOG_LINES = 250
 _MAX_LOG_CHARS = 64_000
 _MAX_STACK_CHARS = 48_000
@@ -226,8 +236,9 @@ def _smtp_send(report: dict[str, Any], report_id: str, duplicate_count: int) -> 
         **report,
     }
     msg = EmailMessage()
-    msg["From"] = f"AILinux Crash Reporter <{_MAIL_FROM}>"
-    msg["To"] = _MAIL_TO
+    recipient, sender = bug_mail_addresses()
+    msg["From"] = f"AILinux Crash Reporter <{sender}>"
+    msg["To"] = recipient
     msg["Subject"] = subject
     msg["X-AILinux-Bug-ID"] = report_id
     msg["X-AILinux-Fingerprint"] = report["fingerprint"]
@@ -252,8 +263,9 @@ def _smtp_send_resolution(report: dict[str, Any]) -> None:
     password = os.getenv("BUG_SMTP_PASS", "")
     starttls = (os.getenv("BUG_SMTP_STARTTLS", "true").lower() not in {"0", "false", "no"})
     msg = EmailMessage()
-    msg["From"] = f"AILinux Bugfix Archive <{_MAIL_FROM}>"
-    msg["To"] = _MAIL_TO
+    recipient, sender = bug_mail_addresses()
+    msg["From"] = f"AILinux Bugfix Archive <{sender}>"
+    msg["To"] = recipient
     msg["Subject"] = f"[AILinux Bugfix] {report.get('app', 'unknown')} {report.get('fingerprint', '')}"
     msg["X-AILinux-Bug-ID"] = str(report.get("id") or "")
     msg["X-AILinux-Fingerprint"] = str(report.get("fingerprint") or "")
