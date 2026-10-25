@@ -337,3 +337,31 @@ def test_claude_mem_session_hooks_are_opt_in(monkeypatch, tmp_path):
     assert args[0].startswith('cli-')
     assert args[1] == 'triforce:agent:gemini-mcp'
     engine.provider.session_summarize.assert_awaited_once_with(args[0])
+
+
+def test_local_summary_opt_in_requires_explicit_agent_allowlist(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from app.services.local_memory_queue import enqueue
+    controller = AgentController(str(tmp_path / "agents"))
+    engine = type("Engine", (), {})()
+    engine.settings = type("Settings", (), {
+        "episodic_memory_enabled": True, "memory_record_enabled": True,
+        "memory_project_id": "triforce",
+    })()
+    engine.record_event = AsyncMock(return_value={"status": "ok"})
+    controller._call_agent_impl = AsyncMock(return_value={"status": "success"})
+    monkeypatch.setenv("TRIFORCE_LOCAL_MEMORY_SUMMARIES", "true")
+    monkeypatch.delenv("TRIFORCE_LOCAL_MEMORY_AGENT_ALLOWLIST", raising=False)
+    with patch("app.services.memory_trigger.get_memory_engine", return_value=engine), patch(
+        "app.services.local_memory_queue.enqueue", wraps=enqueue
+    ) as queued:
+        asyncio.run(controller.call_agent("gemini-mcp", "metadata only"))
+        queued.assert_not_called()
+    monkeypatch.setenv("TRIFORCE_LOCAL_MEMORY_AGENT_ALLOWLIST", "gemini-mcp")
+    with patch("app.services.memory_trigger.get_memory_engine", return_value=engine), patch(
+        "app.services.local_memory_queue.enqueue", return_value={"status": "queued"}
+    ) as queued:
+        asyncio.run(controller.call_agent("gemini-mcp", "metadata only"))
+        assert queued.call_count == 1
+        asyncio.run(controller.call_agent("codex-mcp", "metadata only"))
+        assert queued.call_count == 1
