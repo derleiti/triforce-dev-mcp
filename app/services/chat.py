@@ -865,7 +865,19 @@ async def _stream_ollama(
     # Strip provider prefix for Ollama API (generic)
     target_model = strip_provider_prefix(target_model)
 
-    url = str(httpx.URL(str(settings.ollama_base)).join("/api/chat"))
+    from .ollama_node_router import LOCAL_OLLAMA_PLACEMENT, ollama_candidates
+
+    # OpenAI-compatible, Nova and other chat routes must use the same pinned
+    # Ollama worker as /client/chat, not the hub's localhost for every model.
+    base_url = str(settings.ollama_base)
+    if target_model in LOCAL_OLLAMA_PLACEMENT:
+        candidates = ollama_candidates(target_model)
+        if not candidates:
+            raise api_error("Pinned Ollama model has no active node",
+                            status_code=503, code="ollama_node_unavailable")
+        base_url = candidates[0].base_url
+
+    url = str(httpx.URL(base_url).join("/api/chat"))
     payload: dict[str, object] = {
         "model": target_model,
         "messages": messages,
@@ -879,7 +891,7 @@ async def _stream_ollama(
         headers["Authorization"] = f"Bearer {settings.ollama_bearer_token}"
 
     # Don't pass api_key to HttpClient - we handle Authorization header manually
-    client = HttpClient(base_url=str(settings.ollama_base))
+    client = HttpClient(base_url=base_url)
     if stream:
         try:
             async with client.stream(

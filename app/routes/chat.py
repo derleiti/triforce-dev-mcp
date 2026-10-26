@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import AsyncGenerator, List, Literal, Optional
 from time import perf_counter
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from ..utils.rate_limit_compat import RateLimiter
@@ -19,6 +19,17 @@ except ImportError:
     _HAS_PERF_MONITOR = False
 
 router = APIRouter(tags=["chat"])
+
+
+async def require_local_chat_auth(
+    payload: "ChatRequest",
+    authorization: str | None = Header(None, alias="Authorization"),
+    x_internal_key: str | None = Header(None, alias="X-Internal-Key"),
+) -> None:
+    """Apply the same private worker policy as the OpenAI compatibility path."""
+    from .openai_compat import require_pinned_ollama_auth
+    await require_pinned_ollama_auth(payload, authorization, x_internal_key)
+
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"]
@@ -67,7 +78,8 @@ async def _chat_generator(payload: ChatRequest, model=None) -> AsyncGenerator[st
                 latency_ms = (perf_counter() - model_start) * 1000
                 perf_monitor.record_model(payload.model, latency_ms, error=error_occurred)
 
-@router.post("/chat", dependencies=[Depends(RateLimiter(times=5, seconds=10))])
+@router.post("/chat", dependencies=[Depends(RateLimiter(times=5, seconds=10)),
+                                    Depends(require_local_chat_auth)])
 async def chat_endpoint(payload: ChatRequest):
     if not payload.messages:
         raise api_error("At least one message is required", status_code=422, code="missing_messages")
@@ -121,7 +133,8 @@ async def _openai_stream_wrapper(payload: ChatRequest, model) -> AsyncGenerator[
     yield "data: [DONE]\n\n"
 
 
-@router.post("/chat/completions", dependencies=[Depends(RateLimiter(times=5, seconds=10))])
+@router.post("/chat/completions", dependencies=[Depends(RateLimiter(times=5, seconds=10)),
+                                                Depends(require_local_chat_auth)])
 async def chat_completions_alias(payload: ChatRequest):
     """OpenAI-compatible chat completions endpoint.
     Returns proper OpenAI format (choices[].message.content) instead of {"text":"..."}.

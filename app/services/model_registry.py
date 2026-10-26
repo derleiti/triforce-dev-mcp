@@ -449,7 +449,14 @@ class ModelRegistry:
             logger.debug("Capability store unavailable: %s", exc)
             return
 
+        from .ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+
         for model_id, entry in deduped.items():
+            if (entry.provider == "ollama" and
+                    model_id.removeprefix("ollama/") in LOCAL_OLLAMA_PLACEMENT):
+                # The current /api/tags response is newer than a stale probe
+                # against the hub's localhost from the capability store.
+                continue
             record = store.get(model_id)
             if not record:
                 continue
@@ -526,9 +533,70 @@ class ModelRegistry:
         return None
 
     async def _discover_ollama(self) -> List[ModelInfo]:
-        # The frontend catalogue must not expose arbitrary local /api/tags models.
-        # Ollama entries here are documented Cloud tags only.
-        return self._ollama_cloud_models()
+        # Keep the explicit Cloud catalog and add ONLY the pinned self-hosted
+        # models when their assigned Ollama node responds with matching /api/tags.
+        # Never publish arbitrary tags from an attached workstation.
+        from .ollama_node_router import (
+            LOCAL_OLLAMA_PLACEMENT, local_model_endpoint,
+        )
+
+        async def check_node(node_id: str, url: str) -> list[dict]:
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0)) as client:
+                    response = await client.get(f"{url}/api/tags")
+                    response.raise_for_status()
+                    rows = response.json().get("models", [])
+                    return rows if isinstance(rows, list) else []
+            except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:
+                logger.debug("Local Ollama node %s not available for discovery: %s",
+                             node_id, type(exc).__name__)
+                return []
+
+        endpoints = {
+            endpoint.node_id: endpoint.base_url
+            for name in LOCAL_OLLAMA_PLACEMENT
+            if (endpoint := local_model_endpoint(name)) is not None
+        }
+        node_results = await asyncio.gather(
+            *(check_node(node, url) for node, url in endpoints.items())
+        )
+        installed = {
+            node: {str(row.get("name") or row.get("model") or ""): row
+                   for row in rows if isinstance(row, dict)}
+            for node, rows in zip(endpoints, node_results)
+        }
+
+        local: List[ModelInfo] = []
+        for name, node in LOCAL_OLLAMA_PLACEMENT.items():
+            row = installed.get(node, {}).get(name)
+            if not row:
+                continue
+            supported = set(row.get("capabilities") or [])
+            if "completion" not in supported:
+                continue
+            capabilities = ["chat"]
+            if "vision" in supported:
+                capabilities.append("vision")
+            if "tools" in supported:
+                capabilities.append("tools")
+            if "thinking" in supported:
+                capabilities.append("reasoning")
+            if "audio" in supported:
+                capabilities.append("audio")
+            if name == "gemma4:12b":
+                # General code-writing model; not a coding-specialist benchmark.
+                capabilities.append("code")
+            if name.startswith("openbmb/minicpm-") and "vision" in supported:
+                capabilities.append("ocr")
+            roles = [CAPABILITY_TO_ROLE[cap] for cap in capabilities
+                     if cap in CAPABILITY_TO_ROLE]
+            local.append(ModelInfo(
+                id=f"ollama/{name}", provider="ollama",
+                capabilities=capabilities, roles=roles,
+                availability="ok", capability_source="declared",
+                free_status="catalog_free",
+            ))
+        return self._ollama_cloud_models() + local
 
     async def _discover_stable_diffusion(self) -> List[ModelInfo]:
         settings = self._settings

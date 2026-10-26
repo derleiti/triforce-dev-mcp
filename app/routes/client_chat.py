@@ -18,7 +18,8 @@ import time
 from datetime import datetime
 
 from ..services.user_tiers import (
-    tier_service, UserTier, FREE_MODELS_OLLAMA, LOCAL_FALLBACK_MODEL
+    tier_service, UserTier, FREE_MODELS_OLLAMA, LOCAL_FALLBACK_MODEL,
+    LOCAL_OLLAMA_MODELS
 )
 from ..services.model_registry import OPENROUTER_FREE_ROUTER, registry
 from ..services.provider_chat import chat_completion, normalize_tools, stream_completion
@@ -257,9 +258,9 @@ def guest_free_model_ids(models) -> List[str]:
 
 
 def is_registered_free_model(model: str) -> bool:
-    """Free-account policy: curated Ollama plus configured free-quota providers."""
+    """Registered users may use verified self-hosted models and free providers."""
     if model.startswith("ollama/"):
-        return model in FREE_MODELS_OLLAMA
+        return model in FREE_MODELS_OLLAMA or model in LOCAL_OLLAMA_MODELS
     if model == OPENROUTER_FREE_ROUTER:
         return bool(os.getenv("OPENROUTER_API_KEY"))
     if model.startswith("openrouter/") and model.endswith(":free"):
@@ -536,10 +537,18 @@ async def call_ollama(
                 logger.warning("Ollama node %s unreachable for %s", endpoint.node_id, model_name)
                 continue
 
-    # All nodes failed for the requested model. Only now change models.
-    # This also covers a model hosted exclusively on an optional worker such as
-    # zombie-pc: removing/reinstalling that machine must not make chat depend on
-    # its presence.
+    # A pinned self-hosted model must not silently switch to an unrelated
+    # Ollama Cloud model (or a different user's GPU node) when it is offline.
+    from app.services.ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+    if model_name in LOCAL_OLLAMA_PLACEMENT:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "pinned_ollama_node_unavailable",
+                    "model": model_name,
+                    "message": "Assigned self-hosted Ollama worker is unavailable"},
+        )
+
+    # Existing Cloud-only fallback policy remains unchanged.
     fallback_name = normalize_ollama_model(LOCAL_FALLBACK_MODEL)
     if (
         not is_fallback

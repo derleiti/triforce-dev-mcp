@@ -1011,6 +1011,14 @@ async def models(response: Response) -> Dict[str, Any]:
     # without staleness blocking new providers from showing up.
     response.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
     raw = await _get_models()
+    # The WordPress catalog is intentionally anonymous. Do not advertise
+    # private federated Ollama compute that requires a signed-in client.
+    from ..services.ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+    raw = [
+        m for m in raw
+        if str(m.get("id") or "").removeprefix("ollama/")
+        not in LOCAL_OLLAMA_PLACEMENT
+    ]
     # Public UI is fail-closed: unknown or unhealthy models are not advertised.
     raw = [m for m in raw if str(m.get("availability", "unknown")).lower() == "ok"]
     items = [_categorize(m) for m in raw]
@@ -1035,6 +1043,14 @@ async def models(response: Response) -> Dict[str, Any]:
 
 async def _require_verified_unbilled_model(model_id: str, capability: str = "chat") -> None:
     """WP server authentication is not end-user billing consent."""
+    # WordPress knows only its own server key, not a verified TriForce end-user
+    # identity. Prevent it from spending private CPU/GPU worker capacity.
+    from ..services.ollama_node_router import LOCAL_OLLAMA_PLACEMENT
+    if model_id.removeprefix("ollama/") in LOCAL_OLLAMA_PLACEMENT:
+        raise HTTPException(
+            status_code=403,
+            detail="Private Ollama worker requires authenticated TriForce client access",
+        )
     from ..services.model_registry import registry
     from ..services.model_availability import availability_service
     catalog = await registry.list_models()
