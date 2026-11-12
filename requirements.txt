@@ -23,7 +23,7 @@ pydantic-settings>=2.15.0,<3
 
 # HTTP Clients & Async
 httpx[http2]==0.28.1
-aiohttp==3.14.3
+aiohttp==3.14.4
 aiofiles==25.1.0
 requests>=2.32,<3
 
