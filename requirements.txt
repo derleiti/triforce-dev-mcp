@@ -40,7 +40,7 @@ mistralai==3.0.0
 # Data Processing & Validation
 python-multipart==0.0.32   # FastAPI Form()/UploadFile
 email-validator==2.3.0     # pydantic EmailStr
-Pillow==12.3.0
+Pillow==13.0.0
 PyYAML>=6.0.3,<7
 orjson>=3.12.0
 
@@ -73,7 +73,7 @@ fakeredis>=2.37.1
 
 # Code Quality
 ruff==0.16.7
-black==26.5.1
+black==26.10.1
 mypy==2.3.1
 # Antigravity SDK runs only in the isolated worker venv from requirements-antigravity.txt.
 crawlee>=1.9.2
