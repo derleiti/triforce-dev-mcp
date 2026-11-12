@@ -1,0 +1,46 @@
+name: Node Integration Checks
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/ailinux-discord-voice-mcp/**'
+      - 'workspace_browser/**'
+      - '.github/workflows/node-integrations.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'integrations/ailinux-discord-voice-mcp/**'
+      - 'workspace_browser/**'
+      - '.github/workflows/node-integrations.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - integrations/ailinux-discord-voice-mcp
+          - workspace_browser
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run integration tests
+        run: |
+          if [ "${{ matrix.project }}" = "workspace_browser" ]; then
+            npm run check
+          else
+            npm test
+          fi
