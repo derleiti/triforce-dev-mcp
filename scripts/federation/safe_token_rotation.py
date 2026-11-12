@@ -29,6 +29,8 @@ VAULT = REPO / ".vault/federation_tokens.json"
 VAULT_LOCK = REPO / ".vault/.federation_tokens.lock"
 ROTATE_LOCK = REPO / ".vault/.safe_federation_rotation.lock"
 ENV_PATH = "/home/zombie/workspace/triforce-dev-mcp/config/triforce.env"
+NODE_ENV_PATHS = {"zombie-pc": ENV_PATH, "backup": "/home/zombie/triforce-dev-mcp/config/triforce.env"}
+NODE_PYTHON_PATHS = {"zombie-pc": "/home/zombie/workspace/triforce-dev-mcp/.venv/bin/python", "backup": "/home/zombie/triforce-dev-mcp/.venv/bin/python"}
 HUB_HEALTH = "http://10.10.0.1:9100/health"
 NODES = {"zombie-pc": ("10.10.0.2", "http://10.10.0.2:9100/health"),
          "backup": ("10.10.0.3", "http://10.10.0.3:9100/health")}
@@ -198,7 +200,7 @@ def ssh_run(node: str, command: str, stdin: str = "", timeout: int = 25) -> subp
 
 
 def remote(node: str, request: dict) -> dict:
-    command = "sudo -n python3 -I -c " + shlex.quote(REMOTE_HELPER)
+    command = "sudo -n python3 -I -c " + shlex.quote(REMOTE_HELPER.replace(ENV_PATH, NODE_ENV_PATHS[node]))
     try:
         response = ssh_run(node, command, json.dumps(request), timeout=26)
         if response.returncode != 0:
@@ -451,8 +453,8 @@ print("HANDSHAKE_OK")
 def verify_federation(node: str, config: dict) -> None:
     # The PC test uses the node's own new token, without putting it in argv.
     p = ssh_run(node,
-        "TRIFORCE_PROBE_CONFIG=" + shlex.quote(ENV_PATH) + " " +
-        shlex.quote("/home/zombie/workspace/triforce-dev-mcp/.venv/bin/python") +
+        "TRIFORCE_PROBE_CONFIG=" + shlex.quote(NODE_ENV_PATHS[node]) + " " +
+        shlex.quote(NODE_PYTHON_PATHS[node]) +
         " -I -c " + shlex.quote(PROBE) + " " + shlex.quote(node) +
         " " + shlex.quote("ws://10.10.0.1:9100/v1/federation/ws") +
         " " + shlex.quote("hetzner"),
