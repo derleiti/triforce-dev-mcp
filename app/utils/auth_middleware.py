@@ -82,6 +82,8 @@ PUBLIC_EXACT_PATHS = {
     "/v1/search/widget/weather",
     "/v1/search/widget/crypto",
     "/v1/search/widget/geo",
+    "/v1/pocket/huggingface/search",
+    "/v1/pocket/huggingface/recommended",
 }
 
 # Routes below do not use an account JWT. They authenticate inside the route

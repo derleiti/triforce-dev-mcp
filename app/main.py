@@ -99,6 +99,7 @@ from .routes.project_memory import router as project_memory_router
 from .routes.project_observations import router as project_observations_router
 from .routes.user_api import webhook_router as user_webhook_router
 from .routes.client_update import router as client_update_router
+from .routes.pocket_huggingface import router as pocket_huggingface_router
 from .routes.client_logs import router as client_logs_router
 from .routes.client_ocr import router as client_ocr_router
 from .routes.federation import router as federation_router
@@ -511,6 +512,7 @@ def create_app() -> FastAPI:
     app.include_router(project_observations_router, prefix="/v1", tags=["Project Memory"])
     app.include_router(user_webhook_router, prefix="/v1", tags=["User Webhooks"])
     app.include_router(client_update_router, prefix="/v1", tags=["Client Update"])
+    app.include_router(pocket_huggingface_router, prefix="/v1", tags=["Pocket AI"])
     app.include_router(client_logs_router, tags=["Client Logs"])
     app.include_router(client_ocr_router, prefix="/v1", tags=["Client OCR"])
     app.include_router(federation_router, prefix="/v1", tags=["Federation"])
