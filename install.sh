@@ -20,7 +20,6 @@ TRIFORCE_ENV_TEMPLATE="$ROOT_DIR/config/triforce.env.template"
 TRIFORCE_ENV_FILE="$ROOT_DIR/config/triforce.env"
 SYSTEMD_TEMPLATE="$ROOT_DIR/scripts/systemd/triforce.service"
 SYSTEMD_DOCKER_TEMPLATE="$ROOT_DIR/scripts/systemd/triforce-docker.service"
-FEDERATION_TEMPLATE="$ROOT_DIR/systemd/federation-node.service"
 FIRST_STARTUP_MARKER="$ROOT_DIR/.state/first-startup.done"
 
 API_HOST="127.0.0.1"
@@ -36,6 +35,12 @@ INSTALL_SHORTCUT="true"
 SKIP_DEPS="false"
 NON_INTERACTIVE="false"
 FIRST_STARTUP="false"
+HOST_EXPLICIT="false"
+PORT_EXPLICIT="false"
+DOMAIN_EXPLICIT="false"
+TIMEZONE_EXPLICIT="false"
+LOG_LEVEL_EXPLICIT="false"
+HEALTH_TIMEOUT=45
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -62,13 +67,15 @@ Options:
   --timezone <tz>                Timezone (default: Europe/Berlin)
   --log-level <level>            LOG_LEVEL in .env (default: INFO)
   --enable-docker-service        Install/enable triforce-docker.service
-  --enable-federation-service    Install legacy federation-node.service (DEPRECATED, kaputt)
+  --enable-federation-service    Unsupported legacy flag (fails safely)
   --skip-systemd                 Do not install/start systemd services
-  --skip-deps                    Skip pip upgrade + requirements install
+  --skip-deps                    Skip pip upgrade + requirements install (requires existing venv for start)
   --no-shortcut                  Do not create desktop shortcut
   --no-start                     Install units but do not start/enable
   --first-startup                Mark and run first-startup initialization
   --non-interactive              No prompts
+  --health-timeout <seconds>     Maximum time to wait for healthy backend (default: 45)
+  --update                       Rerun after git pull (preserves existing config)
   -h, --help                     Show this help
 USAGE
 }
@@ -90,7 +97,24 @@ upsert_env_key() {
     { print }
     END { if (!done) print k "=" v }
   ' "$file" > "$tmp"
+  chmod --reference="$file" "$tmp"
   mv "$tmp" "$file"
+}
+
+# Existing installations retain all values unless a flag explicitly changes them.
+ensure_env_key() {
+  local file="$1" key="$2" value="$3"
+  if ! grep -q "^${key}=" "$file"; then
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+secure_config() {
+  local file="$1"
+  [[ -f "$file" && ! -L "$file" ]] || { err "Invalid config: $file"; return 1; }
+  run_sudo chown "$RUN_USER:$RUN_USER" "$file"
+  run_sudo chmod 600 "$file"
+  [[ -r "$file" ]] || { err "Config not readable by installer user: $file"; return 1; }
 }
 
 run_sudo() {
@@ -105,15 +129,20 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --host)
-        API_HOST="$2"; shift 2 ;;
+        [[ $# -ge 2 ]] || { err "Missing --host value"; exit 2; }
+        API_HOST="$2"; shift 2 ; HOST_EXPLICIT="true" ;;
       --port)
-        API_PORT="$2"; shift 2 ;;
+        [[ $# -ge 2 ]] || { err "Missing --port value"; exit 2; }
+        API_PORT="$2"; shift 2 ; PORT_EXPLICIT="true" ;;
       --domain)
-        DOMAIN="$2"; shift 2 ;;
+        [[ $# -ge 2 ]] || { err "Missing --domain value"; exit 2; }
+        DOMAIN="$2"; shift 2 ; DOMAIN_EXPLICIT="true" ;;
       --timezone)
-        TIMEZONE="$2"; shift 2 ;;
+        [[ $# -ge 2 ]] || { err "Missing --timezone value"; exit 2; }
+        TIMEZONE="$2"; shift 2 ; TIMEZONE_EXPLICIT="true" ;;
       --log-level)
-        LOG_LEVEL="$2"; shift 2 ;;
+        [[ $# -ge 2 ]] || { err "Missing --log-level value"; exit 2; }
+        LOG_LEVEL="$2"; shift 2 ; LOG_LEVEL_EXPLICIT="true" ;;
       --enable-docker-service)
         ENABLE_DOCKER_SERVICE="true"; shift ;;
       --enable-federation-service)
@@ -132,6 +161,11 @@ parse_args() {
         FIRST_STARTUP="true"; shift ;;
       --non-interactive)
         NON_INTERACTIVE="true"; shift ;;
+      --update)
+        NON_INTERACTIVE="true"; shift ;;
+      --health-timeout)
+        [[ $# -ge 2 ]] || { err "Missing --health-timeout value"; exit 2; }
+        HEALTH_TIMEOUT="$2"; shift 2 ;;
       -h|--help)
         usage; exit 0 ;;
       *)
@@ -156,38 +190,64 @@ print_header() {
 
 prepare_dirs() {
   mkdir -p "$ROOT_DIR/logs" "$ROOT_DIR/data" "$ROOT_DIR/.state"
+  run_sudo chown "$RUN_USER:$RUN_USER" "$ROOT_DIR/logs" "$ROOT_DIR/data" "$ROOT_DIR/.state"
   run_sudo mkdir -p /var/tristar/{prompts,logs,memory,agents}
-  run_sudo chown -R "$RUN_USER:$RUN_USER" /var/tristar
+  run_sudo chown "$RUN_USER:$RUN_USER" /var/tristar
+  run_sudo chown "$RUN_USER:$RUN_USER" "$ROOT_DIR/logs"
   ok "Directories prepared"
 }
 
 ensure_env_files() {
   require_file "$ENV_EXAMPLE_FILE"
   if [[ ! -f "$ENV_FILE" ]]; then
-    cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
+    install -m 600 "$ENV_EXAMPLE_FILE" "$ENV_FILE"
     ok "Created .env from .env.example"
   else
-    log ".env exists, updating core keys only"
+    log ".env exists: preserving existing configuration"
   fi
+  secure_config "$ENV_FILE"
 
-  upsert_env_key "$ENV_FILE" "TRIFORCE_BIND_HOST" "$API_HOST"
-  upsert_env_key "$ENV_FILE" "TRIFORCE_API_PORT" "$API_PORT"
-  upsert_env_key "$ENV_FILE" "LOG_LEVEL" "$LOG_LEVEL"
-  upsert_env_key "$ENV_FILE" "TRIFORCE_DOMAIN" "$DOMAIN"
-  upsert_env_key "$ENV_FILE" "TRIFORCE_TIMEZONE" "$TIMEZONE"
+  local key value explicit
+  for key in TRIFORCE_BIND_HOST TRIFORCE_API_PORT LOG_LEVEL TRIFORCE_DOMAIN TRIFORCE_TIMEZONE; do
+    case "$key" in
+      TRIFORCE_BIND_HOST) value="$API_HOST"; explicit="$HOST_EXPLICIT" ;;
+      TRIFORCE_API_PORT) value="$API_PORT"; explicit="$PORT_EXPLICIT" ;;
+      LOG_LEVEL) value="$LOG_LEVEL"; explicit="$LOG_LEVEL_EXPLICIT" ;;
+      TRIFORCE_DOMAIN) value="$DOMAIN"; explicit="$DOMAIN_EXPLICIT" ;;
+      TRIFORCE_TIMEZONE) value="$TIMEZONE"; explicit="$TIMEZONE_EXPLICIT" ;;
+    esac
+    if [[ "$explicit" == true ]]; then upsert_env_key "$ENV_FILE" "$key" "$value"
+    else ensure_env_key "$ENV_FILE" "$key" "$value"; fi
+  done
 
-  if [[ -f "$TRIFORCE_ENV_TEMPLATE" && ! -f "$TRIFORCE_ENV_FILE" ]]; then
-    cp "$TRIFORCE_ENV_TEMPLATE" "$TRIFORCE_ENV_FILE"
+  if [[ ! -f "$TRIFORCE_ENV_FILE" ]]; then
+    require_file "$TRIFORCE_ENV_TEMPLATE"
+    install -m 600 "$TRIFORCE_ENV_TEMPLATE" "$TRIFORCE_ENV_FILE"
     ok "Created config/triforce.env from template"
+  else
+    log "config/triforce.env exists: preserving Federation secrets and node settings"
   fi
-
-  if [[ -f "$TRIFORCE_ENV_FILE" ]]; then
-    upsert_env_key "$TRIFORCE_ENV_FILE" "DOMAIN" "$DOMAIN"
-    upsert_env_key "$TRIFORCE_ENV_FILE" "TZ" "$TIMEZONE"
-    upsert_env_key "$TRIFORCE_ENV_FILE" "INSTALL_DIR" "$ROOT_DIR"
+  secure_config "$TRIFORCE_ENV_FILE"
+  if [[ "$DOMAIN_EXPLICIT" == true ]]; then upsert_env_key "$TRIFORCE_ENV_FILE" DOMAIN "$DOMAIN"
+  else ensure_env_key "$TRIFORCE_ENV_FILE" DOMAIN "$DOMAIN"; fi
+  if [[ "$TIMEZONE_EXPLICIT" == true ]]; then upsert_env_key "$TRIFORCE_ENV_FILE" TZ "$TIMEZONE"
+  else ensure_env_key "$TRIFORCE_ENV_FILE" TZ "$TIMEZONE"; fi
+  ensure_env_key "$TRIFORCE_ENV_FILE" INSTALL_DIR "$ROOT_DIR"
+  if [[ "$HOST_EXPLICIT" == true ]]; then upsert_env_key "$TRIFORCE_ENV_FILE" SERVER_HOST "$API_HOST"; fi
+  if [[ "$PORT_EXPLICIT" == true ]]; then upsert_env_key "$TRIFORCE_ENV_FILE" SERVER_PORT "$API_PORT"; fi
+  secure_config "$ENV_FILE"
+  secure_config "$TRIFORCE_ENV_FILE"
+  # Health probes use effective values from the canonical config, not installer defaults.
+  if [[ "$HOST_EXPLICIT" != true ]]; then
+    API_HOST="$(sed -n 's/^SERVER_HOST=//p' "$TRIFORCE_ENV_FILE" | tail -n 1 | tr -d '\r\"' | tr -d "'" )"
+    API_HOST="${API_HOST:-127.0.0.1}"
   fi
-
-  ok "Environment files configured"
+  if [[ "$PORT_EXPLICIT" != true ]]; then
+    API_PORT="$(sed -n 's/^SERVER_PORT=//p' "$TRIFORCE_ENV_FILE" | tail -n 1 | tr -d '\r\"' | tr -d "'" )"
+    API_PORT="${API_PORT:-9100}"
+  fi
+  [[ "$API_PORT" =~ ^[0-9]+$ ]] && (( API_PORT >= 1 && API_PORT <= 65535 )) || { err "Invalid configured SERVER_PORT"; return 1; }
+  ok "Environment files configured without resetting existing secrets"
 }
 
 install_python_deps() {
@@ -218,7 +278,9 @@ render_unit() {
 
   sed -e "s|User=zombie|User=${RUN_USER}|g" \
       -e "s|Group=zombie|Group=${RUN_USER}|g" \
+      -e "s|-o zombie -g zombie|-o ${RUN_USER} -g ${RUN_USER}|g" \
       -e "s|/home/zombie/triforce|${ROOT_DIR}|g" \
+      -e "s|/home/zombie/workspace/triforce|${ROOT_DIR}|g" \
       "$template" > "$out"
 }
 
@@ -230,7 +292,7 @@ install_systemd_units() {
 
   require_file "$SYSTEMD_TEMPLATE"
 
-  local tmp_triforce tmp_docker="" tmp_federation=""
+  local tmp_triforce tmp_docker=""
   tmp_triforce="$(mktemp)"
   render_unit "$SYSTEMD_TEMPLATE" "$tmp_triforce"
 
@@ -240,39 +302,58 @@ install_systemd_units() {
     render_unit "$SYSTEMD_DOCKER_TEMPLATE" "$tmp_docker"
   fi
 
-  if [[ "$ENABLE_FEDERATION_SERVICE" == "true" ]]; then
-    require_file "$FEDERATION_TEMPLATE"
-    tmp_federation="$(mktemp)"
-    render_unit "$FEDERATION_TEMPLATE" "$tmp_federation"
-  fi
+
 
   run_sudo install -m 644 "$tmp_triforce" /etc/systemd/system/triforce.service
   if [[ "$ENABLE_DOCKER_SERVICE" == "true" ]]; then
     run_sudo install -m 644 "$tmp_docker" /etc/systemd/system/triforce-docker.service
   fi
-  if [[ "$ENABLE_FEDERATION_SERVICE" == "true" ]]; then
-    run_sudo install -m 644 "$tmp_federation" /etc/systemd/system/federation-node.service
-  fi
 
   run_sudo systemctl daemon-reload
+  run_sudo systemd-analyze verify /etc/systemd/system/triforce.service || { err "Generated unit failed verification"; return 1; }
 
   if [[ "$START_SYSTEMD" == "true" ]]; then
-    run_sudo systemctl enable --now triforce.service
+    # Existing drop-ins may contain stale WorkingDirectory/ExecStart values.
+    local effective_dir effective_exec
+    effective_dir="$(systemctl show triforce.service -p WorkingDirectory --value)"
+    effective_exec="$(systemctl show triforce.service -p ExecStart --value)"
+    if [[ "$effective_dir" != "$ROOT_DIR" ]]; then
+      err "Systemd drop-in overrides WorkingDirectory: $effective_dir (expected $ROOT_DIR)"
+      err "Inspect: systemctl cat triforce.service; no unsafe override will be removed automatically"
+      return 1
+    fi
+    if [[ "$effective_exec" != *"${ROOT_DIR}/scripts/start-triforce.sh"* ]]; then
+      err "Systemd ExecStart points to a different backend: $effective_exec"
+      return 1
+    fi
+    run_sudo systemctl reset-failed triforce.service
+    run_sudo systemctl enable triforce.service
+    run_sudo systemctl restart triforce.service
+    local i code probe_host="$API_HOST"
+    [[ "$probe_host" == "0.0.0.0" || "$probe_host" == "::" ]] && probe_host="127.0.0.1"
+    for ((i=0; i<HEALTH_TIMEOUT; i++)); do
+      if ! systemctl is-active --quiet triforce.service; then
+        sleep 1; continue
+      fi
+      code="$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://${probe_host}:${API_PORT}/health" 2>/dev/null || true)"
+      if [[ "$code" == 200 ]]; then ok "Backend healthcheck HTTP 200"; break; fi
+      sleep 1
+    done
+    if [[ "${code:-}" != 200 ]]; then
+      err "Backend did not become healthy; check journalctl -u triforce -n 80"
+      return 1
+    fi
 
     if [[ "$ENABLE_DOCKER_SERVICE" == "true" ]]; then
       run_sudo systemctl enable --now triforce-docker.service
     fi
 
-    if [[ "$ENABLE_FEDERATION_SERVICE" == "true" ]]; then
-      run_sudo systemctl enable --now federation-node.service
-    fi
   else
     log "Systemd units installed but not enabled or started (--no-start)"
   fi
 
   rm -f "$tmp_triforce"
   [[ -z "$tmp_docker" ]] || rm -f "$tmp_docker"
-  [[ -z "$tmp_federation" ]] || rm -f "$tmp_federation"
   ok "Systemd units installed"
 }
 
@@ -305,7 +386,7 @@ DESKTOP
     chmod +x "$desktop_dir/TriForce Web UI.desktop"
   fi
 
-  run_sudo chown -R "$RUN_USER:$RUN_USER" "$apps_dir" "$desktop_dir" 2>/dev/null || true
+  run_sudo chown "$RUN_USER:$RUN_USER" "$apps_dir" 2>/dev/null || true
   ok "Desktop shortcut installed (${web_url})"
 }
 
@@ -334,6 +415,13 @@ print_next_steps() {
 
 main() {
   parse_args "$@"
+  [[ "$API_PORT" =~ ^[0-9]+$ ]] && (( API_PORT >= 1 && API_PORT <= 65535 )) || { err "Invalid --port"; exit 2; }
+  [[ "$HEALTH_TIMEOUT" =~ ^[0-9]+$ ]] && (( HEALTH_TIMEOUT >= 1 && HEALTH_TIMEOUT <= 600 )) || { err "Invalid --health-timeout"; exit 2; }
+  [[ "$RUN_USER" != root ]] || { err "Run as a normal user (sudo is used only for system changes)"; exit 2; }
+  [[ "$ENABLE_FEDERATION_SERVICE" != true ]] || { err "Legacy federation service unsupported; use triforce.service"; exit 2; }
+  if [[ "$SKIP_DEPS" == true && ! -x "$VENV_DIR/bin/python" && "$START_SYSTEMD" == true ]]; then
+    err "--skip-deps requires an existing .venv/bin/python when starting TriForce"; exit 2
+  fi
   print_header
 
   if [[ "$NON_INTERACTIVE" != "true" && -t 0 && -t 1 ]]; then
@@ -355,4 +443,4 @@ main() {
   print_next_steps
 }
 
-main "$@"
+[[ "${TRIFORCE_INSTALL_LIB_ONLY:-0}" == 1 ]] || main "$@"
