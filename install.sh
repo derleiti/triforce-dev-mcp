@@ -304,6 +304,13 @@ install_systemd_units() {
 
 
 
+  # Preserve the currently deployed unit before replacing it on updates.
+  if [[ -f /etc/systemd/system/triforce.service ]]; then
+    local unit_backup
+    unit_backup="/etc/systemd/system/triforce.service.pre-install-$(date +%Y%m%d%H%M%S)"
+    run_sudo cp -p /etc/systemd/system/triforce.service "$unit_backup"
+    log "Previous systemd unit backed up: $unit_backup"
+  fi
   run_sudo install -m 644 "$tmp_triforce" /etc/systemd/system/triforce.service
   if [[ "$ENABLE_DOCKER_SERVICE" == "true" ]]; then
     run_sudo install -m 644 "$tmp_docker" /etc/systemd/system/triforce-docker.service
