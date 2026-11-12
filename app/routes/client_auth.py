@@ -490,26 +490,42 @@ def load_users_from_file() -> dict:
 
 
 def save_user_to_file(email: str, user_data: dict) -> bool:
-    """Speichere neuen User in users.json"""
+    """Persist client profile changes atomically to avoid truncated license data."""
+    import tempfile
+
+    temp_path = None
     try:
-        # Lade existierende User
         users = {}
         if USERS_FILE_PATH.exists():
-            with open(USERS_FILE_PATH, 'r') as f:
+            with USERS_FILE_PATH.open("r", encoding="utf-8") as f:
                 users = json.load(f)
-        
-        # Füge neuen User hinzu
+            if not isinstance(users, dict):
+                raise ValueError("users registry must be a JSON object")
+
         users[email.lower()] = user_data
-        
-        # Speichere zurück
         USERS_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(USERS_FILE_PATH, 'w') as f:
-            json.dump(users, f, indent=2)
-        
-        logger.info(f"Saved user {email} to {USERS_FILE_PATH}")
+
+        fd, temp_name = tempfile.mkstemp(
+            prefix=".users.", suffix=".tmp", dir=str(USERS_FILE_PATH.parent)
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(users, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(temp_path, 0o600)
+            os.replace(temp_path, USERS_FILE_PATH)
+            temp_path = None
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+        logger.info("Saved user %s to %s", email, USERS_FILE_PATH)
         return True
-    except Exception as e:
-        logger.error(f"Failed to save user {email}: {e}")
+    except Exception as exc:
+        logger.error("Failed to save user %s: %s", email, exc)
         return False
 
 
