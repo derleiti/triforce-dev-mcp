@@ -28,7 +28,7 @@ CONFIG = REPO / "config/triforce.env"
 VAULT = REPO / ".vault/federation_tokens.json"
 VAULT_LOCK = REPO / ".vault/.federation_tokens.lock"
 ROTATE_LOCK = REPO / ".vault/.safe_federation_rotation.lock"
-ENV_PATH = "/home/zombie/workspace/triforce/config/triforce.env"
+ENV_PATH = "/home/zombie/workspace/triforce-dev-mcp/config/triforce.env"
 HUB_HEALTH = "http://10.10.0.1:9100/health"
 NODES = {"zombie-pc": ("10.10.0.2", "http://10.10.0.2:9100/health"),
          "backup": ("10.10.0.3", "http://10.10.0.3:9100/health")}
@@ -86,7 +86,7 @@ def patch_env(content: str, replacements: dict[str, str]) -> str:
 
 REMOTE_HELPER = r'''
 import hashlib,json,os,pathlib,sys,tempfile
-path=pathlib.Path("/home/zombie/workspace/triforce/config/triforce.env")
+path=pathlib.Path("/home/zombie/workspace/triforce-dev-mcp/config/triforce.env")
 def digest(v): return hashlib.sha256(v.encode()).hexdigest()
 def require(condition,message):
     if not condition: raise RuntimeError(message)
@@ -198,7 +198,7 @@ def ssh_run(node: str, command: str, stdin: str = "", timeout: int = 25) -> subp
 
 
 def remote(node: str, request: dict) -> dict:
-    command = "python3 -I -c " + shlex.quote(REMOTE_HELPER)
+    command = "sudo -n python3 -I -c " + shlex.quote(REMOTE_HELPER)
     try:
         response = ssh_run(node, command, json.dumps(request), timeout=26)
         if response.returncode != 0:
@@ -420,10 +420,10 @@ def rotate(node: str, config: dict, vault: dict) -> None:
 
 
 PROBE = r'''
-import hashlib,hmac,json,pathlib,sys,time
+import hashlib,hmac,json,os,pathlib,sys,time
 from websockets.sync.client import connect
 cfg={}
-p=pathlib.Path("/home/zombie/workspace/triforce/config/triforce.env")
+p=pathlib.Path(os.environ.get("TRIFORCE_PROBE_CONFIG", "/home/zombie/workspace/triforce/config/triforce.env"))
 for line in p.read_text().splitlines():
     if "=" in line and not line.lstrip().startswith("#"):
         k,v=line.split("=",1);cfg[k.strip()]=v.strip().strip("\"'")
@@ -451,7 +451,8 @@ print("HANDSHAKE_OK")
 def verify_federation(node: str, config: dict) -> None:
     # The PC test uses the node's own new token, without putting it in argv.
     p = ssh_run(node,
-        shlex.quote("/home/zombie/workspace/triforce/.venv/bin/python") +
+        "TRIFORCE_PROBE_CONFIG=" + shlex.quote(ENV_PATH) + " " +
+        shlex.quote("/home/zombie/workspace/triforce-dev-mcp/.venv/bin/python") +
         " -I -c " + shlex.quote(PROBE) + " " + shlex.quote(node) +
         " " + shlex.quote("ws://10.10.0.1:9100/v1/federation/ws") +
         " " + shlex.quote("hetzner"),

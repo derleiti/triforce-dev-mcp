@@ -399,6 +399,66 @@ cleanup_ailinux_stable_alias(){
   done
 }
 
+
+# apt-mirror updates uncompressed Packages before it invokes postmirror.
+# Never sign Release metadata while an old Packages.xz or Packages.gz remains.
+# Repair only stale compressed indexes; keep already consistent files unchanged.
+reconcile_compressed_indexes(){
+  local plain ext compressed staged fixed=0 checked=0
+  [[ -d "$MIRROR_ROOT" ]] || { log "ERROR: missing MIRROR_ROOT for compression validation"; return 1; }
+
+  while IFS= read -r -d '' plain; do
+    for ext in gz xz; do
+      compressed="$plain.$ext"
+      [[ -f "$compressed" ]] || continue
+      ((checked += 1))
+
+      if [[ "$ext" == gz ]]; then
+        if (set -o pipefail; gzip -cd -- "$compressed" | cmp -s - "$plain"); then
+          continue
+        fi
+      else
+        if (set -o pipefail; xz -dc -- "$compressed" | cmp -s - "$plain"); then
+          continue
+        fi
+      fi
+
+      staged="$(mktemp "$compressed.repair.XXXXXX")" || return 1
+      if [[ "$ext" == gz ]]; then
+        if ! gzip -n -9 -c -- "$plain" > "$staged"; then
+          rm -f "$staged"
+          log "ERROR: failed to regenerate $compressed"
+          return 1
+        fi
+        if ! (set -o pipefail; gzip -cd -- "$staged" | cmp -s - "$plain"); then
+          rm -f "$staged"
+          log "ERROR: verification failed for $compressed"
+          return 1
+        fi
+      else
+        if ! xz -9 -c -- "$plain" > "$staged"; then
+          rm -f "$staged"
+          log "ERROR: failed to regenerate $compressed"
+          return 1
+        fi
+        if ! (set -o pipefail; xz -dc -- "$staged" | cmp -s - "$plain"); then
+          rm -f "$staged"
+          log "ERROR: verification failed for $compressed"
+          return 1
+        fi
+      fi
+
+      chmod 0644 "$staged"
+      mv -f -- "$staged" "$compressed"
+      log "Rebuilt stale index: $compressed"
+      ((fixed += 1))
+    done
+  done < <(find "$MIRROR_ROOT" -type f \( -name Packages -o -name Sources \) -print0)
+
+  log "Compression validation complete: $checked checked, $fixed rebuilt."
+  return 0
+}
+
 main(){
   if [[ -e "$LOCKFILE" ]]; then log "FEHLER: Lock existiert: $LOCKFILE"; exit 1; fi
   mkdir -p "$(dirname "$LOGFILE")"
@@ -410,7 +470,11 @@ main(){
   ensure_neon_pins
   cleanup_ailinux_stable_alias
 
-  # CRITICAL: Sign repositories FIRST, before slow DEP-11 validation
+  # Mandatory before signing: never advertise new plain Packages alongside
+  # old .xz/.gz files, even when apt-mirror is run directly outside update-mirror.
+  reconcile_compressed_indexes
+
+  # Sign only after compressed indexes match, before slow DEP-11 validation.
   # This ensures mirrors get signed even if DEP-11 validation is slow/stuck
   [[ -x "$SIGN_REPOS_SCRIPT" ]] || { [[ -x "$ALT_SIGN_REPOS_SCRIPT" ]] && SIGN_REPOS_SCRIPT="$ALT_SIGN_REPOS_SCRIPT"; }
   [[ -x "$SIGN_REPOS_SCRIPT" ]] || { log "FEHLER: sign-repos.sh nicht gefunden/ausführbar."; exit 1; }
