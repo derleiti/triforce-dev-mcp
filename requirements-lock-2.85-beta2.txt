@@ -88,7 +88,7 @@ proto-plus==1.29.0
 psutil==2.2.0
 pyasn1==0.6.4
 pyasn1_modules==0.4.2
-pycparser==3.0
+pycparser==3.12
 pydantic==2.13.5
 pydantic_core==2.49.0
 pydantic-settings==2.15.0
