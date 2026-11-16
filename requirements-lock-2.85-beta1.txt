@@ -59,7 +59,7 @@ jsonlines==4.0.0
 jsonpath-python==1.1.6
 librt==0.16.0
 linkify-it-py==2.2.0
-markdown-it-py==4.2.0
+markdown-it-py==4.3.0
 mdit-py-plugins==0.6.1
 mdurl==0.1.2
 mistralai==3.0.0
