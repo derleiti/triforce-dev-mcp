@@ -372,6 +372,16 @@ step_download() {
     return 0
 }
 
+step_validate_mirror_payloads() {
+    log "Validating APT Packages -> .deb files (size and SHA256)..."
+    if python3 -B "$REPO_ROOT/validate-mirror-packages.py" --mirror-root "$MIRROR_ROOT" 2>&1 | tee -a "$LOGFILE"; then
+        log_ok "All indexed package payloads verified"
+        return 0
+    fi
+    log_err "Missing or corrupt mirrored packages; refusing further signing/publication"
+    return 1
+}
+
 step_postmirror() {
     if [[ $SKIP_DEP11 -eq 1 ]]; then
         log "Skipping postmirror/DEP-11 (--skip-dep11)"
@@ -380,12 +390,12 @@ step_postmirror() {
 
     log "Running postmirror cleanup and validation..."
 
-    dc --profile mirror run --rm "$SERVICE" bash -lc \
-        "export REPO_PATH='/var/spool/apt-mirror'; /var/spool/apt-mirror/var/postmirror.sh" 2>&1 | tee -a "$LOGFILE" || {
-        log_warn "Postmirror had some issues (non-fatal)"
-    }
-
-    return 0
+    if dc --profile mirror run --rm "$SERVICE" bash -lc \
+        "export REPO_PATH='/var/spool/apt-mirror'; /var/spool/apt-mirror/var/postmirror.sh" 2>&1 | tee -a "$LOGFILE"; then
+        return 0
+    fi
+    log_err "Postmirror validation or signing failed"
+    return 1
 }
 
 step_permissions() {
@@ -995,8 +1005,12 @@ main() {
         run_step 6 "Generate Packages" step_generate_packages || failed=1
     fi
 
+    if [[ $failed -eq 0 && $SIGN_ONLY -eq 0 ]]; then
+        run_step 7 "Validate All Mirror Payloads" step_validate_mirror_payloads || failed=1
+    fi
+
     if [[ $failed -eq 0 ]]; then
-        run_step 7 "GPG Signing" step_signing || failed=1
+        run_step 8 "GPG Signing" step_signing || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then

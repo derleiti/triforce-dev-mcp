@@ -474,6 +474,18 @@ main(){
   # old .xz/.gz files, even when apt-mirror is run directly outside update-mirror.
   reconcile_compressed_indexes
 
+  # Refuse to sign references to missing or corrupt payloads.
+  # This also protects apt-mirror invocations outside update-mirror.sh.
+  if [[ ! -f /var/spool/apt-mirror/var/validate-mirror-packages.py ]]; then
+    log "FEHLER: Mirror payload validator missing; refusing signing."
+    return 1
+  fi
+  python3 -B /var/spool/apt-mirror/var/validate-mirror-packages.py \
+    --mirror-root "$MIRROR_ROOT" || {
+      log "FEHLER: Mirror payload validation failed; refusing signing."
+      return 1
+    }
+
   # Sign only after compressed indexes match, before slow DEP-11 validation.
   # This ensures mirrors get signed even if DEP-11 validation is slow/stuck
   [[ -x "$SIGN_REPOS_SCRIPT" ]] || { [[ -x "$ALT_SIGN_REPOS_SCRIPT" ]] && SIGN_REPOS_SCRIPT="$ALT_SIGN_REPOS_SCRIPT"; }

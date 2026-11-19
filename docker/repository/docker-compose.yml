@@ -61,6 +61,7 @@ services:
       - ./mirror-wgetrc:/etc/apt-mirror-wgetrc:ro
       # Scripts for post-mirror processing
       - ./postmirror.sh:/var/spool/apt-mirror/var/postmirror.sh:ro
+      - ./validate-mirror-packages.py:/var/spool/apt-mirror/var/validate-mirror-packages.py:ro
       - ./sign-repos.sh:/var/spool/apt-mirror/var/sign-repos.sh:ro
       # Shared signing key id (single source of truth for the scripts above)
       - ./signing-key.env:/var/spool/apt-mirror/var/signing-key.env:ro
