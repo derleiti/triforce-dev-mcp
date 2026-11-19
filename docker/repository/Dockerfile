@@ -5,6 +5,7 @@ RUN dpkg --add-architecture i386 && \
     apt-get update && apt-get install -y --no-install-recommends \
         apt-mirror \
         cron \
+        python3 \
         wget \
         curl \
         gnupg \
