@@ -22,7 +22,7 @@ def validate(root, repository=None, max_errors=30):
             def check():
                 nonlocal checked, missing, corrupt, unsafe
                 fn = fields.get("Filename")
-                if not fn or not fn.endswith((".deb", ".udeb")):
+                if not fn or not fn.endswith((".deb", ".udeb", ".ddeb")):
                     return
                 relative = Path(fn)
                 if relative.is_absolute() or ".." in relative.parts:
@@ -37,6 +37,10 @@ def validate(root, repository=None, max_errors=30):
                     return
                 file = repo_root / relative
                 checked += 1
+                if file.is_symlink():
+                    unsafe += 1
+                    print(f"UNSAFE_SYMLINK {file}", file=sys.stderr)
+                    return
                 if not file.is_file():
                     missing += 1
                     if missing + corrupt + unsafe <= max_errors:

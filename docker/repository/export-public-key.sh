@@ -12,7 +12,8 @@ REPO_ROOT="${REPO_ROOT:-$SCRIPT_DIR}"
 # Keep the fallback in sync with signing-key.env (see that file for details).
 [[ -r "${REPO_ROOT}/signing-key.env" ]] && . "${REPO_ROOT}/signing-key.env"
 SIGNING_KEY_ID="${SIGNING_KEY_ID:-59FAE19560F5E25B}"
-OUTPUT_FILE="${OUTPUT_FILE:-${REPO_ROOT}/repo/mirror/ailinux-archive-key.gpg}"
+MIRROR_OUTPUT_ROOT="${MIRROR_OUTPUT_ROOT:-${REPO_ROOT}/repo/mirror}"
+OUTPUT_FILE="${OUTPUT_FILE:-${MIRROR_OUTPUT_ROOT}/ailinux-archive-key.gpg}"
 
 # Use repository's GNUPGHOME if available, otherwise fall back to default
 DEFAULT_GNUPGHOME="${REPO_ROOT}/etc/gnupg"
@@ -57,14 +58,14 @@ mkdir -p "$(dirname "$OUTPUT_FILE")"
 PUBLISHED_KEYS=(
   "$OUTPUT_FILE"
   # name clients install as (KEYRING_PATH in add-ailinux-repo.sh)
-  "${REPO_ROOT}/repo/mirror/ailinux-archive-keyring.gpg"
+  "${MIRROR_OUTPUT_ROOT}/ailinux-archive-keyring.gpg"
   # compatibility aliases for older install instructions
-  "${REPO_ROOT}/repo/mirror/ailinux-mirror-signing-key.gpg"
+  "${MIRROR_OUTPUT_ROOT}/ailinux-mirror-signing-key.gpg"
   # direct root downloads
   "${REPO_ROOT}/repo/ailinux-archive-key.gpg"
   "${REPO_ROOT}/repo/ailinux-mirror-signing-key.gpg"
   # copy served from inside the mirrored AILinux tree
-  "${REPO_ROOT}/repo/mirror/repo.ailinux.me/ailinux-archive-key.gpg"
+  "${MIRROR_OUTPUT_ROOT}/repo.ailinux.me/ailinux-archive-key.gpg"
 )
 
 for dest in "${PUBLISHED_KEYS[@]}"; do

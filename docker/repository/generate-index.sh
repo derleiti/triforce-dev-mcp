@@ -18,7 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 HOST_REPO_PATH="${HOST_REPO_PATH:-$SCRIPT_DIR/repo}"
-HOST_MIRROR_PATH="$HOST_REPO_PATH/mirror"
+HOST_MIRROR_PATH="${HOST_MIRROR_PATH:-$HOST_REPO_PATH/mirror}"
 INDEX_FILE_ON_MIRROR="$HOST_MIRROR_PATH/index.html"
 LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/log}"
 UPDATE_LOGFILE="${UPDATE_LOGFILE:-$LOG_DIR/update-mirror.log}"

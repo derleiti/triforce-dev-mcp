@@ -64,6 +64,12 @@ fi
 
 # Mirror paths - auto-detected from ./repo/mirror
 MIRROR_ROOT="${REPO_ROOT}/repo/mirror"
+LIVE_MIRROR_ROOT="$MIRROR_ROOT"
+ATOMIC_GENERATOR="${REPO_ROOT}/mirror-generations.py"
+ATOMIC_STAGE_ACTIVE=0
+ATOMIC_TXN_DIR=""
+ATOMIC_PENDING_GENERATION=""
+
 GNUPG_HOME="${REPO_ROOT}/etc/gnupg"
 
 # Signing key: shared signing-key.env if available, else built-in default.
@@ -269,6 +275,142 @@ run_step() {
         timer_end "$step_name"
         return $rc
     fi
+}
+
+# Staging uses overlayfs: all existing hundreds of GB remain read-only in the
+# lower generation; apt-mirror only writes changed files to the upper directory.
+# A verified generation is assembled using rsync --link-dest and made live with
+# one atomic symlink replacement. A failed run never changes the live target.
+atomic_cleanup() {
+    if [[ -n "${ATOMIC_TXN_DIR:-}" && -d "$ATOMIC_TXN_DIR" ]]; then
+        local merged="$ATOMIC_TXN_DIR/merged"
+        if mountpoint -q "$merged"; then
+            if ! umount "$merged"; then
+                log_err "Cannot unmount staging $merged; preserving it for recovery"
+                return 1
+            fi
+        fi
+        rm -rf -- "$ATOMIC_TXN_DIR"
+    fi
+    # A candidate that failed before the activation rename is unpublished.
+    # Clean it up so aborted downloads do not consume additional disk space.
+    if [[ -n "${ATOMIC_PENDING_GENERATION:-}" &&           "$ATOMIC_PENDING_GENERATION" == "$REPO_ROOT/repo/mirror-generations/.incoming-"* &&           -d "$ATOMIC_PENDING_GENERATION" && ! -L "$ATOMIC_PENDING_GENERATION" ]]; then
+        rm -rf -- "$ATOMIC_PENDING_GENERATION"
+    fi
+}
+
+step_prepare_atomic_mirror() {
+    if [[ "$EUID" -ne 0 ]]; then
+        log_err "Atomic mirror publication needs root (overlayfs mount). Use sudo."
+        return 1
+    fi
+    for cmd in mount umount mountpoint rsync python3 flock; do
+        check_cmd "$cmd" || return 1
+    done
+    local rel current gen_repo="${REPO_ROOT}/repo"
+    # First invocation: hardlink-snapshot the existing mirror and atomically
+    # exchange its directory name with a symlink. No 771-GB byte copy.
+    if ! python3 -B "$ATOMIC_GENERATOR" bootstrap --repo-dir "$gen_repo"; then
+        log_err "Atomic mirror bootstrap failed, live repository untouched"
+        return 1
+    fi
+    current="$(readlink -f "$LIVE_MIRROR_ROOT")"
+    [[ -d "$current" ]] || return 1
+    ATOMIC_TXN_DIR="$gen_repo/.mirror-transactions/txn-$(date +%Y%m%d-%H%M%S)-$$"
+    mkdir -p "$ATOMIC_TXN_DIR/upper" "$ATOMIC_TXN_DIR/work" "$ATOMIC_TXN_DIR/merged"
+    if ! mount -t overlay overlay -o "lowerdir=$current,upperdir=$ATOMIC_TXN_DIR/upper,workdir=$ATOMIC_TXN_DIR/work" "$ATOMIC_TXN_DIR/merged"; then
+        log_err "Cannot mount overlay staging; live mirror unchanged"
+        return 1
+    fi
+    MIRROR_ROOT="$ATOMIC_TXN_DIR/merged"
+    export MIRROR_ROOT REPO_MIRROR_OUTPUT_PATH="$MIRROR_ROOT"
+    ATOMIC_STAGE_ACTIVE=1
+    log_ok "Unpublished overlay staging: $MIRROR_ROOT"
+    log "Published generation remains: $current"
+}
+
+step_quarantine_truncated_packages() {
+    if [[ "$(findmnt -n -o FSTYPE -T "$MIRROR_ROOT")" != "overlay" ]]; then
+        log_err "Refusing repair outside an overlay staging mount"
+        return 1
+    fi
+    log "Removing wrong-size package placeholders ONLY from the COW stage..."
+    if python3 -B "$REPO_ROOT/prune-truncated-packages.py" \
+         --mirror-root "$MIRROR_ROOT" 2>&1 | tee -a "$LOGFILE"; then
+        return 0
+    fi
+    log_err "Staging preflight failed; published mirror remains untouched"
+    return 1
+}
+
+step_verify_signed_metadata() {
+    log "Verifying signed Release hashes and detached/inline GPG signatures..."
+    if python3 -B "$REPO_ROOT/validate-signed-metadata.py" \
+        --mirror-root "$MIRROR_ROOT" \
+        --keyring "$MIRROR_ROOT/ailinux-archive-key.gpg" 2>&1 | tee -a "$LOGFILE"; then
+        return 0
+    fi
+    log_err "Signed repository metadata does not match staged indexes"
+    return 1
+}
+
+step_publish_atomic_mirror() {
+    [[ "$ATOMIC_STAGE_ACTIVE" == 1 && -d "$ATOMIC_TXN_DIR/merged" ]] || return 1
+    local generations="$REPO_ROOT/repo/mirror-generations"
+    local old_root="$(readlink -f "$LIVE_MIRROR_ROOT")"
+    local old_generation next_name incoming next
+    old_generation="$(python3 -B "$ATOMIC_GENERATOR" current --repo-dir "$REPO_ROOT/repo")" || return 1
+    next_name="release-$(date +%Y%m%d-%H%M%S-%N)-$$"
+    incoming="$generations/.incoming-$next_name"
+    next="$generations/$next_name"
+    [[ ! -e "$incoming" && ! -e "$next" ]] || {
+        log_err "Generation name collision: $next"
+        return 1
+    }
+    mkdir -p "$incoming"
+    ATOMIC_PENDING_GENERATION="$incoming"
+    log "Assembling linked generation $next_name; unchanged files use hardlinks"
+    if ! rsync -a --checksum --numeric-ids --link-dest="$old_root" "$MIRROR_ROOT/" "$incoming/" 2>&1 | tee -a "$LOGFILE"; then
+        log_err "Failed to assemble candidate; leaving live generation unchanged"
+        return 1
+    fi
+    # Verify again after materialization: linked files may only be reused if
+    # their bytes are identical to their index checksums, not just their mtime.
+    log "Validating materialized generation before publish..."
+    if ! python3 -B "$REPO_ROOT/validate-mirror-packages.py" \
+         --mirror-root "$incoming" 2>&1 | tee -a "$LOGFILE"; then
+        log_err "Candidate integrity failed; live unchanged"
+        return 1
+    fi
+    if ! python3 -B "$REPO_ROOT/validate-signed-metadata.py" \
+         --mirror-root "$incoming" --keyring "$incoming/ailinux-archive-key.gpg" 2>&1 | tee -a "$LOGFILE"; then
+        log_err "Candidate signature verification failed; live unchanged"
+        return 1
+    fi
+    mv -T -- "$incoming" "$next" || return 1
+    ATOMIC_PENDING_GENERATION=""
+    log "Atomically publishing $next_name"
+    if ! python3 -B "$ATOMIC_GENERATOR" switch --repo-dir "$REPO_ROOT/repo" --generation "$next_name"; then
+        log_err "Atomic activation failed"
+        return 1
+    fi
+    MIRROR_ROOT="$LIVE_MIRROR_ROOT"
+    ATOMIC_STAGE_ACTIVE=0
+    export MIRROR_ROOT
+    # Public verification after activation. On failure, atomically revert the
+    # symlink; both generations stay available for investigation.
+    if step_verify_local_repo; then
+        log_ok "Public verification passed; active generation $next_name"
+        log "Rollback generation: $old_generation"
+        return 0
+    fi
+    log_err "Post-publication verification failed. Rolling back to $old_generation"
+    local prior_name="${old_generation##*/}"
+    if ! python3 -B "$ATOMIC_GENERATOR" switch \
+        --repo-dir "$REPO_ROOT/repo" --generation "$prior_name"; then
+        log_err "CRITICAL: automatic rollback failed; manual recovery required"
+    fi
+    return 1
 }
 
 # ==================== PIPELINE STEPS ====================
@@ -757,6 +899,11 @@ step_verify_local_repo() {
 
     log_ok "Local metadata contains all $checked package file(s)"
 
+    if [[ "${ATOMIC_STAGE_ACTIVE:-0}" -eq 1 ]]; then
+        log "Staged local metadata verified; public endpoint checked after activation"
+        return 0
+    fi
+
     if command -v curl >/dev/null 2>&1; then
         local_xz="$local_repo/dists/$suite/main/binary-amd64/Packages.xz"
         remote_url="$public_base/repo.ailinux.me/dists/$suite/main/binary-amd64/Packages.xz?verify=$(date +%s)"
@@ -867,7 +1014,7 @@ step_export_key() {
     log "Using GNUPGHOME: $GNUPG_HOME"
 
     # Export with correct GNUPGHOME
-    if GNUPGHOME="$GNUPG_HOME" bash "$PUBLIC_KEY_SCRIPT" 2>&1 | tee -a "$LOGFILE"; then
+    if GNUPGHOME="$GNUPG_HOME" MIRROR_OUTPUT_ROOT="$MIRROR_ROOT"         OUTPUT_FILE="$MIRROR_ROOT/ailinux-archive-key.gpg"         bash "$PUBLIC_KEY_SCRIPT" 2>&1 | tee -a "$LOGFILE"; then
         log_ok "Public key exported to $MIRROR_ROOT/ailinux-archive-key.gpg"
         return 0
     else
@@ -907,7 +1054,7 @@ step_generate_index() {
 
     # Run generate-index.sh on host since it accesses the mirror directory
     if [[ -f "${REPO_ROOT}/generate-index.sh" ]]; then
-        if bash "${REPO_ROOT}/generate-index.sh" 2>&1 | tee -a "$LOGFILE"; then
+        if HOST_MIRROR_PATH="$MIRROR_ROOT" bash "${REPO_ROOT}/generate-index.sh" 2>&1 | tee -a "$LOGFILE"; then
             log_ok "HTML index generated"
             return 0
         else
@@ -949,10 +1096,14 @@ main() {
         log_err "Another update is already running (lock: $LOCKFILE)"
         exit 1
     fi
-    trap 'rm -f "$LOCKFILE"' EXIT
+    trap 'atomic_cleanup; rm -f "$LOCKFILE"' EXIT
 
     # Check requirements
     check_cmd docker || exit 1
+    if [[ $DRY_RUN -ne 1 && "$EUID" -ne 0 ]]; then
+        log_err "Run the mirror pipeline with sudo for atomic overlay publication"
+        exit 1
+    fi
 
     # Start
     TOTAL_START=$(date +%s)
@@ -982,53 +1133,69 @@ main() {
     run_step 0 "Heal Permissions" step_heal_perms || failed=1
 
     if [[ $failed -eq 0 ]]; then
-        run_step 1 "Container Setup" step_container_setup || failed=1
+        run_step 1 "Atomic Staging" step_prepare_atomic_mirror || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then
-        run_step 2 "Download (apt-mirror)" step_download || failed=1
+        run_step 2 "Container Setup" step_container_setup || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then
-        run_step 3 "Postmirror (DEP-11)" step_postmirror || failed=1
+        run_step "2B" "Quarantine Truncated Packages in Staging" step_quarantine_truncated_packages || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then
-        run_step 4 "Fix Permissions" step_permissions || failed=1
+        run_step 3 "Download (apt-mirror)" step_download || failed=1
+    fi
+
+    if [[ $failed -eq 0 ]]; then
+        run_step 4 "Postmirror (DEP-11)" step_postmirror || failed=1
+    fi
+
+    if [[ $failed -eq 0 ]]; then
+        run_step 5 "Fix Permissions" step_permissions || failed=1
     fi
 
     if [[ $failed -eq 0 && $SIGN_ONLY -eq 0 ]]; then
-        run_step 5 "Compression Fix" step_compression_fix || failed=1
+        run_step 6 "Compression Fix" step_compression_fix || failed=1
     fi
 
     if [[ $failed -eq 0 && $SIGN_ONLY -eq 0 ]]; then
-        run_step 6 "Generate Packages" step_generate_packages || failed=1
-    fi
-
-    if [[ $failed -eq 0 && $SIGN_ONLY -eq 0 ]]; then
-        run_step 7 "Validate All Mirror Payloads" step_validate_mirror_payloads || failed=1
+        run_step 7 "Generate Packages" step_generate_packages || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then
-        run_step 8 "GPG Signing" step_signing || failed=1
+        run_step 8 "Validate All Mirror Payloads" step_validate_mirror_payloads || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then
-        run_step 8 "Verify Local/Public Repository" step_verify_local_repo || failed=1
+        run_step 9 "GPG Signing" step_signing || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then
-        run_step 9 "Export Public Key" step_export_key || failed=1
+        run_step 10 "Verify Staged Local Repository" step_verify_local_repo || failed=1
     fi
 
     if [[ $failed -eq 0 ]]; then
-        run_step 10 "Generate Index" step_generate_index || failed=1
+        run_step 11 "Export Public Key" step_export_key || failed=1
+    fi
+
+    if [[ $failed -eq 0 ]]; then
+        run_step 12 "Generate Index" step_generate_index || failed=1
     fi
 
     # Compression, signing and index generation may create new files after
     # the first permission pass. Do not publish unreadable Packages.xz files.
     if [[ $failed -eq 0 ]]; then
-        run_step 11 "Final Public Mirror Permissions" step_permissions || failed=1
+        run_step 13 "Final Staging Permissions" step_permissions || failed=1
+    fi
+
+    if [[ $failed -eq 0 ]]; then
+        run_step 14 "Verify Signed Metadata" step_verify_signed_metadata || failed=1
+    fi
+
+    if [[ $failed -eq 0 ]]; then
+        run_step 15 "Atomic Publish and Verify" step_publish_atomic_mirror || failed=1
     fi
 
     # Summary
@@ -1055,4 +1222,7 @@ main() {
         exit 1
     fi
 }
-main "$@"
+# Sourcing is supported for isolated integration tests; normal executions run main.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

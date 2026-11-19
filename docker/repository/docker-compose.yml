@@ -71,7 +71,9 @@ services:
       # GPG keyrings for repo verification
       - ./etc/keyrings:/keyrings:ro
       # Mirror output
-      - ./repo/mirror:/var/spool/apt-mirror/mirror
+      # Writable mirror output MUST be explicitly provided by update-mirror.sh.
+      # Direct docker compose runs write into an unpublished scratch directory.
+      - ${REPO_MIRROR_OUTPUT_PATH:-./data/unpublished-mirror}:/var/spool/apt-mirror/mirror
       # Logs
       - ./log:/var/log/ailinux
     command: ["apt-mirror"]
