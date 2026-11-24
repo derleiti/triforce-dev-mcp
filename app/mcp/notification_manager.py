@@ -196,7 +196,7 @@ async def _get_dedup_count(fingerprint: str) -> int:
 
 # -- Storage --
 
-def _load() -> List[Dict]:
+def _load(*, strict: bool = False) -> List[Dict]:
     try:
         STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
         if STORE_FILE.exists():
@@ -204,19 +204,33 @@ def _load() -> List[Dict]:
         return []
     except Exception as e:
         logger.error(f"Notify load error: {e}")
+        if strict:
+            raise
         return []
 
 
-def _save(entries: List[Dict]):
+def _save(entries: List[Dict], *, strict: bool = False):
     try:
         STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
         if len(entries) > MAX_ENTRIES:
             entries = entries[-MAX_ENTRIES:]
         _tmp = STORE_FILE.with_suffix(".tmp")
-        _tmp.write_text(json.dumps(entries, indent=2, ensure_ascii=False))
+        with _tmp.open("w", encoding="utf-8") as handle:
+            json.dump(entries, handle, indent=2, ensure_ascii=False)
+            if strict:
+                handle.flush()
+                os.fsync(handle.fileno())
         os.replace(_tmp, STORE_FILE)
+        if strict:
+            fd = os.open(STORE_FILE.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
     except Exception as e:
         logger.error(f"Notify save error: {e}")
+        if strict:
+            raise
 
 
 # -- Classification --
@@ -264,6 +278,7 @@ async def create_event(
     action_url: str = "", metadata: Dict = None,
     auto_resolve: bool = False, event_type: str = None,
     correlation_id: str = None,
+    source_key: str = None,
 ) -> Optional[Dict]:
     if not event_type:
         event_type = classify_event(source, title, body, tags)
@@ -272,7 +287,7 @@ async def create_event(
         priority = rule.get("priority", PRIO_NORMAL)
     fp = _fingerprint(source, event_type, f"{title}{body[:200]}")
     window = DEDUP_WINDOW_ERROR if source == SRC_SYSTEM else DEDUP_WINDOW_CONTENT
-    if await _is_duplicate(fp, window):
+    if not source_key and await _is_duplicate(fp, window):
         count = await _get_dedup_count(fp)
         if source == SRC_SYSTEM and count >= 5 and event_type == "ops.error":
             if count == 5:  # promote once, then suppress all further duplicates
@@ -296,9 +311,21 @@ async def create_event(
         "read": False, "resolved": auto_resolve,
         "dispatched": False, "dispatch_result": None,
     }
-    entries = _load()
-    entries.append(entry)
-    _save(entries)
+    # Pollers use source identity rather than a content-based Redis reservation.
+    # No suspension point between the durable lookup and atomic file replacement.
+    # This protects the local store under the poller lease, not independent nodes.
+    if source_key:
+        entry["source_key"] = source_key
+        entries = _load(strict=True)
+        if any(item.get("source") == source and item.get("source_key") == source_key
+               for item in entries):
+            return None
+        entries.append(entry)
+        _save(entries, strict=True)
+    else:
+        entries = _load()
+        entries.append(entry)
+        _save(entries)
     logger.info(f"EVENT | [{priority.upper()}] [{source}] [{event_type}] {title}")
     try:
         from ..services.slack_notifications import schedule_slack_notification
@@ -1278,56 +1305,77 @@ async def _seen_add(source: str, key: str):
             pass
 
 
+async def _process_unread_mail(msg: Dict):
+    from app.services.mail_service import mail_read, mail_mark_seen
+
+    uid = str(msg.get("uid", ""))
+    if not uid or msg.get("seen"):
+        return
+    # Read without changing the IMAP Seen flag. A failed read remains retryable.
+    full_mail = mail_read(uid, mark_seen=False)
+    snippet = str(full_mail.get("body", ""))[:3000]
+    subject = msg.get("subject", "(kein Betreff)")
+    sender = msg.get("from", "unknown")
+    validity = str(msg.get("uidvalidity") or "")
+    message_id = str(full_mail.get("message_id") or "").strip()
+    identity = f"{validity}:{uid}" if validity else f"{uid}:{message_id}"
+    source_key = "mail:INBOX:" + identity
+
+    # An old Seen cache entry alone is not evidence that a mail was persisted.
+    # Recognize previously persisted pre-upgrade messages by UID + Message-ID.
+    prior = any(
+        entry.get("source") == SRC_MAIL
+        and not entry.get("source_key")
+        and message_id
+        and str((entry.get("metadata") or {}).get("uid")) == uid
+        and (entry.get("metadata") or {}).get("message_id") == message_id
+        for entry in _load(strict=True)
+    )
+    tags_mail = ["mail", "inbox"]
+    research = "[research]" in subject.lower() or "research" in subject.lower()
+    if research:
+        tags_mail.append("research")
+    entry = None if prior else await create_event(
+        title=f"Mail: {subject}", body=f"Von: {sender}\n\n{snippet}",
+        source=SRC_MAIL, tags=tags_mail, source_key=source_key,
+        metadata={
+            "uid": uid, "uidvalidity": validity, "from": sender, "subject": subject,
+            "reply_to": full_mail.get("reply_to", ""),
+            "message_id": message_id,
+            "references": full_mail.get("references", ""),
+        },
+    )
+    if entry is not None and research:
+        try:
+            from app.services.mail_service import mail_send
+            mail_send(
+                to="admin@ailinux.me",
+                subject=f"[Nova Research] {subject}",
+                body=f"Nova Research-Report:\nVon: {sender}\n\n{snippet}\n\nAntwort mit [RESEARCH-APPROVED] triggert implementation_agent.",
+            )
+        except Exception as exc:
+            logger.debug("Research forward failed: %s", type(exc).__name__)
+    # A cancellation here leaves a stored source identity; retries won't
+    # re-create or re-dispatch the event.
+    await _seen_add("mail", source_key)
+    try:
+        mail_mark_seen(uid)
+    except Exception as exc:
+        logger.warning("Mail acknowledgement failed: %s", type(exc).__name__)
+
+
 async def _poll_mail():
     await asyncio.sleep(60)
     while True:
         try:
-            from app.services.mail_service import mail_inbox, mail_read, mail_mark_seen
+            from app.services.mail_service import mail_inbox
             for msg in mail_inbox(limit=10, folder="INBOX"):
-                uid = str(msg.get("uid",""))
-                if not uid or msg.get("seen"):
-                    continue
-                if await _seen_check("mail", uid):
-                    continue
-                await _seen_add("mail", uid)
-                subject = msg.get("subject","(kein Betreff)")
-                sender = msg.get("from","unknown")
                 try:
-                    full_mail = mail_read(uid)
-                    snippet = str(full_mail.get("body", ""))[:3000]
-                except Exception as _read_e:
-                    logger.warning(f"Mail {uid}: full body read failed: {_read_e}")
-                    full_mail = {}
-                    snippet = ""
-                tags_mail = ["mail", "inbox"]
-                if "[research]" in subject.lower() or "research" in subject.lower():
-                    tags_mail.append("research")
-                    try:
-                        from app.services.mail_service import mail_send
-                        mail_send(
-                            to="admin@ailinux.me",
-                            subject=f"[Nova Research] {subject}",
-                            body=f"Nova Research-Report:\nVon: {sender}\n\n{snippet}\n\nAntwort mit [RESEARCH-APPROVED] triggert implementation_agent.",
-                        )
-                        logger.info(f"Research forward -> Markus: {subject[:60]}")
-                    except Exception as _fwd_e:
-                        logger.debug(f"Research forward error: {_fwd_e}")
-                await create_event(
-                    title=f"Mail: {subject}", body=f"Von: {sender}\n\n{snippet}",
-                    source=SRC_MAIL, tags=tags_mail,
-                    metadata={
-                        "uid": uid, "from": sender, "subject": subject,
-                        "reply_to": full_mail.get("reply_to", ""),
-                        "message_id": full_mail.get("message_id", ""),
-                        "references": full_mail.get("references", ""),
-                    },
-                )
-                try:
-                    mail_mark_seen(uid)
-                except Exception:
-                    pass  # Non-critical — _seen_check is the primary dedup
-        except Exception as e:
-            logger.debug(f"Mail poller error: {e}")
+                    await _process_unread_mail(msg)
+                except Exception as exc:
+                    logger.warning("Mail processing failed; retrying later: %s", type(exc).__name__)
+        except Exception as exc:
+            logger.debug("Mail poller error: %s", type(exc).__name__)
         await asyncio.sleep(MAIL_POLL_INTERVAL)
 
 
@@ -1345,7 +1393,6 @@ async def _poll_forum():
                 key = f"{did}:{pc}:{lp_at[:16]}"  # dedup by discussion + comment count + timestamp
                 if await _seen_check("forum", key):
                     continue
-                await _seen_add("forum", key)
                 title = disc.get("title","(kein Titel)")
 
                 # Check latest post author via author_id
@@ -1363,15 +1410,17 @@ async def _poll_forum():
                 # Known admin author IDs (zombie=1, nova-ai=2)
                 ADMIN_AUTHOR_IDS = {"1", "2"}
                 if str(author_id) in ADMIN_AUTHOR_IDS:
+                    await _seen_add("forum", key)
                     continue
                 if author_id:
                     author = f"user#{author_id}"
                 await create_event(
                     title=f"Forum: {title}", body=f"Von: {author} | Posts: {pc} | #{did}",
-                    source=SRC_FORUM, tags=["forum","discussion"],
+                    source=SRC_FORUM, tags=["forum","discussion"], source_key=key,
                     metadata={"discussion_id": did, "author": author, "comment_count": pc},
                     action_url=f"https://forum.ailinux.me/d/{did}",
                 )
+                await _seen_add("forum", key)
         except Exception as e:
             logger.warning(f"Forum poller error: {e}")
         logger.info(f"Forum poll cycle done, seen={len(_last_seen.get('forum', set()))}")
@@ -1401,14 +1450,14 @@ async def _poll_wordpress():
                         cid = str(c.get("id",""))
                         if await _seen_check("wp", cid):
                             continue
-                        await _seen_add("wp", cid)
                         author = c.get("author_name","unknown")
                         content = c.get("content",{}).get("rendered","")[:300]
                         await create_event(
                             title=f"WP Kommentar von {author}", body=content,
-                            source=SRC_WORDPRESS, tags=["wordpress","comment"],
+                            source=SRC_WORDPRESS, tags=["wordpress","comment"], source_key=cid,
                             metadata={"comment_id": cid, "post_id": c.get("post"), "author": author},
                         )
+                        await _seen_add("wp", cid)
         except Exception as e:
             logger.warning(f"WordPress poller error: {e}")
         logger.info(f"WP poll cycle done, seen={len(_last_seen.get('wp', set()))}")

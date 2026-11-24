@@ -374,3 +374,91 @@ def test_external_poller_policy_setting():
     assert Settings.model_validate({
         "TRIFORCE_NOTIFICATION_EXTERNAL_POLLERS_ENABLED": "false",
     }).notification_external_pollers_enabled is False
+
+
+
+@pytest.fixture
+def mail_delivery(monkeypatch, tmp_path):
+    from app.mcp import notification_manager as nm
+    from app.services import mail_service
+    from unittest.mock import Mock, AsyncMock
+    monkeypatch.setattr(nm, "STORE_FILE", tmp_path / "notifications.json")
+    monkeypatch.setattr(mail_service, "mail_read", Mock(return_value={
+        "body": "hello", "message_id": "<test@example.invalid>",
+    }))
+    monkeypatch.setattr(mail_service, "mail_mark_seen", Mock(return_value={"ok": True}))
+    monkeypatch.setattr(nm, "_seen_add", AsyncMock())
+    monkeypatch.setattr(nm, "_dispatch_event", AsyncMock())
+    monkeypatch.setattr(nm, "_is_duplicate", AsyncMock(side_effect=AssertionError("must not reserve content before persistence")))
+    monkeypatch.setattr("app.services.slack_notifications.schedule_slack_notification", Mock())
+    return nm, mail_service, {"uid": "42", "uidvalidity": "7", "subject": "Test", "from": "test@example.invalid"}
+
+
+async def test_mail_cancel_before_save_remains_unread_and_retryable(mail_delivery, monkeypatch):
+    nm, mail, msg = mail_delivery
+    create = nm.create_event
+    async def cancel(**kwargs):
+        raise asyncio.CancelledError
+    monkeypatch.setattr(nm, "create_event", cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await nm._process_unread_mail(msg)
+    mail.mail_read.assert_called_once_with("42", mark_seen=False)
+    mail.mail_mark_seen.assert_not_called()
+    nm._seen_add.assert_not_awaited()
+    assert nm._load() == []
+    monkeypatch.setattr(nm, "create_event", create)
+    await nm._process_unread_mail(msg)
+    assert len(nm._load()) == 1
+    mail.mail_mark_seen.assert_called_once_with("42")
+
+
+async def test_mail_cancel_after_save_does_not_duplicate_event(mail_delivery):
+    nm, mail, msg = mail_delivery
+    nm._seen_add.side_effect = asyncio.CancelledError
+    with pytest.raises(asyncio.CancelledError):
+        await nm._process_unread_mail(msg)
+    assert len(nm._load()) == 1
+    mail.mail_mark_seen.assert_not_called()
+    nm._seen_add.side_effect = None
+    await nm._process_unread_mail(msg)
+    await asyncio.sleep(0)
+    assert len(nm._load()) == 1
+    nm._dispatch_event.assert_awaited_once()
+    mail.mail_mark_seen.assert_called_once_with("42")
+
+
+async def test_mail_storage_failure_does_not_acknowledge(mail_delivery, monkeypatch):
+    nm, mail, msg = mail_delivery
+    save = nm._save
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(nm, "_save", fail)
+    with pytest.raises(OSError):
+        await nm._process_unread_mail(msg)
+    nm._seen_add.assert_not_awaited()
+    mail.mail_mark_seen.assert_not_called()
+    monkeypatch.setattr(nm, "_save", save)
+    await nm._process_unread_mail(msg)
+    assert len(nm._load()) == 1
+
+
+async def test_mail_distinct_uids_are_not_content_deduplicated(mail_delivery):
+    nm, mail, msg = mail_delivery
+    await nm._process_unread_mail(msg)
+    await nm._process_unread_mail({**msg, "uid": "43"})
+    await nm._process_unread_mail(msg)
+    assert len(nm._load()) == 2
+
+
+def test_imap_peek_preserves_manual_read_semantics(monkeypatch):
+    from unittest.mock import Mock
+    from app.services import mail_service
+    conn = Mock()
+    conn.uid.return_value = ("OK", [(b"meta", b"Subject: test\r\n\r\nhello")])
+    monkeypatch.setattr(mail_service, "_imap_connect", lambda: conn)
+    mail_service.mail_read("42", mark_seen=False)
+    conn.select.assert_called_with("INBOX", readonly=True)
+    conn.uid.assert_called_with("FETCH", b"42", "(BODY.PEEK[])")
+    mail_service.mail_read("42")
+    conn.select.assert_called_with("INBOX", readonly=False)
+    conn.uid.assert_called_with("FETCH", b"42", "(RFC822)")

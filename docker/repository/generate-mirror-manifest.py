@@ -101,9 +101,10 @@ def suite_target_codename(path: str, suite: str) -> str:
     return ""
 
 
-def available_arches(repo_root: Path, suite: str, configured: list[str]) -> list[str]:
+def available_arches(repo_root: Path, suite: str, configured: list[str],
+                     components: list[str] | None = None) -> list[str]:
     if suite == "/":
-        if not (repo_root / "Release").is_file():
+        if not any((repo_root / name).is_file() for name in ("Release", "InRelease")):
             return []
         if not any((repo_root / name).is_file() for name in ("Packages", "Packages.gz", "Packages.xz")):
             return []
@@ -115,15 +116,23 @@ def available_arches(repo_root: Path, suite: str, configured: list[str]) -> list
     if not ((suite_root / "Release").is_file() or (suite_root / "InRelease").is_file()):
         return []
 
-    found: set[str] = set()
-    for binary_dir in suite_root.glob("*/binary-*"):
-        arch = binary_dir.name.removeprefix("binary-")
-        if any((binary_dir / name).is_file() for name in ("Packages", "Packages.gz", "Packages.xz")):
-            found.add(arch)
+    selected = components if components is not None else sorted(
+        p.name for p in suite_root.iterdir() if p.is_dir()
+    )
+    if not selected:
+        return []
+    # Each advertised arch must have an index in every advertised component.
+    # A union would publish a Cartesian product of nonexistent indexes.
+    per_component = []
+    for component in selected:
+        per_component.append({
+            p.name.removeprefix("binary-")
+            for p in (suite_root / component).glob("binary-*")
+            if any((p / name).is_file() for name in ("Packages", "Packages.gz", "Packages.xz"))
+        })
+    found = set.intersection(*per_component)
     if configured:
-        ordered = [arch for arch in configured if arch in found]
-        ordered.extend(sorted(found.difference(ordered)))
-        return ordered
+        return [arch for arch in configured if arch in found]
     return sorted(found)
 
 
@@ -147,6 +156,8 @@ def parse_mirror_list(mirror_list: Path, mirror_root: Path) -> list[dict[str, st
             continue
         url = match.group("url").rstrip("/")
         suite = match.group("suite")
+        if suite == "./":
+            suite = "/"
         components = " ".join((match.group("components") or "").split())
         path = repo_path(url)
         key = (path, suite, components)
@@ -169,7 +180,8 @@ def parse_mirror_list(mirror_list: Path, mirror_root: Path) -> list[dict[str, st
         path = str(entry["path"])
         suite = str(entry["suite"])
         repo_root = mirror_root / path
-        arches = available_arches(repo_root, suite, list(entry["configured_arches"]))
+        arches = available_arches(repo_root, suite, list(entry["configured_arches"]),
+                                  str(entry["components"]).split())
         if not arches:
             continue
         label, category, base_id = friendly(path)
@@ -196,12 +208,11 @@ def add_local_repo(rows: list[dict[str, str]], mirror_root: Path) -> None:
         return
     for suite_root in sorted(p for p in dists.iterdir() if p.is_dir()):
         suite = suite_root.name
-        components = sorted(p.name for p in suite_root.iterdir() if p.is_dir())
-        arches: set[str] = set()
-        for component in components:
-            for binary_dir in (suite_root / component).glob("binary-*"):
-                if any((binary_dir / n).is_file() for n in ("Packages", "Packages.gz", "Packages.xz")):
-                    arches.add(binary_dir.name.removeprefix("binary-"))
+        components = sorted(
+            p.name for p in suite_root.iterdir()
+            if p.is_dir() and any(p.glob("binary-*"))
+        )
+        arches = available_arches(local_root, suite, [], components)
         if not arches:
             continue
         rows.append(

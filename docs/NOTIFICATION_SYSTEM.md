@@ -117,9 +117,20 @@ on a designated node. For separate Redis installations, set
 This disables the mail, forum and WordPress pollers while preserving the
 node-local AICoder digest when its Redis lease is available. The setting
 defaults to true for backwards compatibility; new federation node templates
-default to false. Promote a standby explicitly, only after the old primary
-has stopped external polling. This is not automatic failover or exactly-once
+default to false. Before promoting a standby, persistently set
+`TRIFORCE_NOTIFICATION_EXTERNAL_POLLERS_ENABLED=false` on the old primary,
+restart or fence it, and verify that it cannot resume external polling. Only
+then enable and restart the standby. If the old primary cannot be reached,
+fence it before promotion. This is not automatic failover or exactly-once
 external delivery.
+
+Source pollers persist an event with a stable source key before recording its
+Seen marker. IMAP polling reads without setting the Seen flag, and acknowledges
+only after persistence. The local bounded notification store suppresses repeat
+creation after cancellation between persistence and acknowledgement. This is
+not a cross-node durable outbox: process crashes during external dispatch,
+manual clearing/retention, or promotion to a different store can still affect
+delivery; do not claim exactly-once replies.
 
 ## Dedup Behavior
 
