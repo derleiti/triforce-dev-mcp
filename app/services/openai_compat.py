@@ -25,7 +25,7 @@ except ImportError:
 
 class OpenAIChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: str | List[dict]
 
 
 class OpenAIChatCompletionRequest(BaseModel):
@@ -93,7 +93,7 @@ async def _resolve_model(request_model: str) -> tuple[str, ModelInfo]:
 
 class _UsageTracker:
     def __init__(self, prompt_messages: List[dict[str, str]]) -> None:
-        combined_prompt = "\n".join(message["content"] for message in prompt_messages)
+        combined_prompt = "\n".join(message["content"] if isinstance(message["content"], str) else " ".join(str(p.get("text", "")) for p in message["content"] if p.get("type") == "text") for message in prompt_messages)
         self.prompt_tokens = _estimate_tokens(combined_prompt)
         self._completion_parts: List[str] = []
 
@@ -115,6 +115,26 @@ class _UsageTracker:
         }
 
 
+async def _strict_provider_response(model_info, resolved_model, messages, payload):
+    from .provider_chat import chat_completion
+    from ..routes.client_chat import _validate_chat_content
+    for message in messages:
+        _validate_chat_content(message["content"])
+    if any(isinstance(m["content"], list) for m in messages) and "vision" not in model_info.capabilities:
+        raise api_error("Model does not support image input", status_code=400, code="unsupported_modality")
+    if model_info.provider not in {"openrouter", "nvidia"}:
+        raise api_error("Multimodal compatibility not supported for this provider", status_code=400, code="unsupported_provider")
+    result = await chat_completion(model_info, resolved_model, messages, temperature=payload.temperature, max_tokens=payload.max_tokens or 1024)
+    content = result.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise api_error("Provider returned no assistant content", status_code=502, code="empty_response")
+    return content
+
+
+def _strict_route(model_info, messages):
+    return any(isinstance(m["content"], list) for m in messages) or (model_info.provider == "openrouter" and model_info.id.endswith(":free"))
+
+
 async def create_chat_completion(payload: OpenAIChatCompletionRequest) -> dict[str, object]:
     if not payload.messages:
         raise api_error("At least one message is required", status_code=422, code="missing_messages")
@@ -131,14 +151,17 @@ async def create_chat_completion(payload: OpenAIChatCompletionRequest) -> dict[s
     
     try:
         async with request_slot():
-            async for chunk in chat_service.stream_chat(
-                model_info,
-                resolved_model,
-                (message for message in internal_messages),
-                stream=bool(payload.stream),
-                temperature=payload.temperature,
-            ):
-                usage.append(chunk)
+            if _strict_route(model_info, internal_messages):
+                usage.append(await _strict_provider_response(model_info, resolved_model, internal_messages, payload))
+            else:
+                async for chunk in chat_service.stream_chat(
+                    model_info,
+                    resolved_model,
+                    (message for message in internal_messages),
+                    stream=bool(payload.stream),
+                    temperature=payload.temperature,
+                ):
+                    usage.append(chunk)
     except Exception as e:
         error_occurred = True
         raise
@@ -177,6 +200,25 @@ async def stream_chat_completion(payload: OpenAIChatCompletionRequest) -> Stream
     created = int(time.time())
     completion_id = f"chatcmpl-{uuid4().hex}"
 
+    strict = _strict_route(model_info, internal_messages)
+    if strict:
+        from ..routes.client_chat import _validate_chat_content
+        for message in internal_messages:
+            _validate_chat_content(message["content"])
+        if model_info.provider not in {"openrouter", "nvidia"}:
+            raise api_error("Unsupported multimodal provider", status_code=400, code="unsupported_provider")
+        if any(isinstance(m["content"], list) for m in internal_messages) and "vision" not in model_info.capabilities:
+            raise api_error("Model does not support image input", status_code=400, code="unsupported_modality")
+
+    async def chunks():
+        if strict:
+            from .provider_chat import stream_completion
+            async for part in stream_completion(model_info, resolved_model, internal_messages, temperature=payload.temperature, max_tokens=payload.max_tokens or 1024):
+                yield part
+        else:
+            async for part in chat_service.stream_chat(model_info, resolved_model, iter(internal_messages), stream=True, temperature=payload.temperature):
+                yield part
+
     async def generator() -> AsyncGenerator[str, None]:
         # Model-Latenz-Tracking für Streaming
         model_start = perf_counter()
@@ -184,13 +226,7 @@ async def stream_chat_completion(payload: OpenAIChatCompletionRequest) -> Stream
         
         try:
             async with request_slot():
-                async for chunk in chat_service.stream_chat(
-                    model_info,
-                    resolved_model,
-                    (message for message in internal_messages),
-                    stream=True,
-                    temperature=payload.temperature,
-                ):
+                async for chunk in chunks():
                     if not chunk:
                         continue
                     usage.append(chunk)

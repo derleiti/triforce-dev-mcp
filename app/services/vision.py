@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import httpx
+from fastapi import HTTPException
 from PIL import Image
 import io
 
@@ -127,6 +128,20 @@ async def analyze(
 
     if image_bytes is not None and content_type is None:
         content_type = "image/png"
+
+    if model.provider in {"nvidia", "openrouter"}:
+        from .provider_chat import chat_completion
+        if image_bytes is None:
+            content_type, image_bytes = await _download_image(image_url)
+        mime = _detect_image_mime(image_bytes)
+        if not mime:
+            raise api_error("Invalid image data", status_code=415, code="invalid_image")
+        uri = f"data:{mime};base64," + base64.b64encode(image_bytes).decode("ascii")
+        result = await chat_completion(model, model.id, [{"role":"user", "content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":uri}}]}], temperature=None, max_tokens=1024)
+        text = result.get("content")
+        if not isinstance(text, str) or not text.strip():
+            raise api_error("Vision model returned no response", status_code=502, code="empty_response")
+        return text
 
     if model.provider == "ollama":
         resolved_bytes = image_bytes
@@ -281,7 +296,8 @@ async def _analyze_with_ollama_data(
     # Optimize image to prevent Ollama OOM/crashes
     image_bytes, _ = _optimize_image(image_bytes)
     
-    url = httpx.URL(str(settings.ollama_base)).join("/api/chat")
+    from .ollama_node_router import ollama_candidates
+    model = model.removeprefix("ollama/")
     encoded = base64.b64encode(image_bytes).decode("ascii")
     body = {
         "model": model,
@@ -294,10 +310,15 @@ async def _analyze_with_ollama_data(
         ],
         "stream": False,
     }
-    try:
-        return await _dispatch_ollama(url, body, timeout_ms=settings.ollama_timeout_ms)
-    except Exception as exc:
-        raise api_error("Ollama vision call failed", status_code=502, code="ollama_vision_failed") from exc
+    last = None
+    for endpoint in ollama_candidates(model):
+        try:
+            return await _dispatch_ollama(httpx.URL(endpoint.base_url + "/api/chat"), body, timeout_ms=settings.ollama_timeout_ms)
+        except HTTPException as exc:
+            last = exc
+    if last is not None:
+        raise last
+    raise api_error("No Ollama worker available", status_code=503, code="ollama_unavailable")
 
 
 async def _dispatch_ollama(url: httpx.URL, payload: dict, timeout_ms: Optional[int] = None) -> str:

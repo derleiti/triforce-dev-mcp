@@ -805,3 +805,135 @@ async def test_client_chat_preserves_native_tool_history_fields(monkeypatch):
     assert seen["messages"][3]["tool_call_id"] == "call_abc"
     assert seen["messages"][3]["name"] == "file_tree"
     assert seen["messages"][3]["role"] == "tool"
+
+
+
+@pytest.fixture
+def openai_compat_fixture(monkeypatch):
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+    from app.services import openai_compat as compat
+
+    @asynccontextmanager
+    async def slot():
+        yield
+
+    monkeypatch.setattr(compat, "request_slot", slot)
+    monkeypatch.setattr(compat, "_HAS_PERF_MONITOR", False)
+    fallback = AsyncMock(side_effect=AssertionError("unexpected legacy provider fallback"))
+    monkeypatch.setattr(compat.chat_service, "stream_chat", fallback)
+    return compat, fallback
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider,model_id,content", [
+    ("openrouter", "openrouter/example/model:free", "hello"),
+    ("nvidia", "nvidia/example/vision", [
+        {"type": "text", "text": "describe"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]),
+])
+async def test_compat_strict_provider_keeps_explicit_model(monkeypatch, openai_compat_fixture, provider, model_id, content):
+    from unittest.mock import AsyncMock
+    compat, fallback = openai_compat_fixture
+    info = SimpleNamespace(provider=provider, id=model_id, capabilities=["chat", "vision"])
+    monkeypatch.setattr(compat, "_resolve_model", AsyncMock(return_value=(model_id, info)))
+    adapter = AsyncMock(return_value={"content": "provider result"})
+    monkeypatch.setattr(provider_chat, "chat_completion", adapter)
+    payload = compat.OpenAIChatCompletionRequest(model=model_id, messages=[{"role": "user", "content": content}], max_tokens=23)
+    response = await compat.create_chat_completion(payload)
+    assert response["choices"][0]["message"]["content"] == "provider result"
+    adapter.assert_awaited_once_with(info, model_id, [{"role": "user", "content": content}], temperature=None, max_tokens=23)
+    fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_compat_strict_provider_error_is_not_replaced_by_paid_fallback(monkeypatch, openai_compat_fixture):
+    from unittest.mock import AsyncMock
+    compat, fallback = openai_compat_fixture
+    model = "openrouter/example/model:free"
+    info = SimpleNamespace(provider="openrouter", id=model, capabilities=["chat"])
+    monkeypatch.setattr(compat, "_resolve_model", AsyncMock(return_value=(model, info)))
+    monkeypatch.setattr(provider_chat, "chat_completion", AsyncMock(side_effect=HTTPException(429, "rate limited")))
+    payload = compat.OpenAIChatCompletionRequest(model=model, messages=[{"role": "user", "content": "hello"}])
+    with pytest.raises(HTTPException) as exc:
+        await compat.create_chat_completion(payload)
+    assert exc.value.status_code == 429
+    fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_compat_rejects_images_for_nonvision_model(monkeypatch, openai_compat_fixture):
+    from unittest.mock import AsyncMock
+    compat, fallback = openai_compat_fixture
+    model = "nvidia/example/text"
+    info = SimpleNamespace(provider="nvidia", id=model, capabilities=["chat"])
+    monkeypatch.setattr(compat, "_resolve_model", AsyncMock(return_value=(model, info)))
+    adapter = AsyncMock()
+    monkeypatch.setattr(provider_chat, "chat_completion", adapter)
+    payload = compat.OpenAIChatCompletionRequest(model=model, messages=[{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]}])
+    with pytest.raises(HTTPException) as exc:
+        await compat.create_chat_completion(payload)
+    assert exc.value.status_code == 400
+    adapter.assert_not_called()
+    fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_compat_free_provider_stream_preserves_model_and_token_budget(monkeypatch, openai_compat_fixture):
+    from unittest.mock import AsyncMock
+    compat, fallback = openai_compat_fixture
+    model = "openrouter/example/model:free"
+    info = SimpleNamespace(provider="openrouter", id=model, capabilities=["chat"])
+    monkeypatch.setattr(compat, "_resolve_model", AsyncMock(return_value=(model, info)))
+    seen = []
+    async def stream(model_info, requested, messages, **kwargs):
+        seen.append((model_info, requested, messages, kwargs))
+        yield "hello"
+        yield " world"
+    monkeypatch.setattr(provider_chat, "stream_completion", stream)
+    payload = compat.OpenAIChatCompletionRequest(model=model, messages=[{"role": "user", "content": "hi"}], stream=True, max_tokens=12)
+    response = await compat.stream_chat_completion(payload)
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert chunks[-1] == "data: [DONE]\n\n"
+    assert seen == [(info, model, [{"role": "user", "content": "hi"}], {"temperature": None, "max_tokens": 12})]
+    assert any("hello" in chunk for chunk in chunks)
+    fallback.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["nvidia", "openrouter"])
+async def test_vision_uses_detected_mime_on_compatible_provider(monkeypatch, provider):
+    import base64
+    from unittest.mock import AsyncMock
+    from app.services import vision
+    info = SimpleNamespace(provider=provider, id=provider + "/example/vision")
+    image = b"\xff\xd8\xff" + b"test-image-bytes"
+    adapter = AsyncMock(return_value={"content": "description"})
+    monkeypatch.setattr(provider_chat, "chat_completion", adapter)
+    result = await vision.analyze(info, info.id, "describe", image_bytes=image, content_type="image/png")
+    assert result == "description"
+    expected_uri = "data:image/jpeg;base64," + base64.b64encode(image).decode("ascii")
+    assert adapter.call_args.args[2][0]["content"][1]["image_url"]["url"] == expected_uri
+    assert adapter.call_args.args[1] == info.id
+
+
+@pytest.mark.asyncio
+async def test_vision_ollama_uses_assigned_worker_and_strips_prefix(monkeypatch):
+    import base64
+    from unittest.mock import AsyncMock, Mock
+    from app.services import vision, ollama_node_router
+    image = b"fixture"
+    monkeypatch.setattr(vision, "_optimize_image", lambda data: (data, "image/png"))
+    candidates = Mock(return_value=[SimpleNamespace(base_url="http://127.0.0.1:11435")])
+    monkeypatch.setattr(ollama_node_router, "ollama_candidates", candidates)
+    dispatch = AsyncMock(return_value="worker result")
+    monkeypatch.setattr(vision, "_dispatch_ollama", dispatch)
+    result = await vision._analyze_with_ollama_data("ollama/example:1b", "describe", image)
+    assert result == "worker result"
+    candidates.assert_called_once_with("example:1b")
+    assert str(dispatch.call_args.args[0]) == "http://127.0.0.1:11435/api/chat"
+    assert dispatch.call_args.args[1]["model"] == "example:1b"
+    assert dispatch.call_args.args[1]["messages"][0]["images"] == [base64.b64encode(image).decode("ascii")]
