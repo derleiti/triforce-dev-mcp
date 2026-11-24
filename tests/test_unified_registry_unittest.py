@@ -9,7 +9,7 @@ class TestUnifiedRegistry(unittest.TestCase):
         text = Path("app/routes/mcp.py").read_text(encoding="utf-8")
         self.assertIn("get_canonical_all_tools", text)
         self.assertIn("filter_tools_for_profile", text)
-        self.assertIn('inventory = str(params.get("inventory", "core"))', text)
+        self.assertIn('inventory = "all" if request is not None else "core"', text)
         self.assertIn("resolve_tool_name_for_call", text)
 
     def test_examples_prompt_and_docs_exist(self):
@@ -196,6 +196,15 @@ class TestCanonicalRegistryAudit(unittest.TestCase):
             expected_read = audit[tool["name"]]["effect"] == "read"
             self.assertEqual(bool(annotations["readOnlyHint"]), expected_read, tool["name"])
 
+
+    def test_bug_report_mutations_are_not_read_safe(self):
+        from app.mcp.runtime_registry import RuntimeToolRegistry
+
+        registry = RuntimeToolRegistry()
+        for name in ("bug_report_status", "bug_report_resolve"):
+            defaults = registry._policy_defaults(name, "admin", "test")
+            self.assertFalse(defaults["read_only"], name)
+            self.assertEqual(registry._classify_tool(name, defaults), "write_scoped", name)
 
     def test_share_mutations_are_never_classified_read_safe(self):
         from app.mcp.runtime_registry import RuntimeToolRegistry

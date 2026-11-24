@@ -293,6 +293,7 @@ def _configure_idle_provider_test(monkeypatch, tmp_path: Path, *, profile_cursor
 
     state_file = tmp_path / "idle-state.json"
     state_file.write_text(json.dumps({"profile_cursor": profile_cursor, "catalogue_cursor": 0}), encoding="utf-8")
+    monkeypatch.setattr(idle_worker, "_AUTH_DEFERRED", {})
     monkeypatch.setattr(idle_worker, "STATE_FILE", state_file)
     monkeypatch.setattr(idle_worker, "STATE_LOCK_FILE", tmp_path / "idle-state.lock")
     monkeypatch.setattr(idle_worker, "workspace_fingerprint", lambda workspace: "stable-fingerprint")

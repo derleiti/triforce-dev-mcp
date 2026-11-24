@@ -1007,7 +1007,7 @@ EX:@g>!s"query"=[r]>>@c>!sum@[r] | @g>>@c!code"feat"#urgent"""
         compact = self.generate_compact_init(agent_id, max_tokens=max_tokens)
         return {
             "system": f"MCP-INIT:\n{compact}\n\nUse tool_use blocks for MCP tools.",
-            "metadata": {"mcp_version": self._version}
+            "metadata": {"mcp_version": VERSION}
         }
 
     def get_universal_init(
@@ -1034,7 +1034,7 @@ EX:@g>!s"query"=[r]>>@c>!sum@[r] | @g>>@c!code"feat"#urgent"""
         else:
             # Universal format
             return {
-                "mcp_version": self._version,
+                "mcp_version": VERSION,
                 "protocol": "TriForce MCP",
                 "compact_init": compact,
                 "token_count": len(compact) // 4,
