@@ -1502,32 +1502,44 @@ async def _start_pollers_with_lock():
 
 def _launch_pollers():
     global _poller_tasks
-    pollers = [("wordpress", _poll_wordpress)]
+    pollers = []
     try:
         from app.config import get_settings
-        _mail_settings = get_settings()
+
+        settings = get_settings()
+        external_enabled = settings.notification_external_pollers_enabled
+    except Exception as exc:
+        external_enabled = False
+        logger.warning("External poller config unavailable: %s", type(exc).__name__)
+        for name in ("mail", "forum", "wordpress"):
+            _poller_status[name] = "disabled:config-error"
+    else:
+        if not external_enabled:
+            for name in ("mail", "forum", "wordpress"):
+                _poller_status[name] = "disabled:node-policy"
+            logger.info("External notification pollers disabled by node policy")
+
+    if external_enabled:
+        pollers.append(("wordpress", _poll_wordpress))
         if all((
-            getattr(_mail_settings, "mail_imap_host", None),
-            getattr(_mail_settings, "mail_imap_user", None),
-            getattr(_mail_settings, "mail_imap_pass", None),
+            getattr(settings, "mail_imap_host", None),
+            getattr(settings, "mail_imap_user", None),
+            getattr(settings, "mail_imap_pass", None),
         )):
             pollers.append(("mail", _poll_mail))
         else:
             _poller_status["mail"] = "disabled:no-imap-auth"
             logger.info("Poller skipped: mail (IMAP auth not configured)")
-    except Exception as exc:
-        _poller_status["mail"] = "disabled:config-error"
-        logger.warning("Mail poller config check failed: %s", exc)
-    try:
-        from app.mcp.flarum_tools import is_flarum_configured
-        if is_flarum_configured():
-            pollers.append(("forum", _poll_forum))
-        else:
-            _poller_status["forum"] = "disabled:no-auth"
-            logger.info("Poller skipped: forum (Flarum auth not configured)")
-    except Exception as exc:
-        _poller_status["forum"] = "disabled:config-error"
-        logger.warning("Forum poller config check failed: %s", exc)
+        try:
+            from app.mcp.flarum_tools import is_flarum_configured
+            if is_flarum_configured():
+                pollers.append(("forum", _poll_forum))
+            else:
+                _poller_status["forum"] = "disabled:no-auth"
+                logger.info("Poller skipped: forum (Flarum auth not configured)")
+        except Exception as exc:
+            _poller_status["forum"] = "disabled:config-error"
+            logger.warning("Forum poller config check failed: %s", type(exc).__name__)
     try:
         from app.services.aicoder_agent_events import aicoder_failure_digest_loop
         pollers.append(("aicoder-failure-digest", aicoder_failure_digest_loop))

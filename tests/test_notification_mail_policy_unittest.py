@@ -308,6 +308,7 @@ def test_launch_pollers_skips_mail_without_imap_auth(monkeypatch):
     launched = []
 
     class MailSettings:
+        notification_external_pollers_enabled = True
         mail_imap_host = ""
         mail_imap_user = ""
         mail_imap_pass = ""
@@ -332,3 +333,44 @@ def test_launch_pollers_skips_mail_without_imap_auth(monkeypatch):
 
     assert "_poll_mail" not in launched
     assert nm._poller_status["mail"] == "disabled:no-imap-auth"
+
+
+def test_external_pollers_disabled_on_worker_preserves_local_digest(monkeypatch):
+    from types import SimpleNamespace
+    import app.config
+    import app.mcp.notification_manager as nm
+    import app.mcp.flarum_tools as ft
+
+    launched = []
+
+    def fake_create_task(coro):
+        launched.append(coro.cr_code.co_name)
+        coro.close()
+
+        class DummyTask:
+            def set_name(self, _name):
+                pass
+
+        return DummyTask()
+
+    monkeypatch.setattr(
+        app.config, "get_settings",
+        lambda: SimpleNamespace(notification_external_pollers_enabled=False),
+    )
+    monkeypatch.setattr(ft, "is_flarum_configured", lambda: pytest.fail("external poller must not be configured"))
+    monkeypatch.setattr(nm.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(nm, "_poller_tasks", [])
+    monkeypatch.setattr(nm, "_poller_status", {})
+
+    nm._launch_pollers()
+    assert launched == ["aicoder_failure_digest_loop"]
+    assert all(nm._poller_status[name] == "disabled:node-policy"
+               for name in ("mail", "forum", "wordpress"))
+
+
+def test_external_poller_policy_setting():
+    from app.config import Settings
+    assert Settings.model_validate({}).notification_external_pollers_enabled is True
+    assert Settings.model_validate({
+        "TRIFORCE_NOTIFICATION_EXTERNAL_POLLERS_ENABLED": "false",
+    }).notification_external_pollers_enabled is False

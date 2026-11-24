@@ -112,8 +112,14 @@ the leader state. Manual notifications retain their file fallback.
 The lease coordinates processes sharing the **same Redis database**. Separate
 Redis databases on different federation nodes do not coordinate external source
 polling; use a shared appropriate Redis database or run external pollers only
-on a designated node. This change does not provide exactly-once external
-delivery.
+on a designated node. For separate Redis installations, set
+`TRIFORCE_NOTIFICATION_EXTERNAL_POLLERS_ENABLED=false` on worker nodes.
+This disables the mail, forum and WordPress pollers while preserving the
+node-local AICoder digest when its Redis lease is available. The setting
+defaults to true for backwards compatibility; new federation node templates
+default to false. Promote a standby explicitly, only after the old primary
+has stopped external polling. This is not automatic failover or exactly-once
+external delivery.
 
 ## Dedup Behavior
 
