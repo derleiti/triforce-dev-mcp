@@ -2097,7 +2097,7 @@ async def _handle_agent_mcp_call(agent_id: str, request: Request):
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {
                         "name": agent.get("name", agent_id),
-                        "version": "2.80",
+                        "version": VERSION,
                         "description": f"Direct MCP access to {agent_id} CLI agent"
                     },
                     "capabilities": {

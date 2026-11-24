@@ -720,6 +720,7 @@ async def webmcp_pyodide_asset(version: str, filename: str) -> Response:
     return FileResponse(path, media_type=media, headers={"Cache-Control": "public, max-age=31536000, immutable", "X-Content-SHA256": str(meta.get("sha256") or "")})
 
 
+@public_router.head("/mcp/helper/release.json", tags=["MCP"], include_in_schema=False)
 @public_router.get("/mcp/helper/release.json", tags=["MCP"], summary="AILinux Helper release manifest")
 async def ailinux_helper_release_manifest() -> JSONResponse:
     return JSONResponse(_helper_release_manifest(), headers={"Cache-Control": "no-store"})
@@ -733,6 +734,7 @@ async def ailinux_helper_icon() -> Response:
     return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=86400, immutable"})
 
 
+@public_router.head("/mcp/helper/releases", tags=["MCP"], include_in_schema=False)
 @public_router.get("/mcp/helper/releases", tags=["MCP"], summary="Current AILinux Helper release catalog")
 async def ailinux_helper_release_catalog() -> JSONResponse:
     return JSONResponse(_helper_release_catalog(), headers={"Cache-Control": "no-store"})
@@ -755,6 +757,7 @@ async def download_ailinux_helper(platform: str):
     )
 
 
+@public_router.head("/mcp/workspace/desktop/{platform}", tags=["MCP"], include_in_schema=False)
 @public_router.get("/mcp/workspace/desktop/{platform}", tags=["MCP"], summary="Download AILinux desktop workspace helper")
 async def download_desktop_workspace_helper(platform: str) -> Response:
     return await download_ailinux_helper(platform)
