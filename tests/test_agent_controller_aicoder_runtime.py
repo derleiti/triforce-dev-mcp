@@ -170,6 +170,7 @@ def test_native_cli_profile_auto_routes_simple_task_direct_without_aicoder(tmp_p
         raise AssertionError("simple task must not start AICoder")
 
     with patch("app.services.tristar.agent_controller.asyncio.create_subprocess_exec", fake_create), \
+         patch("app.services.tristar.agent_controller.load_profile", return_value={"id": "gemini-mcp", "model": "account:gemini/test"}), \
          patch("app.services.tristar.agent_controller.query_account_provider_quota", return_value={"quota_exhausted": False}), \
          patch("app.services.tristar.agent_controller.run_profile", forbidden_run_profile):
         result = asyncio.run(controller.call_agent("gemini-mcp", "lies README.md", timeout=45))
@@ -199,6 +200,7 @@ def test_gemini_direct_print_timeout_is_not_reported_as_success(tmp_path):
         return FakeProcess()
 
     with patch("app.services.tristar.agent_controller.asyncio.create_subprocess_exec", fake_create), \
+         patch("app.services.tristar.agent_controller.load_profile", return_value={"id": "gemini-mcp", "model": "account:gemini/test"}), \
          patch("app.services.tristar.agent_controller.query_account_provider_quota", return_value={"quota_exhausted": False}):
         result = asyncio.run(controller.call_agent("gemini-mcp", "lies README.md", timeout=45))
 

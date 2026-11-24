@@ -509,6 +509,19 @@ class TestMcpStructuredOutput(unittest.TestCase):
         self.assertLessEqual(len(result["compact_init"]), 64)
         self.assertLessEqual(result["token_count"], 16)
 
+    def test_compact_init_uses_canonical_version_for_all_formats(self):
+        from app.config import VERSION
+        from app.services.init_service import CompactInitGenerator
+
+        generator = CompactInitGenerator()
+        result = generator.get_universal_init(max_tokens=16)
+        self.assertEqual(result["mcp_version"], VERSION)
+        self.assertEqual(result["formats"]["anthropic"]["metadata"]["mcp_version"], VERSION)
+        self.assertEqual(
+            generator.get_universal_init(provider="anthropic")["metadata"]["mcp_version"],
+            VERSION,
+        )
+
     def test_cli_agent_start_does_not_report_error_as_success(self):
         from app.routes import agents
         from app.services.tristar import agent_controller as controller_module
