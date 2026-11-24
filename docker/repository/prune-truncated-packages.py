@@ -6,19 +6,23 @@ skips it on later runs. Removing just the stage view creates overlay whiteouts;
 the published lower generation is never modified.
 """
 import argparse
+import hashlib
 from pathlib import Path
 import sys
 
 
 def prune(root: Path) -> int:
     removed, examined, unsafe = 0, 0, 0
+    # Debug symbols are a manageable subset and can be silently corrupted
+    # without a size mismatch. Rehash these before apt-mirror decides to skip.
+    hashed_debug = 0
     seen = set()
     for idx in root.glob('**/dists/*/**/Packages'):
         parts = idx.parts
         repo = Path(*parts[:parts.index('dists')])
         stanza = {}
         def visit():
-            nonlocal removed, examined, unsafe
+            nonlocal removed, examined, unsafe, hashed_debug
             raw = stanza.get('Filename', '')
             if not raw.endswith(('.deb', '.udeb', '.ddeb')):
                 return
@@ -48,6 +52,16 @@ def prune(root: Path) -> int:
                     print('QUARANTINE_TRUNCATED',f.relative_to(root),f'{actual}/{expected}')
                     f.unlink()
                     removed += 1
+                elif f.suffix == '.ddeb' and len(stanza.get('SHA256', '')) == 64:
+                    hashed_debug += 1
+                    digest = hashlib.sha256()
+                    with f.open('rb') as reader:
+                        for chunk in iter(lambda: reader.read(4 * 1024 * 1024), b''):
+                            digest.update(chunk)
+                    if digest.hexdigest().lower() != stanza['SHA256'].lower():
+                        print('QUARANTINE_BAD_SHA256', f.relative_to(root))
+                        f.unlink()
+                        removed += 1
             except (ValueError,OSError) as err:
                 unsafe += 1
                 print('INVALID_RECORD',raw,err,file=sys.stderr)
@@ -59,13 +73,13 @@ def prune(root: Path) -> int:
                         stanza={}
                     elif line[0] not in ' \t' and ': ' in line:
                         k,v=line.split(': ',1)
-                        if k in ('Filename','Size'):
+                        if k in ('Filename','Size','SHA256'):
                             stanza[k]=v.strip()
                 visit()
         except OSError as exc:
             unsafe += 1
             print('UNREADABLE_INDEX',idx,exc,file=sys.stderr)
-    print(f'STAGING_PREFLIGHT examined={examined} removed={removed} errors={unsafe}')
+    print(f'STAGING_PREFLIGHT examined={examined} debug_hashed={hashed_debug} removed={removed} errors={unsafe}')
     return 1 if unsafe else 0
 
 

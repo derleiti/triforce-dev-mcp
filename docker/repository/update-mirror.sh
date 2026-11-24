@@ -484,8 +484,8 @@ step_download() {
     local download_limit="${MIRROR_DOWNLOAD_TIMEOUT:-90m}"
     log "Download time limit: ${download_limit}; individual wget waits bounded by mirror-wgetrc"
     if timeout --signal=TERM --kill-after=45s "$download_limit" \
-        docker compose -f "$COMPOSE_FILE" --profile mirror run --rm -T \
-        "$SERVICE" /usr/bin/apt-mirror "$mirror_input" 2>&1 | tee -a "$LOGFILE"; then
+        docker compose -f "$COMPOSE_FILE" --profile mirror run --rm -T --interactive=false \
+        "$SERVICE" env AILINUX_POSTMIRROR_DEFER=1 /usr/bin/apt-mirror "$mirror_input" </dev/null 2>&1 | tee -a "$LOGFILE"; then
         log_ok "apt-mirror download completed"
     else
         local rc=$?
@@ -532,8 +532,9 @@ step_postmirror() {
 
     log "Running postmirror cleanup and validation..."
 
-    if dc --profile mirror run --rm "$SERVICE" bash -lc \
-        "export REPO_PATH='/var/spool/apt-mirror'; /var/spool/apt-mirror/var/postmirror.sh" 2>&1 | tee -a "$LOGFILE"; then
+    if timeout --signal=TERM --kill-after=30s "${MIRROR_POSTMIRROR_TIMEOUT:-30m}" \
+        docker compose -f "$COMPOSE_FILE" --profile mirror run --rm -T --interactive=false "$SERVICE" bash -lc \
+        "export REPO_PATH='/var/spool/apt-mirror'; /var/spool/apt-mirror/var/postmirror.sh" </dev/null 2>&1 | tee -a "$LOGFILE"; then
         return 0
     fi
     log_err "Postmirror validation or signing failed"

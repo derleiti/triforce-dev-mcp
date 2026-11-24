@@ -7,6 +7,13 @@ fi
 
 set -euo pipefail
 
+# apt-mirror normally invokes this hook before returning. The orchestrator
+# runs it as a separate bounded step so failures propagate to the publisher.
+if [[ "${AILINUX_POSTMIRROR_DEFER:-0}" == "1" ]]; then
+  echo "Postmirror deferred to update-mirror.sh"
+  exit 0
+fi
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 if [[ -z "${REPO_PATH:-}" ]]; then
   for candidate in "$SCRIPT_DIR" "$SCRIPT_DIR/.." "/var/spool/apt-mirror" "/root/ailinux-repo"; do
