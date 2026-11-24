@@ -50,6 +50,9 @@ jobs:
         run: |
           python -m pytest -q tests/test_aicoder_mcp_contract.py tests/test_security_findings.py
 
+      - name: Notification leader lifecycle regression tests
+        run: python -m pytest -q tests/test_notification_mail_policy_unittest.py
+
       # The workspace/MCP suite carries the pairing, capability and credential
       # regressions. It used to run only on developer machines, so CI stayed
       # green while these paths were unverified. Failures here are real.
