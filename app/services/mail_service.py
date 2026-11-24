@@ -89,7 +89,9 @@ def mail_inbox(limit: int = 20, folder: str = "INBOX") -> List[Dict[str, Any]]:
     """
     conn = _imap_connect()
     try:
-        conn.select(folder)
+        conn.select(folder, readonly=True)
+        _, validity = conn.response("UIDVALIDITY")
+        uidvalidity = (validity[0] or b"").decode() if validity else ""
         # B-01 FIX: use uid('SEARCH') to get stable UIDs (not MSNs which shift on expunge)
         _, data = conn.uid("SEARCH", None, "ALL")
         uids = data[0].split()
@@ -98,7 +100,7 @@ def mail_inbox(limit: int = 20, folder: str = "INBOX") -> List[Dict[str, Any]]:
 
         messages = []
         for uid in recent:
-            _, raw = conn.uid("FETCH", uid, "(RFC822.HEADER FLAGS)")
+            _, raw = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER] FLAGS)")
             if not raw or not raw[0]:
                 continue
             if not isinstance(raw[0], tuple):
@@ -110,6 +112,7 @@ def mail_inbox(limit: int = 20, folder: str = "INBOX") -> List[Dict[str, Any]]:
 
             messages.append({
                 "uid": uid.decode(),
+                "uidvalidity": uidvalidity,
                 "subject": _decode_header(msg.get("Subject", "(kein Betreff)")),
                 "from": _decode_header(msg.get("From", "")),
                 "date": msg.get("Date", ""),
@@ -120,14 +123,14 @@ def mail_inbox(limit: int = 20, folder: str = "INBOX") -> List[Dict[str, Any]]:
         conn.logout()
 
 
-def mail_read(uid: str, folder: str = "INBOX") -> Dict[str, Any]:
+def mail_read(uid: str, folder: str = "INBOX", *, mark_seen: bool = True) -> Dict[str, Any]:
     """Fetch full message by UID. Returns headers + body."""
     conn = _imap_connect()
     try:
-        conn.select(folder)
+        conn.select(folder, readonly=not mark_seen)
         # B-01 FIX: use uid('FETCH') with stable UIDs
-        _, raw = conn.uid("FETCH", uid.encode(), "(RFC822)")
-        if not raw or not raw[0]:
+        status, raw = conn.uid("FETCH", uid.encode(), "(RFC822)" if mark_seen else "(BODY.PEEK[])")
+        if status != "OK" or not raw or not isinstance(raw[0], tuple):
             raise api_error(f"Message UID {uid} not found", status_code=404, code="mail_not_found")
 
         msg_bytes = raw[0][1] if isinstance(raw[0], tuple) else raw[0]

@@ -668,6 +668,9 @@ class CompactInitGenerator:
     Format: Strukturierte Kurznotation statt Prosa.
     """
 
+    def __init__(self):
+        self._version = VERSION
+
     # TRIFORCE BACKEND KURZREFERENZ (Kapitel 1 - am Anfang jeder Init)
     # ============================================================================
 

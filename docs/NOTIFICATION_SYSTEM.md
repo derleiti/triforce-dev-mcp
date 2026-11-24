@@ -1,14 +1,14 @@
 # Nova Notification Manager v2.0
 
-**Last Updated:** 2026-03-21
+**Last Updated:** 2026-11-24
 **File:** `app/mcp/notification_manager.py`
-**Status:** ✅ Production (deployed on all 3 nodes)
+**Status:** Existing manager deployed on all 3 nodes; leader lifecycle changes are pending rollout.
 
 ## Architecture
 
 ```
-Sources (polled every 5-10 min):
-  Mail Poller → IMAP nova@ailinux.me (5min)
+Sources (polled every 1-10 min):
+  Mail Poller → IMAP nova@ailinux.me (1min)
   Forum Poller → Flarum API (5min)
   WordPress Poller → WP REST API comments (10min)
   System → system_log_collector bridge (realtime)
@@ -100,6 +100,38 @@ Covered: `mail.support`, `mail.research`, `forum.question`, `forum.support`,
 | `notify_send` | Create manual notification (title, body, source, priority, event_type, tags) |
 | `notify_status` | Manager stats, poller health, dedup windows, dispatch rule count |
 
+## Poller leadership and Redis outages
+
+Automatic pollers use the configured `REDIS_URL` and a single supervisor task.
+They wait for Redis and a 120-second leader lease before launching, renew the
+lease atomically every 60 seconds and stop their tasks when renewal fails.
+They retry after 15 seconds. On normal shutdown local pollers are cancelled
+before the owner-checked lease release. `notify_status.poller_leader` reports
+the leader state. Manual notifications retain their file fallback.
+
+The lease coordinates processes sharing the **same Redis database**. Separate
+Redis databases on different federation nodes do not coordinate external source
+polling; use a shared appropriate Redis database or run external pollers only
+on a designated node. For separate Redis installations, set
+`TRIFORCE_NOTIFICATION_EXTERNAL_POLLERS_ENABLED=false` on worker nodes.
+This disables the mail, forum and WordPress pollers while preserving the
+node-local AICoder digest when its Redis lease is available. The setting
+defaults to true for backwards compatibility; new federation node templates
+default to false. Before promoting a standby, persistently set
+`TRIFORCE_NOTIFICATION_EXTERNAL_POLLERS_ENABLED=false` on the old primary,
+restart or fence it, and verify that it cannot resume external polling. Only
+then enable and restart the standby. If the old primary cannot be reached,
+fence it before promotion. This is not automatic failover or exactly-once
+external delivery.
+
+Source pollers persist an event with a stable source key before recording its
+Seen marker. IMAP polling reads without setting the Seen flag, and acknowledges
+only after persistence. The local bounded notification store suppresses repeat
+creation after cancellation between persistence and acknowledgement. This is
+not a cross-node durable outbox: process crashes during external dispatch,
+manual clearing/retention, or promotion to a different store can still affect
+delivery; do not claim exactly-once replies.
+
 ## Dedup Behavior
 
 | Occurrence | Action |
@@ -131,14 +163,14 @@ Fingerprint normalization strips:
 ## Configuration
 
 ```python
-MAIL_POLL_INTERVAL = 300       # 5 min
+MAIL_POLL_INTERVAL = 60        # 1 min
 FORUM_POLL_INTERVAL = 300      # 5 min
 WP_POLL_INTERVAL = 600         # 10 min
 DEDUP_WINDOW_ERROR = 3600      # 1h for system errors
 DEDUP_WINDOW_CONTENT = 86400   # 24h for content (mail/forum/wp)
 DISPATCH_AGENT_TIMEOUT = 300   # 5 min agent auto-shutdown
 DISPATCH_COOLDOWN_S = 120      # 2 min between same event_type dispatches
-MAX_ENTRIES = 500              # Max notifications in store
+MAX_ENTRIES = 1000              # Max notifications in store
 ```
 
 Storage: `/var/lib/triforce/notifications.json` (JSON file)

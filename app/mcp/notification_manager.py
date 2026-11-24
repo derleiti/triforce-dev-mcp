@@ -135,15 +135,19 @@ _redis = None
 
 async def _get_redis():
     global _redis
-    if _redis is not None:
-        try:
-            await _redis.ping()
-            return _redis
-        except Exception:
-            _redis = None
     try:
-        import redis.asyncio as aioredis
-        _redis = aioredis.from_url("redis://localhost:6379/0", decode_responses=True)
+        if _redis is None:
+            import redis.asyncio as aioredis
+            from app.config import get_settings
+
+            # Assign before awaiting: concurrent callers share one pool.
+            # Redis reconnects lazily after outages; do not abandon the pool.
+            _redis = aioredis.from_url(
+                get_settings().redis_url,
+                decode_responses=True,
+                socket_connect_timeout=3,
+                socket_timeout=3,
+            )
         await _redis.ping()
         return _redis
     except Exception:
@@ -192,7 +196,7 @@ async def _get_dedup_count(fingerprint: str) -> int:
 
 # -- Storage --
 
-def _load() -> List[Dict]:
+def _load(*, strict: bool = False) -> List[Dict]:
     try:
         STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
         if STORE_FILE.exists():
@@ -200,19 +204,33 @@ def _load() -> List[Dict]:
         return []
     except Exception as e:
         logger.error(f"Notify load error: {e}")
+        if strict:
+            raise
         return []
 
 
-def _save(entries: List[Dict]):
+def _save(entries: List[Dict], *, strict: bool = False):
     try:
         STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
         if len(entries) > MAX_ENTRIES:
             entries = entries[-MAX_ENTRIES:]
         _tmp = STORE_FILE.with_suffix(".tmp")
-        _tmp.write_text(json.dumps(entries, indent=2, ensure_ascii=False))
+        with _tmp.open("w", encoding="utf-8") as handle:
+            json.dump(entries, handle, indent=2, ensure_ascii=False)
+            if strict:
+                handle.flush()
+                os.fsync(handle.fileno())
         os.replace(_tmp, STORE_FILE)
+        if strict:
+            fd = os.open(STORE_FILE.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
     except Exception as e:
         logger.error(f"Notify save error: {e}")
+        if strict:
+            raise
 
 
 # -- Classification --
@@ -260,6 +278,7 @@ async def create_event(
     action_url: str = "", metadata: Dict = None,
     auto_resolve: bool = False, event_type: str = None,
     correlation_id: str = None,
+    source_key: str = None,
 ) -> Optional[Dict]:
     if not event_type:
         event_type = classify_event(source, title, body, tags)
@@ -268,7 +287,7 @@ async def create_event(
         priority = rule.get("priority", PRIO_NORMAL)
     fp = _fingerprint(source, event_type, f"{title}{body[:200]}")
     window = DEDUP_WINDOW_ERROR if source == SRC_SYSTEM else DEDUP_WINDOW_CONTENT
-    if await _is_duplicate(fp, window):
+    if not source_key and await _is_duplicate(fp, window):
         count = await _get_dedup_count(fp)
         if source == SRC_SYSTEM and count >= 5 and event_type == "ops.error":
             if count == 5:  # promote once, then suppress all further duplicates
@@ -292,9 +311,21 @@ async def create_event(
         "read": False, "resolved": auto_resolve,
         "dispatched": False, "dispatch_result": None,
     }
-    entries = _load()
-    entries.append(entry)
-    _save(entries)
+    # Pollers use source identity rather than a content-based Redis reservation.
+    # No suspension point between the durable lookup and atomic file replacement.
+    # This protects the local store under the poller lease, not independent nodes.
+    if source_key:
+        entry["source_key"] = source_key
+        entries = _load(strict=True)
+        if any(item.get("source") == source and item.get("source_key") == source_key
+               for item in entries):
+            return None
+        entries.append(entry)
+        _save(entries, strict=True)
+    else:
+        entries = _load()
+        entries.append(entry)
+        _save(entries)
     logger.info(f"EVENT | [{priority.upper()}] [{source}] [{event_type}] {title}")
     try:
         from ..services.slack_notifications import schedule_slack_notification
@@ -1274,56 +1305,77 @@ async def _seen_add(source: str, key: str):
             pass
 
 
+async def _process_unread_mail(msg: Dict):
+    from app.services.mail_service import mail_read, mail_mark_seen
+
+    uid = str(msg.get("uid", ""))
+    if not uid or msg.get("seen"):
+        return
+    # Read without changing the IMAP Seen flag. A failed read remains retryable.
+    full_mail = mail_read(uid, mark_seen=False)
+    snippet = str(full_mail.get("body", ""))[:3000]
+    subject = msg.get("subject", "(kein Betreff)")
+    sender = msg.get("from", "unknown")
+    validity = str(msg.get("uidvalidity") or "")
+    message_id = str(full_mail.get("message_id") or "").strip()
+    identity = f"{validity}:{uid}" if validity else f"{uid}:{message_id}"
+    source_key = "mail:INBOX:" + identity
+
+    # An old Seen cache entry alone is not evidence that a mail was persisted.
+    # Recognize previously persisted pre-upgrade messages by UID + Message-ID.
+    prior = any(
+        entry.get("source") == SRC_MAIL
+        and not entry.get("source_key")
+        and message_id
+        and str((entry.get("metadata") or {}).get("uid")) == uid
+        and (entry.get("metadata") or {}).get("message_id") == message_id
+        for entry in _load(strict=True)
+    )
+    tags_mail = ["mail", "inbox"]
+    research = "[research]" in subject.lower() or "research" in subject.lower()
+    if research:
+        tags_mail.append("research")
+    entry = None if prior else await create_event(
+        title=f"Mail: {subject}", body=f"Von: {sender}\n\n{snippet}",
+        source=SRC_MAIL, tags=tags_mail, source_key=source_key,
+        metadata={
+            "uid": uid, "uidvalidity": validity, "from": sender, "subject": subject,
+            "reply_to": full_mail.get("reply_to", ""),
+            "message_id": message_id,
+            "references": full_mail.get("references", ""),
+        },
+    )
+    if entry is not None and research:
+        try:
+            from app.services.mail_service import mail_send
+            mail_send(
+                to="admin@ailinux.me",
+                subject=f"[Nova Research] {subject}",
+                body=f"Nova Research-Report:\nVon: {sender}\n\n{snippet}\n\nAntwort mit [RESEARCH-APPROVED] triggert implementation_agent.",
+            )
+        except Exception as exc:
+            logger.debug("Research forward failed: %s", type(exc).__name__)
+    # A cancellation here leaves a stored source identity; retries won't
+    # re-create or re-dispatch the event.
+    await _seen_add("mail", source_key)
+    try:
+        mail_mark_seen(uid)
+    except Exception as exc:
+        logger.warning("Mail acknowledgement failed: %s", type(exc).__name__)
+
+
 async def _poll_mail():
     await asyncio.sleep(60)
     while True:
         try:
-            from app.services.mail_service import mail_inbox, mail_read, mail_mark_seen
+            from app.services.mail_service import mail_inbox
             for msg in mail_inbox(limit=10, folder="INBOX"):
-                uid = str(msg.get("uid",""))
-                if not uid or msg.get("seen"):
-                    continue
-                if await _seen_check("mail", uid):
-                    continue
-                await _seen_add("mail", uid)
-                subject = msg.get("subject","(kein Betreff)")
-                sender = msg.get("from","unknown")
                 try:
-                    full_mail = mail_read(uid)
-                    snippet = str(full_mail.get("body", ""))[:3000]
-                except Exception as _read_e:
-                    logger.warning(f"Mail {uid}: full body read failed: {_read_e}")
-                    full_mail = {}
-                    snippet = ""
-                tags_mail = ["mail", "inbox"]
-                if "[research]" in subject.lower() or "research" in subject.lower():
-                    tags_mail.append("research")
-                    try:
-                        from app.services.mail_service import mail_send
-                        mail_send(
-                            to="admin@ailinux.me",
-                            subject=f"[Nova Research] {subject}",
-                            body=f"Nova Research-Report:\nVon: {sender}\n\n{snippet}\n\nAntwort mit [RESEARCH-APPROVED] triggert implementation_agent.",
-                        )
-                        logger.info(f"Research forward -> Markus: {subject[:60]}")
-                    except Exception as _fwd_e:
-                        logger.debug(f"Research forward error: {_fwd_e}")
-                await create_event(
-                    title=f"Mail: {subject}", body=f"Von: {sender}\n\n{snippet}",
-                    source=SRC_MAIL, tags=tags_mail,
-                    metadata={
-                        "uid": uid, "from": sender, "subject": subject,
-                        "reply_to": full_mail.get("reply_to", ""),
-                        "message_id": full_mail.get("message_id", ""),
-                        "references": full_mail.get("references", ""),
-                    },
-                )
-                try:
-                    mail_mark_seen(uid)
-                except Exception:
-                    pass  # Non-critical — _seen_check is the primary dedup
-        except Exception as e:
-            logger.debug(f"Mail poller error: {e}")
+                    await _process_unread_mail(msg)
+                except Exception as exc:
+                    logger.warning("Mail processing failed; retrying later: %s", type(exc).__name__)
+        except Exception as exc:
+            logger.debug("Mail poller error: %s", type(exc).__name__)
         await asyncio.sleep(MAIL_POLL_INTERVAL)
 
 
@@ -1341,7 +1393,6 @@ async def _poll_forum():
                 key = f"{did}:{pc}:{lp_at[:16]}"  # dedup by discussion + comment count + timestamp
                 if await _seen_check("forum", key):
                     continue
-                await _seen_add("forum", key)
                 title = disc.get("title","(kein Titel)")
 
                 # Check latest post author via author_id
@@ -1359,15 +1410,17 @@ async def _poll_forum():
                 # Known admin author IDs (zombie=1, nova-ai=2)
                 ADMIN_AUTHOR_IDS = {"1", "2"}
                 if str(author_id) in ADMIN_AUTHOR_IDS:
+                    await _seen_add("forum", key)
                     continue
                 if author_id:
                     author = f"user#{author_id}"
                 await create_event(
                     title=f"Forum: {title}", body=f"Von: {author} | Posts: {pc} | #{did}",
-                    source=SRC_FORUM, tags=["forum","discussion"],
+                    source=SRC_FORUM, tags=["forum","discussion"], source_key=key,
                     metadata={"discussion_id": did, "author": author, "comment_count": pc},
                     action_url=f"https://forum.ailinux.me/d/{did}",
                 )
+                await _seen_add("forum", key)
         except Exception as e:
             logger.warning(f"Forum poller error: {e}")
         logger.info(f"Forum poll cycle done, seen={len(_last_seen.get('forum', set()))}")
@@ -1397,14 +1450,14 @@ async def _poll_wordpress():
                         cid = str(c.get("id",""))
                         if await _seen_check("wp", cid):
                             continue
-                        await _seen_add("wp", cid)
                         author = c.get("author_name","unknown")
                         content = c.get("content",{}).get("rendered","")[:300]
                         await create_event(
                             title=f"WP Kommentar von {author}", body=content,
-                            source=SRC_WORDPRESS, tags=["wordpress","comment"],
+                            source=SRC_WORDPRESS, tags=["wordpress","comment"], source_key=cid,
                             metadata={"comment_id": cid, "post_id": c.get("post"), "author": author},
                         )
+                        await _seen_add("wp", cid)
         except Exception as e:
             logger.warning(f"WordPress poller error: {e}")
         logger.info(f"WP poll cycle done, seen={len(_last_seen.get('wp', set()))}")
@@ -1415,108 +1468,127 @@ async def _poll_wordpress():
 
 _poller_tasks: List[asyncio.Task] = []
 _poller_status: Dict[str, str] = {}
-_poller_lock_owner: str | None = None
-_poller_lock_redis = None
+_poller_leader_task: asyncio.Task | None = None
+_POLLER_LOCK_KEY = "notify:poller_lock"
+_POLLER_LOCK_TTL = 120
+_POLLER_RETRY_INTERVAL = 15
+_POLLER_REFRESH_INTERVAL = 60
+_POLLER_RENEW_SCRIPT = (
+    'if redis.call("get", KEYS[1]) == ARGV[1] then '
+    'return redis.call("expire", KEYS[1], ARGV[2]) else return 0 end'
+)
+_POLLER_RELEASE_SCRIPT = (
+    'if redis.call("get", KEYS[1]) == ARGV[1] then '
+    'return redis.call("del", KEYS[1]) else return 0 end'
+)
 
 
 def start_pollers():
-    """Start pollers with Redis lock — only one uvicorn worker runs them."""
-    global _poller_tasks
-    asyncio.create_task(_start_pollers_with_lock())
+    """Start exactly one local supervisor; pollers require a Redis lease."""
+    global _poller_leader_task
+    if _poller_leader_task is not None and not _poller_leader_task.done():
+        return
+    _poller_leader_task = asyncio.create_task(
+        _start_pollers_with_lock(), name="notification-poller-leader"
+    )
+
+
+async def _run_poller_leadership(r, owner: str):
+    """Run one tenure and atomically renew only the current owner's lease."""
+    try:
+        _launch_pollers()
+        while True:
+            await asyncio.sleep(_POLLER_REFRESH_INTERVAL)
+            if not await r.eval(
+                _POLLER_RENEW_SCRIPT, 1, _POLLER_LOCK_KEY, owner, _POLLER_LOCK_TTL
+            ):
+                logger.warning("Pollers: leader lock lost; stopping local pollers")
+                return
+    finally:
+        # Stop local work before voluntarily releasing the lease.
+        await _stop_local_pollers()
+        try:
+            await r.eval(_POLLER_RELEASE_SCRIPT, 1, _POLLER_LOCK_KEY, owner)
+        except Exception as exc:
+            logger.debug("Pollers: leader lock release skipped: %s", type(exc).__name__)
 
 
 async def _start_pollers_with_lock():
-    """Acquire and maintain the Redis poller-leader lock.
+    """Wait for Redis, acquire a lease, and recover after loss or outage.
 
-    A freshly restarted process may see the previous process' lock until its TTL
-    expires. Keep retrying instead of permanently disabling all pollers for the
-    lifetime of the new backend process.
+    File fallback remains available for manual notifications. Automatic external
+    pollers must not start without a lease because they can send duplicate replies.
+    Leadership is scoped to the configured Redis database.
     """
-    global _poller_tasks, _poller_lock_owner, _poller_lock_redis
-    r = await _get_redis()
-    if r is None:
-        logger.warning("Pollers: Redis unavailable, starting without lock (risk of duplicates)")
-        _launch_pollers()
-        return
-
-    lock_key = "notify:poller_lock"
-    owner = f"{os.getpid()}:{uuid.uuid4().hex}"
-
-    lock_wait_logged = False
+    waiting_reason = None
     while True:
+        owner = f"{os.getpid()}:{uuid.uuid4().hex}"
         try:
-            locked = await r.set(lock_key, owner, nx=True, ex=120)
-        except Exception as e:
-            logger.warning(f"Pollers: lock acquisition failed: {e}; retrying")
-            await asyncio.sleep(15)
             r = await _get_redis()
             if r is None:
-                continue
-            continue
-        if locked:
-            _poller_lock_owner = owner
-            _poller_lock_redis = r
-            break
-        if not lock_wait_logged:
-            ttl = await r.ttl(lock_key)
-            logger.info("Pollers: existing leader lock detected (ttl=%ss); waiting for takeover", ttl)
-            lock_wait_logged = True
-        else:
-            logger.debug("Pollers: leader lock still held; retrying in 15s")
-        await asyncio.sleep(15)
-
-    logger.info("Pollers: acquired leader lock, starting pollers")
-    _launch_pollers()
-
-    # Refresh only our own lock. If ownership is lost, stop local pollers to
-    # avoid two leaders processing the same external events.
-    while True:
-        await asyncio.sleep(60)
-        try:
-            current_owner = await r.get(lock_key)
-            if current_owner != owner:
-                logger.warning("Pollers: leader lock lost; stopping local pollers")
-                _poller_lock_owner = None
-                _poller_lock_redis = None
-                await stop_pollers()
-                return
-            await r.expire(lock_key, 120)
-        except Exception as e:
-            logger.warning(f"Pollers: failed to refresh leader lock: {e}; stopping pollers")
-            _poller_lock_owner = None
-            _poller_lock_redis = None
-            await stop_pollers()
-            return
+                reason = "redis-unavailable"
+            elif not await r.set(
+                _POLLER_LOCK_KEY, owner, nx=True, ex=_POLLER_LOCK_TTL
+            ):
+                reason = "lease-held"
+            else:
+                waiting_reason = None
+                _poller_status["leader"] = "active"
+                logger.info("Pollers: acquired leader lock, starting pollers")
+                await _run_poller_leadership(r, owner)
+                reason = "lease-lost"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            reason = "redis-error"
+            logger.warning("Pollers: lease operation failed: %s", type(exc).__name__)
+        _poller_status["leader"] = f"waiting:{reason}"
+        if reason != waiting_reason:
+            logger.info("Pollers: waiting for leadership (%s)", reason)
+            waiting_reason = reason
+        await asyncio.sleep(_POLLER_RETRY_INTERVAL)
 
 
 def _launch_pollers():
     global _poller_tasks
-    pollers = [("wordpress", _poll_wordpress)]
+    pollers = []
     try:
         from app.config import get_settings
-        _mail_settings = get_settings()
+
+        settings = get_settings()
+        external_enabled = settings.notification_external_pollers_enabled
+    except Exception as exc:
+        external_enabled = False
+        logger.warning("External poller config unavailable: %s", type(exc).__name__)
+        for name in ("mail", "forum", "wordpress"):
+            _poller_status[name] = "disabled:config-error"
+    else:
+        if not external_enabled:
+            for name in ("mail", "forum", "wordpress"):
+                _poller_status[name] = "disabled:node-policy"
+            logger.info("External notification pollers disabled by node policy")
+
+    if external_enabled:
+        pollers.append(("wordpress", _poll_wordpress))
         if all((
-            getattr(_mail_settings, "mail_imap_host", None),
-            getattr(_mail_settings, "mail_imap_user", None),
-            getattr(_mail_settings, "mail_imap_pass", None),
+            getattr(settings, "mail_imap_host", None),
+            getattr(settings, "mail_imap_user", None),
+            getattr(settings, "mail_imap_pass", None),
         )):
             pollers.append(("mail", _poll_mail))
         else:
             _poller_status["mail"] = "disabled:no-imap-auth"
             logger.info("Poller skipped: mail (IMAP auth not configured)")
-    except Exception as exc:
-        _poller_status["mail"] = "disabled:config-error"
-        logger.warning("Mail poller config check failed: %s", exc)
-    try:
-        from app.mcp.flarum_tools import is_flarum_configured
-        if is_flarum_configured():
-            pollers.append(("forum", _poll_forum))
-        else:
-            _poller_status["forum"] = "disabled:no-auth"
-            logger.info("Poller skipped: forum (Flarum auth not configured)")
-    except Exception as exc:
-        _poller_status["forum"] = "disabled:config-error"
-        logger.warning("Forum poller config check failed: %s", exc)
+        try:
+            from app.mcp.flarum_tools import is_flarum_configured
+            if is_flarum_configured():
+                pollers.append(("forum", _poll_forum))
+            else:
+                _poller_status["forum"] = "disabled:no-auth"
+                logger.info("Poller skipped: forum (Flarum auth not configured)")
+        except Exception as exc:
+            _poller_status["forum"] = "disabled:config-error"
+            logger.warning("Forum poller config check failed: %s", type(exc).__name__)
     try:
         from app.services.aicoder_agent_events import aicoder_failure_digest_loop
         pollers.append(("aicoder-failure-digest", aicoder_failure_digest_loop))
@@ -1530,33 +1602,37 @@ def _launch_pollers():
         logger.info(f"Poller started: {name}")
 
 
-async def stop_pollers():
-    global _poller_lock_owner, _poller_lock_redis
-    for t in _poller_tasks:
-        t.cancel()
-    for t in _poller_tasks:
-        try:
-            await t
-        except asyncio.CancelledError:
-            pass
+async def _stop_local_pollers():
+    tasks = list(_poller_tasks)
     _poller_tasks.clear()
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("Poller shutdown error: %s", type(result).__name__)
+    for name, status in list(_poller_status.items()):
+        if status == "running":
+            _poller_status[name] = "stopped"
 
-    # Release only our own Redis lease. This avoids forcing the next backend
-    # process to wait for the 120s TTL after an orderly systemd restart.
-    owner, r = _poller_lock_owner, _poller_lock_redis
-    _poller_lock_owner = None
-    _poller_lock_redis = None
-    if owner and r is not None:
+
+async def stop_pollers():
+    global _poller_leader_task, _redis
+    task = _poller_leader_task
+    if task is not None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if _poller_leader_task is task:
+            _poller_leader_task = None
+    await _stop_local_pollers()
+    client, _redis = _redis, None
+    if client is not None:
         try:
-            await r.eval(
-                "if redis.call('get', KEYS[1]) == ARGV[1] then "
-                "return redis.call('del', KEYS[1]) else return 0 end",
-                1,
-                "notify:poller_lock",
-                owner,
-            )
+            await client.aclose()
         except Exception as exc:
-            logger.debug("Pollers: leader lock release skipped: %s", exc)
+            logger.debug("Notification Redis close skipped: %s", type(exc).__name__)
+    _poller_status["leader"] = "stopped"
     logger.info("All pollers stopped")
 
 
@@ -1951,9 +2027,10 @@ async def handle_notify_status(params: Dict[str, Any]) -> Dict:
     try:
         return {
             "status": "ok", "stats": get_stats(),
+            "poller_leader": _poller_status.get("leader", "not-started"),
             "pollers": {
                 n: {"status": _poller_status.get(n, "unknown"), "seen": len(_last_seen.get(n, set()))}
-                for n in ("mail", "forum", "wordpress")
+                for n in ("mail", "forum", "wordpress", "aicoder-failure-digest")
             },
             "dispatch_rules": len(EVENT_TYPES),
             "dedup_windows": {"error_s": DEDUP_WINDOW_ERROR, "content_s": DEDUP_WINDOW_CONTENT},

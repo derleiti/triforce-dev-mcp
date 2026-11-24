@@ -36,9 +36,17 @@ def test_requirements_use_supported_google_genai_sdk():
     root = Path(__file__).parents[1]
     requirements = (root / "requirements.txt").read_text()
     lock = (root / "requirements-lock-2.85-beta2.txt").read_text()
-    assert "google-genai==2.18.1" in requirements
+    from packaging.version import Version
+
+    def sdk_pin(text):
+        pins = [line.split("==", 1)[1].strip() for line in text.splitlines()
+                if line.startswith("google-genai==")]
+        assert len(pins) == 1, "google-genai must have one exact pin"
+        return Version(pins[0])
+
+    assert sdk_pin(requirements) == sdk_pin(lock)
+    assert sdk_pin(requirements) >= Version("2.18.1")
     assert "google-generativeai" not in requirements
-    assert "google-genai==2.18.1" in lock
     assert "google-generativeai" not in lock
 
 

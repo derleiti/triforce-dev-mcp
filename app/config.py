@@ -394,6 +394,7 @@ class Settings(BaseSettings):
     wordpress_category_id: int = Field(default=1, validation_alias="WORDPRESS_CATEGORY_ID")
 
     # Mail / Notification (optional)
+    notification_external_pollers_enabled: bool = Field(True, validation_alias="TRIFORCE_NOTIFICATION_EXTERNAL_POLLERS_ENABLED")
     mail_from_name: Optional[str] = Field(default=None, validation_alias="MAIL_FROM_NAME")
     mail_from_addr: Optional[str] = Field(default=None, validation_alias="MAIL_FROM_ADDR")
     mail_smtp_host: Optional[str] = Field(default=None, validation_alias="MAIL_SMTP_HOST")
