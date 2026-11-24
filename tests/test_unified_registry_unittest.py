@@ -197,11 +197,11 @@ class TestCanonicalRegistryAudit(unittest.TestCase):
             self.assertEqual(bool(annotations["readOnlyHint"]), expected_read, tool["name"])
 
 
-    def test_bug_report_mutations_are_not_read_safe(self):
+    def test_bug_report_and_worker_mutations_are_not_read_safe(self):
         from app.mcp.runtime_registry import RuntimeToolRegistry
 
         registry = RuntimeToolRegistry()
-        for name in ("bug_report_status", "bug_report_resolve"):
+        for name in ("bug_report_status", "bug_report_resolve", "web_worker"):
             defaults = registry._policy_defaults(name, "admin", "test")
             self.assertFalse(defaults["read_only"], name)
             self.assertEqual(registry._classify_tool(name, defaults), "write_scoped", name)
