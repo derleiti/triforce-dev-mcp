@@ -1,2 +1,2 @@
 # Isolated Antigravity SDK worker; do not install into the TriForce core venv.
-google-antigravity==0.1.13
+google-antigravity==0.1.23
